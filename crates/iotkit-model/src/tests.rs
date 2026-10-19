@@ -106,3 +106,98 @@ fn buttons() {
     block_on(RESTART.wait_press());
     assert_eq!(RESTART.state(), State::None);
 }
+
+#[test]
+fn numbers_snap_to_range_and_step() {
+    static N: Number = Number::new("n", "N", 10.0, 30.0, 0.5).unit("°C");
+    assert_eq!(N.spec(), Spec::Number { min: 10.0, max: 30.0, step: 0.5, slider: false });
+    assert!(N.command(Command::Number(21.3)));
+    assert_eq!(block_on(N.wait_command()), 21.5);
+    assert_eq!(N.target(), State::Number(21.5), "pending until the app reports");
+    assert!(N.command(Command::Number(99.0)));
+    assert_eq!(block_on(N.wait_command()), 30.0);
+    assert!(!N.command(Command::Number(f32::NAN)));
+    N.set(12.0);
+    assert_eq!((N.state(), N.target()), (State::Number(12.0), State::Number(12.0)));
+}
+
+#[test]
+fn selects_take_known_options() {
+    static S: Select = Select::new("mode", "Mode", &["eco", "comfort"]);
+    assert!(S.command(Command::Option(1)));
+    assert_eq!(block_on(S.wait_command()), 1);
+    assert!(!S.command(Command::Option(2)));
+    S.set(1);
+    assert_eq!((S.state(), S.option()), (State::Option(1), Some("comfort")));
+    S.set(9);
+    assert_eq!(S.state(), State::Unknown);
+}
+
+#[test]
+fn text_sensors_keep_whole_characters() {
+    static T: TextSensor = TextSensor::new("status", "Status");
+    assert_eq!((T.state(), T.text()), (State::Unknown, None));
+    T.set("ready");
+    assert!(T.take_dirty(Binding::MQTT));
+    assert_eq!((T.state(), T.text().as_deref()), (State::Text, Some("ready")));
+    T.set("ready");
+    assert!(!T.take_dirty(Binding::MQTT), "same text: nothing to publish");
+    let long = "é".repeat(40); // 80 bytes
+    T.set(&long);
+    assert_eq!(T.text().unwrap().len(), 64);
+}
+
+#[test]
+fn events_are_sent_once() {
+    static E: Event = Event::new("button", "Button", &["press", "long_press"]);
+    E.trigger(1);
+    assert_eq!(E.state(), State::Event(1));
+    assert!(E.take_dirty(Binding::MQTT) && !E.take_dirty(Binding::MQTT));
+    E.mark_dirty(Binding::MQTT);
+    assert!(!E.take_dirty(Binding::MQTT), "not replayed after a reconnection");
+    E.trigger(1);
+    assert!(E.take_dirty(Binding::MQTT), "the same event again is a new event");
+    E.take_dirty(Binding::MATTER);
+    E.trigger(7);
+    assert!(!E.take_dirty(Binding::MATTER) && E.state() == State::Event(1), "unknown event type: ignored");
+}
+
+#[test]
+fn covers_valves_and_locks() {
+    static C: Cover = Cover::new("blind", "Blind").device_class("blind");
+    static P: Cover = Cover::new("shade", "Shade").position();
+    static L: Lock = Lock::new("door", "Door");
+    assert!(!C.command(Command::Cover(CoverCommand::Position(50))), "no position support");
+    assert!(P.command(Command::Cover(CoverCommand::Position(50))));
+    assert_eq!(block_on(P.wait_command()), CoverCommand::Position(50));
+    assert!(!P.command(Command::Cover(CoverCommand::Position(101))));
+    P.set(Some(CoverState::Opening), Some(120));
+    assert_eq!(P.state(), State::Cover { state: Some(CoverState::Opening), position: Some(100) });
+    assert!(!L.command(Command::Lock(LockCommand::Open)), "no unlatch support");
+    assert!(L.command(Command::Lock(LockCommand::Unlock)));
+    assert_eq!(block_on(L.wait_command()), LockCommand::Unlock);
+    static V: Valve = Valve::new("water", "Water");
+    assert_eq!(V.meta().kind, Kind::Valve);
+}
+
+#[test]
+fn fans_and_thermostats_build_on_the_target() {
+    static F: Fan = Fan::new("fan", "Fan").speed().presets(&["sleep", "turbo"]);
+    F.set(FanState::OFF);
+    assert!(F.command(Command::Fan(FanCommand::Percentage(40))));
+    assert!(F.command(Command::Fan(FanCommand::Preset(1))));
+    let wanted = block_on(F.wait_command());
+    assert_eq!((wanted.on, wanted.percentage, wanted.preset), (true, 40, Some(1)));
+    assert!(!F.command(Command::Fan(FanCommand::Oscillate(true))), "no oscillation support");
+    assert!(F.command(Command::Fan(FanCommand::Percentage(0))));
+    assert!(!block_on(F.wait_command()).on);
+
+    static T: Climate = Climate::new("thermostat", "Thermostat", &[HvacMode::Heat, HvacMode::Off]);
+    assert!(T.command(Command::Climate(ClimateCommand::Target(22.2))));
+    assert!(T.command(Command::Climate(ClimateCommand::Mode(HvacMode::Off))));
+    let wanted = block_on(T.wait_command());
+    assert_eq!((wanted.mode, wanted.target), (HvacMode::Off, 22.0));
+    assert!(!T.command(Command::Climate(ClimateCommand::Mode(HvacMode::Cool))), "not one of its modes");
+    assert!(T.command(Command::Climate(ClimateCommand::Target(50.0))));
+    assert_eq!(block_on(T.wait_command()).target, 35.0);
+}

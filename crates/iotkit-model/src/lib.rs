@@ -25,12 +25,19 @@ pub(crate) use core::sync::atomic;
 #[cfg(feature = "portable-atomic")]
 pub(crate) use portable_atomic as atomic;
 
+mod appliances;
 mod entities;
+mod inputs;
 
 use crate::atomic::{AtomicU8, Ordering};
 
+pub use appliances::{
+    Climate, ClimateCommand, ClimateState, Cover, CoverCommand, CoverState, Fan, FanCommand, FanDirection, FanState,
+    HvacAction, HvacMode, Lock, LockCommand, LockState, Valve,
+};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 pub use entities::{BinarySensor, Button, Light, LightState, Sensor, Switch};
+pub use inputs::{Event, Number, Select, TEXT_LEN, TextSensor};
 
 /// What kind of entity: decides the state, the commands, and how a binding shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +47,20 @@ pub enum Kind {
     Switch,
     Light,
     Button,
+    /// A value set from Home Assistant (a setpoint, a duration).
+    Number,
+    /// One of a fixed list of options.
+    Select,
+    /// A text reading.
+    TextSensor,
+    /// Something that happened (a button press): not a state.
+    Event,
+    Cover,
+    Valve,
+    Lock,
+    Fan,
+    /// A thermostat.
+    Climate,
 }
 
 /// Where Home Assistant files an entity.
@@ -109,17 +130,82 @@ pub enum State {
     Light(LightState),
     /// Buttons have no state.
     None,
+    /// Select: the index of the option.
+    Option(u8),
+    /// Text sensor: read it with [`Entity::text`].
+    Text,
+    /// Event: the index of the last event type triggered.
+    Event(u8),
+    /// Cover or valve.
+    Cover {
+        state: Option<CoverState>,
+        position: Option<u8>,
+    },
+    Lock(LockState),
+    Fan(FanState),
+    Climate(ClimateState),
 }
 
 /// A command from a controller.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Command {
     /// Switch: on or off.
     Set(bool),
     /// Light: the fields to change.
-    Light { on: Option<bool>, brightness: Option<u8>, rgb: Option<[u8; 3]> },
+    Light {
+        on: Option<bool>,
+        brightness: Option<u8>,
+        rgb: Option<[u8; 3]>,
+    },
     /// Button.
     Press,
+    /// Number: the new value.
+    Number(f32),
+    /// Select: the index of the option.
+    Option(u8),
+    Cover(CoverCommand),
+    Lock(LockCommand),
+    Fan(FanCommand),
+    Climate(ClimateCommand),
+}
+
+/// What an entity kind can do beyond its [`Meta`], for the bindings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Spec {
+    /// Nothing more (sensors, switches, lights, buttons, text sensors).
+    None,
+    Number {
+        min: f32,
+        max: f32,
+        step: f32,
+        slider: bool,
+    },
+    Select {
+        options: &'static [&'static str],
+    },
+    Event {
+        types: &'static [&'static str],
+    },
+    /// Cover or valve: whether it takes a position (0 closed, 100 open).
+    Cover {
+        position: bool,
+    },
+    /// Whether it can also open (unlatch).
+    Lock {
+        open: bool,
+    },
+    Fan {
+        speed: bool,
+        presets: &'static [&'static str],
+        oscillation: bool,
+        direction: bool,
+    },
+    Climate {
+        modes: &'static [HvacMode],
+        min: f32,
+        max: f32,
+        step: f32,
+    },
 }
 
 /// An entity, as the bindings see it.
@@ -131,6 +217,14 @@ pub trait Entity: Sync {
     /// so commands that come before the app has applied the previous ones are not lost.
     fn target(&self) -> State {
         self.state()
+    }
+    /// What the kind can do beyond [`Meta`] (options, ranges, features).
+    fn spec(&self) -> Spec {
+        Spec::None
+    }
+    /// The text of a text sensor; `None` for the other kinds, or before the first `set`.
+    fn text(&self) -> Option<heapless::String<TEXT_LEN>> {
+        None
     }
     /// Hands a command to the app. `false` if the entity takes no such command.
     fn command(&self, command: Command) -> bool;

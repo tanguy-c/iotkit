@@ -133,9 +133,17 @@ async fn session(
     }
 
     let commands = ha::commands_filter(node);
-    let n = codec::subscribe(&mut out, 1, &[&commands, ha::HA_STATUS]).map_err(|_| Error::Protocol)?;
+    // Commands for one setting (`<id>/<feature>/set`) only when some entity takes them. In a
+    // block: the filter is not kept in the task's state.
+    let n = if ha::has_feature_commands(device) {
+        let features = ha::feature_commands_filter(node);
+        codec::subscribe(&mut out, 1, &[&commands, &features, ha::HA_STATUS])
+    } else {
+        codec::subscribe(&mut out, 1, &[&commands, ha::HA_STATUS])
+    }
+    .map_err(|_| Error::Protocol)?;
     socket.write_all(&out[..n]).await.map_err(|_| Error::Io)?;
-    publish(&mut socket, &mut out, &availability, b"online").await?;
+    publish(&mut socket, &mut out, &availability, b"online", true).await?;
     announce(&mut socket, &mut out, device, node).await?;
     log::info!("mqtt: connected to {}:{}, {} entities announced", broker.host, broker.port, device.entities.len());
     CONNECTED.store(true, Ordering::Relaxed);
@@ -151,7 +159,9 @@ async fn session(
             if entity.take_dirty(Binding::MQTT)
                 && let Some(state) = ha::state_payload(*entity)
             {
-                publish(&mut socket, &mut out, &ha::state_topic(node, entity.meta().id), state.as_bytes()).await?;
+                let retain = ha::retained(*entity);
+                publish(&mut socket, &mut out, &ha::state_topic(node, entity.meta().id), state.as_bytes(), retain)
+                    .await?;
             }
         }
         let ping = Timer::at(next_ping);
@@ -164,7 +174,7 @@ async fn session(
         match select4(inbox.fill(&mut socket), iotkit_model::changed(Binding::MQTT), ping, restart).await {
             Either4::Fourth(()) => {
                 // A planned restart: say so, so Home Assistant shows the device unavailable.
-                publish(&mut socket, &mut out, &availability, b"offline").await?;
+                publish(&mut socket, &mut out, &availability, b"offline", true).await?;
                 socket.write_all(&codec::DISCONNECT).await.map_err(|_| Error::Io)?;
                 let _ = socket.flush().await;
                 socket.close();
@@ -184,8 +194,10 @@ async fn session(
                             announce(&mut socket, &mut out, device, node).await?;
                             continue;
                         }
-                    } else if let Some(entity) = ha::command_entity(node, topic).and_then(|id| device.entity(id)) {
-                        match ha::parse_command(entity.meta().kind, payload) {
+                    } else if let Some((entity, feature)) =
+                        ha::command_entity(node, topic).and_then(|(id, feature)| Some((device.entity(id)?, feature)))
+                    {
+                        match ha::parse_command(entity, feature, payload) {
                             Some(command) if entity.command(command) => {
                                 log::info!("mqtt: {} <- {command:?}", entity.meta().id)
                             }
@@ -219,7 +231,7 @@ async fn announce(
             log::error!("mqtt: discovery payload of {} too large", entity.meta().id);
             continue;
         };
-        publish(socket, out, &ha::discovery_topic(node, *entity), config.as_bytes()).await?;
+        publish(socket, out, &ha::discovery_topic(node, *entity), config.as_bytes(), true).await?;
         entity.mark_dirty(Binding::MQTT);
     }
     Ok(())
@@ -230,8 +242,9 @@ async fn publish(
     out: &mut [u8; PACKET_MAX],
     topic: &str,
     payload: &[u8],
+    retain: bool,
 ) -> Result<(), Error> {
-    let n = codec::publish(out, topic, payload, true).map_err(|_| Error::Protocol)?;
+    let n = codec::publish(out, topic, payload, retain).map_err(|_| Error::Protocol)?;
     socket.write_all(&out[..n]).await.map_err(|_| Error::Io)
 }
 

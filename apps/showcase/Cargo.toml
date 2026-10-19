@@ -1,0 +1,29 @@
+[package]
+name         = "showcase"
+description  = "One entity of each kind, simulated: to try them in Home Assistant over MQTT and Matter"
+publish      = false
+edition.workspace      = true
+rust-version.workspace = true
+version      = "0.1.0"
+license.workspace      = true
+
+[features]
+default = ["esp32c6"]
+esp32c6 = ["iotkit-app/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-alloc/esp32c6", "esp-bootloader-esp-idf/esp32c6"]
+## Matter over Wi-Fi, next to MQTT.
+matter-wifi = ["iotkit-app/matter-wifi"]
+
+[dependencies]
+iotkit-app = { workspace = true }
+
+esp-alloc              = { workspace = true }
+esp-hal                = { workspace = true }
+esp-rtos               = { workspace = true }
+esp-bootloader-esp-idf = { workspace = true }
+embassy-executor       = { workspace = true }
+embassy-futures        = "0.1"
+embassy-time           = { workspace = true }
+log                    = { workspace = true }
+
+[build-dependencies]
+iotkit-build = { workspace = true }

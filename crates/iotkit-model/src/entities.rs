@@ -9,7 +9,7 @@ use embassy_sync::{
     signal::Signal,
 };
 
-use crate::{Binding, Category, Command, Dirty, Entity, Kind, Meta, State};
+use crate::{Binding, Command, Dirty, Entity, Kind, Meta, State};
 
 macro_rules! builders {
     ($ty:ty) => {
@@ -24,17 +24,19 @@ macro_rules! builders {
             }
             /// Filed under the device's diagnostics.
             pub const fn diagnostic(mut self) -> Self {
-                self.meta.category = Category::Diagnostic;
+                self.meta.category = $crate::Category::Diagnostic;
                 self
             }
             /// Filed under the device's settings.
             pub const fn config(mut self) -> Self {
-                self.meta.category = Category::Config;
+                self.meta.category = $crate::Category::Config;
                 self
             }
         }
     };
 }
+
+pub(crate) use builders;
 
 /// A numeric reading.
 pub struct Sensor {
@@ -309,7 +311,7 @@ impl Entity for Light {
                 true
             }
             Command::Set(on) => self.command(Command::Light { on: Some(on), brightness: None, rgb: None }),
-            Command::Press => false,
+            _ => false,
         }
     }
     fn take_dirty(&self, binding: Binding) -> bool {
