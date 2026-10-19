@@ -1,0 +1,17 @@
+# Host tooling, run with `cargo xtask <command>` from the repository root.
+# Its own workspace: the firmware workspace builds for the chip by default.
+[workspace]
+
+[package]
+name         = "xtask"
+publish      = false
+edition      = "2024"
+rust-version = "1.95"
+version      = "0.1.0"
+
+[dependencies]
+iotkit-image    = { path = "../crates/iotkit-image", features = ["sign"] }
+ed25519-compact = { version = "2.6", default-features = false, features = ["random"] }
+anyhow          = "1"
+clap            = { version = "4.6", features = ["derive"] }
+serde_json      = "1"

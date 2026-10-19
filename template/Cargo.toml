@@ -1,0 +1,31 @@
+[package]
+name         = "{{project-name}}"
+edition      = "2024"
+rust-version = "1.95"
+version      = "0.1.0"
+publish      = false
+
+[dependencies]
+esp-hal                = { version = "~1.2.2", features = ["{{chip}}", "log-04", "unstable"] }
+esp-rtos               = { version = "0.4.0", features = ["embassy", "{{chip}}", "log-04"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["{{chip}}", "log-04"] }
+esp-backtrace          = { version = "0.20.0", features = ["{{chip}}", "panic-handler", "println"] }
+esp-println            = { version = "0.18.0", features = ["{{chip}}", "log-04"] }
+esp-hal-smartled       = { version = "0.18", features = ["{{chip}}"] }
+embassy-executor       = { version = "0.10.0", features = ["log"] }
+embassy-time           = { version = "0.5.1", features = ["log"] }
+smart-leds             = "0.4"
+log                    = "0.4.27"
+
+# A standalone project, even when generated inside another workspace.
+[workspace]
+
+[profile.dev]
+# The default debug profile is too slow and too big for the chip.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug         = 2
+lto           = 'fat'
+opt-level     = 's'

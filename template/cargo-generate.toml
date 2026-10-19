@@ -1,0 +1,11 @@
+[template]
+cargo_generate_version = ">=0.22.0"
+# Kept in sync with the repository root by CI; see template/README.md.
+exclude = []
+ignore  = ["README.md", "check-sync.sh"]
+
+[placeholders.chip]
+type    = "string"
+prompt  = "Chip?"
+choices = ["esp32c6"]
+default = "esp32c6"

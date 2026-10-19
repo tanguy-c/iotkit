@@ -1,0 +1,5 @@
+[toolchain]
+channel    = "stable"
+components = ["rust-src", "rustfmt", "clippy"]
+# ESP32-C6/H2, then ESP32-C3. The Xtensa chips (S3) use the `esp` toolchain instead.
+targets    = ["riscv32imac-unknown-none-elf", "riscv32imc-unknown-none-elf"]

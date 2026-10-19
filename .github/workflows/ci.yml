@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  host:
+    name: Host crates and xtask
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target\nxtask -> target"
+      - run: cargo fmt --all --check
+      - run: cargo fmt --all --check --manifest-path xtask/Cargo.toml
+      - run: cargo test-host --features iotkit-image/sign
+      - run: cargo clippy -p iotkit-image -p iotkit-config -p iotkit-diag -p iotkit-runtime -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-model -p iotkit-link-mqtt --target host-tuple --all-targets --features iotkit-image/sign -- -D warnings
+      - run: cargo clippy --manifest-path xtask/Cargo.toml --target host-tuple -- -D warnings
+
+  firmware:
+    name: Firmware (ESP32-C6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: espflash
+      # A throw-away signing key: the firmware embeds keys/ota.pub.
+      - run: cargo xtask keygen
+      # Per app, not `--workspace`: devkit's Wi-Fi and thread-light's 802.15.4 would unify into one
+      # esp-radio build, which refuses both at once.
+      - run: cargo clippy -p devkit -- -D warnings
+      # The chip side of the libraries, which the host jobs do not build.
+      - run: cargo clippy -p iotkit-config -p iotkit-diag -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-link-mqtt --features iotkit-config/esp32c6,iotkit-diag/esp32c6,iotkit-net/esp32c6,iotkit-ota/esp32c6,iotkit-provision/esp32c6,iotkit-link-mqtt/esp32c6 -- -D warnings
+      # Matter over Wi-Fi next to MQTT (git dependency, 8 MB partitions).
+      - run: cargo clippy -p devkit --features matter-wifi -- -D warnings
+      # Matter over Thread builds OpenThread and mbedtls from C.
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake
+      - run: cargo clippy -p thread-light -- -D warnings
+      # Signed build, then check it like a device would.
+      - run: cargo xtask build --release
+      - run: cargo xtask verify dist/devkit/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devkit
+          path: dist/
+
+  template:
+    name: Template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./template/check-sync.sh
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-generate
+      - run: cargo generate --path template --name ci-device --destination "$RUNNER_TEMP" --silent --define chip=esp32c6
+      - run: cargo build --release
+        working-directory: ${{ runner.temp }}/ci-device
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

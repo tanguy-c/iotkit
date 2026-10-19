@@ -1,0 +1,31 @@
+[package]
+name         = "thread-light"
+description  = "Matter over Thread on the ESP32-C6-DevKitC-1: the RGB LED as a colour light and the chip temperature"
+publish      = false
+version      = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+
+[dependencies]
+iotkit-config      = { workspace = true, features = ["esp32c6"] }
+iotkit-diag        = { workspace = true, features = ["esp32c6", "panic-handler"] }
+iotkit-link-matter = { workspace = true, features = ["thread", "esp32c6"] }
+iotkit-model       = { workspace = true }
+iotkit-net         = { workspace = true }
+
+esp-alloc              = { workspace = true }
+esp-hal                = { workspace = true }
+esp-rtos               = { workspace = true }
+esp-radio              = { version = "1.0.0-beta.1", features = ["esp32c6", "ble", "ieee802154", "esp-alloc", "log-04", "unstable"] }
+esp-bootloader-esp-idf = { workspace = true }
+esp-println            = { workspace = true }
+esp-hal-smartled       = { workspace = true }
+embassy-executor       = { workspace = true }
+embassy-futures        = "0.1"
+embassy-sync           = { workspace = true }
+embassy-time           = { workspace = true }
+smart-leds             = { workspace = true }
+static_cell            = { workspace = true }
+log                    = { workspace = true }
+heapless               = { workspace = true }

@@ -1,0 +1,10 @@
+target/
+dist/
+# OTA signing key (`cargo xtask keygen`); the public half is committed.
+keys/*.key
+.cargo/secrets.toml
+**/*.rs.bk
+.DS_Store
+# Home Assistant state of the test server.
+test-server/ha-config/
+test-server/matter-data/

@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Flash USB",
+      "detail": "Build, flash over USB and open the serial monitor",
+      "type": "shell",
+      "command": "cargo run --release",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "Monitor",
+      "type": "shell",
+      "command": "espflash monitor --chip esp32c6",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build signed",
+      "detail": "Release build, app image and signed manifest in dist/",
+      "type": "shell",
+      "command": "cargo xtask build --release",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "OTA push",
+      "type": "shell",
+      "command": "cargo xtask ota push --host ${input:otaHost}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "Build signed",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build debug",
+      "type": "shell",
+      "command": "cargo build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "Host tests",
+      "type": "shell",
+      "command": "cargo test-host",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$rustc"],
+      "group": "test"
+    }
+  ],
+  "inputs": [
+    { "id": "otaHost", "type": "promptString", "description": "Device host name", "default": "iotkit-XXXX.local" }
+  ]
+}

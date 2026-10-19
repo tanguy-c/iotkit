@@ -1,0 +1,37 @@
+[package]
+name         = "iotkit-link-matter"
+description  = "The device model over Matter, on Wi-Fi (iotkit-net's stack) or Thread"
+publish      = false
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[features]
+## Matter over Thread, commissioned over BLE (needs `clang` and `cmake` to build OpenThread).
+thread = ["_esp", "rs-matter-embassy/openthread", "rs-matter-embassy/mbedtls", "rs-matter-embassy/openthread-heap-int-8192", "rs-matter-embassy/esp", "rs-matter-embassy/trouble", "dep:tinyrlibc"]
+## Matter over Wi-Fi, on `iotkit-net`'s network (commissioned on the network).
+wifi = ["_esp", "dep:iotkit-net", "iotkit-net/matter", "rs-matter-embassy/embassy-net", "rs-matter-embassy/rustcrypto", "rs-matter-embassy/trouble"]
+esp32c6 = ["esp-hal/esp32c6", "iotkit-net?/esp32c6", "iotkit-config/esp32c6", "iotkit-diag?/esp32c6"]
+_esp = ["dep:rs-matter-embassy", "dep:esp-hal", "dep:embassy-executor", "dep:embassy-futures", "dep:embassy-sync", "dep:static_cell", "iotkit-config/_esp", "dep:embassy-embedded-hal", "dep:heapless", "dep:iotkit-diag", "dep:embassy-time"]
+
+[dependencies]
+iotkit-config = { workspace = true }
+iotkit-model = { workspace = true }
+serde        = { version = "1", default-features = false, features = ["derive"] }
+heapless     = { version = "0.9", optional = true }
+iotkit-diag  = { workspace = true, optional = true }
+embassy-time = { version = "0.5.1", optional = true }
+log          = "0.4.27"
+
+iotkit-net        = { workspace = true, optional = true }
+embassy-embedded-hal = { version = "0.6", optional = true, default-features = false }
+embassy-executor  = { version = "0.10.0", optional = true }
+embassy-futures   = { version = "0.1", optional = true }
+embassy-sync      = { version = "0.8", optional = true }
+esp-hal           = { version = "~1.2.2", optional = true, features = ["unstable"] }
+static_cell       = { version = "2.1", optional = true }
+# C functions OpenThread and mbedtls call.
+tinyrlibc = { version = "0.5", optional = true, default-features = false, features = ["memchr", "utoa", "strtoul", "strtol", "strcmp", "strncmp", "strlen", "strncpy", "strcpy", "strchr", "strrchr", "strstr", "strspn", "strcspn", "strcat", "atoi", "isspace", "isdigit", "isalpha", "isupper", "abs", "itoa", "qsort", "strncasecmp", "strtoull", "strtoll", "strtoimax", "strtoumax"] }
+# Not on crates.io yet (it depends on git crates); pinned.
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "2a806b0b1b521293b34a773618499e87402c843c", optional = true, default-features = false, features = ["log"] }

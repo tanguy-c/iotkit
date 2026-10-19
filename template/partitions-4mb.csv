@@ -1,0 +1,9 @@
+# 4 MB flash (boards with less flash; too small for Matter). Two app slots make OTA possible. `config` holds iotkit-config's records and is
+# found by its label: espflash 4.6 rejects custom data subtypes (0x40-0xfe).
+# Name,   Type, SubType,   Offset,   Size
+nvs,      data, nvs,       0x9000,   0x4000
+otadata,  data, ota,       0xd000,   0x2000
+phy_init, data, phy,       0xf000,   0x1000
+config,   data, undefined, 0x10000,  0x10000
+ota_0,    app,  ota_0,     0x20000,  0x1E0000
+ota_1,    app,  ota_1,     0x200000, 0x1E0000

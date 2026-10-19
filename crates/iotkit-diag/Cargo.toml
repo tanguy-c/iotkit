@@ -1,0 +1,32 @@
+[package]
+name         = "iotkit-diag"
+description  = "Crash record, reset reason, boot counters and task watchdog"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[features]
+## The ESP32-C6 side (`esp` module): reset reason, RTC crash record, hardware watchdog.
+esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-backtrace/esp32c6", "esp-println/esp32c6"]
+## Installs iotkit's `#[panic_handler]`: records the panic, prints it with a backtrace, restarts.
+## Use instead of esp-backtrace's `panic-handler` feature.
+panic-handler = []
+_esp = ["dep:esp-hal", "dep:esp-backtrace", "dep:esp-println", "dep:embassy-executor", "dep:embassy-time"]
+
+[dependencies]
+iotkit-config    = { workspace = true }
+iotkit-runtime   = { workspace = true }
+heapless         = { version = "0.9", features = ["serde"] }
+embedded-storage-async = "0.4"
+log              = "0.4.27"
+serde            = { version = "1", default-features = false, features = ["derive"] }
+
+embassy-executor = { version = "0.10.0", optional = true }
+embassy-time     = { version = "0.5.1", optional = true }
+esp-backtrace    = { version = "0.20.0", optional = true, features = ["println"] }
+esp-hal          = { version = "~1.2.2", optional = true, features = ["unstable"] }
+esp-println      = { version = "0.18.0", optional = true, features = ["log-04"] }
+
+[dev-dependencies]
+postcard = { version = "1.1", default-features = false }

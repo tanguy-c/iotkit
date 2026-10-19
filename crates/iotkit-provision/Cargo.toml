@@ -1,0 +1,33 @@
+[package]
+name         = "iotkit-provision"
+description  = "First-boot Wi-Fi setup with Improv over Bluetooth LE and serial"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[features]
+## ESP32-C6 Bluetooth and serial front-ends (`esp` module).
+esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-radio/esp32c6", "esp-println/esp32c6", "iotkit-config/esp32c6", "iotkit-net/esp32c6", "iotkit-diag/esp32c6"]
+_esp = ["dep:esp-hal", "dep:esp-radio", "dep:esp-println", "dep:trouble-host", "dep:bt-hci", "dep:embassy-executor", "dep:embassy-futures", "dep:embassy-sync", "dep:embassy-time", "dep:iotkit-config", "dep:iotkit-net", "dep:iotkit-diag", "dep:static_cell", "dep:embassy-net", "dep:embedded-io-async"]
+
+[dependencies]
+heapless = "0.9"
+log      = "0.4.27"
+
+iotkit-config    = { workspace = true, optional = true }
+iotkit-net       = { workspace = true, optional = true }
+iotkit-diag      = { workspace = true, optional = true }
+bt-hci           = { version = "0.10", optional = true }
+embassy-executor = { version = "0.10.0", optional = true }
+embassy-futures  = { version = "0.1", optional = true }
+embassy-net      = { version = "0.9.1", optional = true }
+embedded-io-async = { version = "0.7", optional = true }
+embassy-sync     = { version = "0.8", optional = true }
+embassy-time     = { version = "0.5.1", optional = true }
+esp-hal          = { version = "~1.2.2", optional = true, features = ["unstable"] }
+esp-println      = { version = "0.18.0", optional = true, features = ["log-04"] }
+esp-radio        = { version = "1.0.0-beta.1", optional = true, features = ["ble", "coex", "esp-alloc", "log-04", "unstable"] }
+# The GATT macros use it.
+static_cell      = { version = "2.1", optional = true }
+trouble-host     = { version = "0.8", optional = true, default-features = false, features = ["peripheral", "gatt", "derive", "default-packet-pool", "connection-params-update"] }

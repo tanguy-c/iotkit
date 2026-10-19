@@ -1,0 +1,15 @@
+[package]
+name         = "iotkit-model"
+description  = "What a device is, once: entities with typed state and commands, independent of MQTT or Matter"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[dependencies]
+critical-section = "1.2"
+embassy-sync     = "0.8"
+
+[dev-dependencies]
+critical-section = { version = "1.2", features = ["std"] }
+embassy-futures  = "0.1"

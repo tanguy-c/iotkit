@@ -1,0 +1,33 @@
+[package]
+name         = "iotkit-link-mqtt"
+description  = "The device model over MQTT, with Home Assistant discovery"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[features]
+## ESP32-C6 client task (`esp` module).
+esp32c6 = ["_esp", "iotkit-config/esp32c6", "iotkit-net/esp32c6"]
+_esp = ["dep:embassy-net", "dep:embassy-time", "dep:embassy-futures", "dep:embassy-executor", "dep:embassy-sync", "dep:embedded-io-async", "dep:iotkit-net", "dep:esp-hal"]
+
+[dependencies]
+iotkit-config   = { workspace = true }
+iotkit-model    = { workspace = true }
+iotkit-runtime  = { workspace = true }
+heapless        = { version = "0.9", features = ["serde"] }
+log             = "0.4.27"
+serde           = { version = "1", default-features = false, features = ["derive"] }
+serde-json-core = "0.7"
+
+iotkit-net        = { workspace = true, optional = true }
+embassy-executor  = { version = "0.10.0", optional = true }
+embassy-futures   = { version = "0.1", optional = true }
+embassy-net       = { version = "0.9.1", optional = true }
+embassy-sync      = { version = "0.8", optional = true }
+embassy-time      = { version = "0.5.1", optional = true }
+embedded-io-async = { version = "0.7", optional = true }
+esp-hal           = { version = "~1.2.2", optional = true, features = ["unstable"] }
+
+[dev-dependencies]
+critical-section = { version = "1.2", features = ["std"] }

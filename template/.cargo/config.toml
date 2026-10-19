@@ -1,0 +1,13 @@
+# Run cargo from the project root: the runner's partition table path is relative to it.
+# `--erase-parts otadata` makes every USB flash boot `ota_0`, even after an OTA switched slots.
+[target.riscv32imac-unknown-none-elf]
+runner    = "espflash flash --monitor --chip {{chip}} --flash-size 8mb --partition-table partitions.csv --erase-parts otadata"
+# Backtraces (esp-backtrace) need frame pointers.
+rustflags = ["-C", "force-frame-pointers"]
+
+[build]
+target = "riscv32imac-unknown-none-elf"
+
+[env]
+# Log level, read at build time by esp-println.
+ESP_LOG = "info"

@@ -1,0 +1,5 @@
+{
+  // The target comes from .cargo/config.toml.
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.cargo.allTargets": false
+}

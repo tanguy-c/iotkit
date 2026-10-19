@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Flash USB",
+      "detail": "Build, flash over USB and open the serial monitor",
+      "type": "shell",
+      "command": "cargo run --release",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Monitor",
+      "type": "shell",
+      "command": "espflash monitor --chip {{chip}}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build debug",
+      "type": "shell",
+      "command": "cargo build",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "group": "build"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+# Wi-Fi credentials for the firmware: `secrets.toml` (git-ignored, see `secrets.toml.example`).
+include = [{ path = "secrets.toml", optional = true }]
+
+# Run cargo from the repository root: the runner's partition table path is relative to it.
+# `--erase-parts otadata` makes every USB flash boot `ota_0`, even after an OTA switched slots.
+[target.riscv32imac-unknown-none-elf] # ESP32-C6, ESP32-H2
+runner    = "espflash flash --monitor --chip esp32c6 --flash-size 8mb --partition-table partitions.csv --erase-parts otadata"
+# Backtraces (esp-backtrace) need frame pointers.
+rustflags = ["-C", "force-frame-pointers"]
+
+[build]
+target = "riscv32imac-unknown-none-elf"
+
+[alias]
+# Host tooling: build, sign, flash, OTA (see xtask/).
+xtask = "run --quiet --manifest-path xtask/Cargo.toml --target host-tuple --"
+# Host unit tests of the hardware-independent crates.
+test-host = "test -p iotkit-image -p iotkit-config -p iotkit-diag -p iotkit-runtime -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-model -p iotkit-link-mqtt -p iotkit-link-matter --target host-tuple"
+
+[env]
+# C code of Matter over Thread (OpenThread, mbedtls) is built with the host's clang.
+CC_riscv32imac_unknown_none_elf = "clang"
+AR_riscv32imac_unknown_none_elf = "ar"
+# Log level, read at build time by esp-println.
+ESP_LOG = "info,rs_matter_stack=warn"

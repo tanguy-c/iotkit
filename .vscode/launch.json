@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // probe-rs over the built-in USB-JTAG: same cable, no extra probe.
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "name": "Debug devkit",
+      "cwd": "${workspaceFolder}",
+      "chip": "esp32c6",
+      "preLaunchTask": "Build debug",
+      "flashingConfig": {
+        "flashingEnabled": true,
+        "haltAfterReset": true,
+        "formatOptions": { "binaryFormat": "idf" }
+      },
+      "coreConfigs": [
+        {
+          "coreIndex": 0,
+          "programBinary": "target/riscv32imac-unknown-none-elf/debug/devkit"
+        }
+      ]
+    },
+    {
+      "type": "probe-rs-debug",
+      "request": "attach",
+      "name": "Attach devkit",
+      "cwd": "${workspaceFolder}",
+      "chip": "esp32c6",
+      "coreConfigs": [
+        {
+          "coreIndex": 0,
+          "programBinary": "target/riscv32imac-unknown-none-elf/debug/devkit"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // probe-rs over the built-in USB-JTAG: same cable, no extra probe.
+      "type": "probe-rs-debug",
+      "request": "launch",
+      "name": "Debug",
+      "cwd": "${workspaceFolder}",
+      "chip": "{{chip}}",
+      "preLaunchTask": "Build debug",
+      "flashingConfig": {
+        "flashingEnabled": true,
+        "haltAfterReset": true,
+        "formatOptions": { "binaryFormat": "idf" }
+      },
+      "coreConfigs": [
+        {
+          "coreIndex": 0,
+          "programBinary": "target/riscv32imac-unknown-none-elf/debug/{{project-name}}"
+        }
+      ]
+    },
+    {
+      "type": "probe-rs-debug",
+      "request": "attach",
+      "name": "Attach",
+      "cwd": "${workspaceFolder}",
+      "chip": "{{chip}}",
+      "coreConfigs": [
+        {
+          "coreIndex": 0,
+          "programBinary": "target/riscv32imac-unknown-none-elf/debug/{{project-name}}"
+        }
+      ]
+    }
+  ]
+}

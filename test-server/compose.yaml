@@ -1,0 +1,35 @@
+# Dev and CI services: `docker compose -f test-server/compose.yaml up` (or podman compose).
+#   MQTT broker     mqtt://<this PC>:1883   (anonymous, for development only)
+#   Updates         http://<this PC>:8080/<package>/manifest.json   (serves ../dist from `cargo xtask build`)
+#   Home Assistant  http://localhost:8123   (`up -d homeassistant`; about 1.7 GB; its broker is `mosquitto`)
+#   Matter server   ws://localhost:5580/ws  (`up -d matter-server`; host network: Matter needs IPv6
+#                   multicast; in the Home Assistant container's Matter integration the URL is
+#                   ws://host.containers.internal:5580/ws with rootless podman)
+services:
+  mosquitto:
+    image: docker.io/library/eclipse-mosquitto:2
+    ports: ["1883:1883"]
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,Z
+
+  updates:
+    image: docker.io/library/caddy:2
+    command: caddy file-server --root /srv --listen :8080 --browse
+    ports: ["8080:8080"]
+    volumes:
+      - ../dist:/srv:ro,Z
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    ports: ["8123:8123"]
+    volumes:
+      - ./ha-config:/config:Z
+    depends_on: [mosquitto]
+
+  matter-server:
+    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    network_mode: host
+    # The device may only have an IPv6 link-local address: name the interface towards it.
+    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlp114s0}"]
+    volumes:
+      - ./matter-data:/data:Z

@@ -1,0 +1,3 @@
+# rust-analyzer and cargo inside xtask/: build for the host, not the chip.
+[build]
+target = "host-tuple"

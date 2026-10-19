@@ -1,0 +1,6 @@
+{
+  // The target comes from .cargo/config.toml (riscv32imac); xtask/ has its own (host).
+  "rust-analyzer.linkedProjects": ["Cargo.toml", "xtask/Cargo.toml"],
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.cargo.allTargets": false
+}
