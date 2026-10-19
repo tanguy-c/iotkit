@@ -92,5 +92,8 @@ fn linker_be_nice() {
         std::process::exit(0);
     }
 
-    println!("cargo:rustc-link-arg=--error-handling-script={}", std::env::current_exe().unwrap().display());
+    // An lld option: the Xtensa chips (ESP32-S3) link with GCC instead.
+    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("xtensa") {
+        println!("cargo:rustc-link-arg=--error-handling-script={}", std::env::current_exe().unwrap().display());
+    }
 }

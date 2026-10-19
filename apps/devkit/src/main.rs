@@ -13,14 +13,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either4, select4};
 use embassy_time::{Duration, Instant, Ticker};
-use esp_hal::{
-    Async,
-    clock::CpuClock,
-    rmt::Rmt,
-    time::Rate,
-    timer::timg::TimerGroup,
-    tsens::{self, TemperatureSensor},
-};
+use esp_hal::{Async, clock::CpuClock, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
+// The chip temperature sensor: on the ESP32-C6 and C3 only.
+#[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
+use esp_hal::tsens::{self, TemperatureSensor};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
 use iotkit_app::{
     APP_CHECKS, App, Board, Button, Check, Config, ConsoleExtension, Entity, HEALTH, Light, LightState, PublicKey,
@@ -34,11 +30,43 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// Updates must be signed with the secret half (`cargo xtask keygen`).
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
 
-/// The DevKit's WS2812 LED on GPIO8, driven by an RMT channel.
+/// Each chip's DevKit pins: the WS2812 RGB LED and the BOOT button (from the boards' user
+/// guides; only the ESP32-C6-DevKitC-1 is tested). A macro, so each pin is taken where it is
+/// used.
+#[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
+macro_rules! pin {
+    ($p:ident, led) => {
+        $p.GPIO8
+    };
+    ($p:ident, boot) => {
+        $p.GPIO9
+    };
+}
+#[cfg(feature = "esp32c5")]
+macro_rules! pin {
+    ($p:ident, led) => {
+        $p.GPIO27
+    };
+    ($p:ident, boot) => {
+        $p.GPIO28
+    };
+}
+#[cfg(feature = "esp32s3")]
+macro_rules! pin {
+    ($p:ident, led) => {
+        $p.GPIO38
+    };
+    ($p:ident, boot) => {
+        $p.GPIO0
+    };
+}
+
+/// The DevKit's WS2812 RGB LED, driven by an RMT channel.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
 static LED: Light = Light::new("led", "LED");
 static CYCLE: Switch = Switch::new("color_cycle", "Color cycle").icon("mdi:palette");
+#[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
 static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
     .unit("°C")
     .device_class("temperature")
@@ -49,7 +77,10 @@ static UPTIME: Sensor = Sensor::new("uptime", "Uptime").unit("s").device_class("
 static SIGNAL: Sensor =
     Sensor::new("wifi_signal", "Wi-Fi signal").unit("dBm").device_class("signal_strength").measurement().diagnostic();
 static RESTART: Button = Button::new("restart", "Restart").device_class("restart").diagnostic();
+#[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
 static ENTITIES: [&dyn Entity; 6] = [&LED, &CYCLE, &TEMPERATURE, &UPTIME, &SIGNAL, &RESTART];
+#[cfg(not(any(feature = "esp32c6", feature = "esp32c3")))]
+static ENTITIES: [&dyn Entity; 5] = [&LED, &CYCLE, &UPTIME, &SIGNAL, &RESTART];
 
 /// The main loop ran for a while.
 const RUNNING: Check = Check(APP_CHECKS);
@@ -116,7 +147,7 @@ async fn main(spawner: Spawner) -> ! {
         bt: p.BT,
         timg1: p.TIMG1,
         usb: p.USB_DEVICE,
-        boot_button: Some(p.GPIO9.into()),
+        boot_button: Some(pin!(p, boot).into()),
     };
     let app = iotkit_app::start(spawner, board, &CONFIG).await;
     // Rollback test: a build with `DEVKIT_PANIC_AT_BOOT=1` never gets healthy.
@@ -124,11 +155,14 @@ async fn main(spawner: Spawner) -> ! {
         panic!("DEVKIT_PANIC_AT_BOOT is set");
     }
 
-    let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();
-    spawner.spawn(temperature_task(tsens).unwrap());
+    #[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
+    {
+        let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();
+        spawner.spawn(temperature_task(tsens).unwrap());
+    }
     spawner.spawn(restart_task().unwrap());
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
-    let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
+    let led = Led::new(WS2812_TIMING, rmt.channel0, pin!(p, led), Rate::from_mhz(80)).unwrap();
     spawner.spawn(led_task(led, app).unwrap());
 
     let mut ticker = Ticker::every(Duration::from_secs(10));
@@ -146,6 +180,7 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
+#[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
 #[embassy_executor::task]
 async fn temperature_task(tsens: TemperatureSensor<'static>) {
     let mut ticker = Ticker::every(Duration::from_secs(30));

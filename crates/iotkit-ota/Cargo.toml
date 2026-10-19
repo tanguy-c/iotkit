@@ -7,11 +7,17 @@ version.workspace      = true
 license.workspace      = true
 
 [features]
+## Atomics for chips without compare-and-swap (ESP32-C3); turned on by the `esp32c3` feature.
+portable-atomic = ["dep:portable-atomic", "iotkit-config/portable-atomic", "iotkit-diag/portable-atomic"]
 ## ESP32-C6 slots and download (`esp` module). Without it the boot policy is host-testable.
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-storage/esp32c6", "esp-bootloader-esp-idf/esp32c6", "iotkit-config/esp32c6", "iotkit-net/esp32c6", "iotkit-diag/esp32c6"]
+esp32c3 = ["portable-atomic", "_esp", "esp-hal/esp32c3", "esp-storage/esp32c3", "esp-bootloader-esp-idf/esp32c3", "iotkit-config/esp32c3", "iotkit-net/esp32c3", "iotkit-diag/esp32c3"]
+esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-storage/esp32c5", "esp-bootloader-esp-idf/esp32c5", "iotkit-config/esp32c5", "iotkit-net/esp32c5", "iotkit-diag/esp32c5"]
+esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-storage/esp32s3", "esp-bootloader-esp-idf/esp32s3", "iotkit-config/esp32s3", "iotkit-net/esp32s3", "iotkit-diag/esp32s3"]
 _esp = ["dep:esp-hal", "dep:esp-storage", "dep:esp-bootloader-esp-idf", "dep:embassy-net", "dep:embassy-time", "dep:embassy-executor", "dep:embassy-futures", "dep:embassy-sync", "dep:embedded-io-async"]
 
 [dependencies]
+portable-atomic  = { version = "1.11", optional = true, default-features = false }  # esp-hal sets its single-core mode
 iotkit-config = { workspace = true }
 iotkit-image  = { workspace = true }
 iotkit-net    = { workspace = true }

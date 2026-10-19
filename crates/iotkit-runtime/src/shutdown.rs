@@ -8,7 +8,7 @@
 //! with_timeout(Duration::from_secs(2), shutdown::shutdown()).await;   // before software_reset
 //! ```
 
-use core::sync::atomic::{AtomicU8, Ordering};
+use crate::atomic::{AtomicU8, Ordering};
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal, watch::Watch};
 

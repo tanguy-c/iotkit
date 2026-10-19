@@ -7,11 +7,17 @@ version.workspace      = true
 license.workspace      = true
 
 [features]
+## Atomics for chips without compare-and-swap (ESP32-C3); turned on by the `esp32c3` feature.
+portable-atomic = ["dep:portable-atomic", "iotkit-model/portable-atomic", "iotkit-runtime/portable-atomic", "iotkit-config/portable-atomic"]
 ## ESP32-C6 client task (`esp` module).
 esp32c6 = ["_esp", "iotkit-config/esp32c6", "iotkit-net/esp32c6"]
+esp32c3 = ["portable-atomic", "_esp", "iotkit-config/esp32c3", "iotkit-net/esp32c3"]
+esp32c5 = ["_esp", "iotkit-config/esp32c5", "iotkit-net/esp32c5"]
+esp32s3 = ["_esp", "iotkit-config/esp32s3", "iotkit-net/esp32s3"]
 _esp = ["dep:embassy-net", "dep:embassy-time", "dep:embassy-futures", "dep:embassy-executor", "dep:embassy-sync", "dep:embedded-io-async", "dep:iotkit-net", "dep:esp-hal"]
 
 [dependencies]
+portable-atomic  = { version = "1.11", optional = true, default-features = false }  # esp-hal sets its single-core mode
 iotkit-config   = { workspace = true }
 iotkit-model    = { workspace = true }
 iotkit-runtime  = { workspace = true }

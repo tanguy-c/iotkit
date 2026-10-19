@@ -14,6 +14,25 @@ esp32c6 = [
     "iotkit-provision/esp32c6", "iotkit-link-mqtt/esp32c6",
     "iotkit-link-matter?/esp32c6",
 ]
+esp32c3 = [
+    "iotkit-model/portable-atomic", "iotkit-runtime/portable-atomic",
+    "esp-hal/esp32c3", "esp-println/esp32c3",
+    "iotkit-config/esp32c3", "iotkit-diag/esp32c3", "iotkit-net/esp32c3", "iotkit-ota/esp32c3",
+    "iotkit-provision/esp32c3", "iotkit-link-mqtt/esp32c3",
+    "iotkit-link-matter?/esp32c3",
+]
+esp32c5 = [
+    "esp-hal/esp32c5", "esp-println/esp32c5",
+    "iotkit-config/esp32c5", "iotkit-diag/esp32c5", "iotkit-net/esp32c5", "iotkit-ota/esp32c5",
+    "iotkit-provision/esp32c5", "iotkit-link-mqtt/esp32c5",
+    "iotkit-link-matter?/esp32c5",
+]
+esp32s3 = [
+    "esp-hal/esp32s3", "esp-println/esp32s3",
+    "iotkit-config/esp32s3", "iotkit-diag/esp32s3", "iotkit-net/esp32s3", "iotkit-ota/esp32s3",
+    "iotkit-provision/esp32s3", "iotkit-link-mqtt/esp32s3",
+    "iotkit-link-matter?/esp32s3",
+]
 ## Matter over Wi-Fi, next to MQTT (8 MB flash: about 2.1 MB of firmware).
 matter-wifi = ["dep:iotkit-link-matter", "iotkit-link-matter/wifi", "iotkit-net/matter"]
 

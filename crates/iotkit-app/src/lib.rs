@@ -23,6 +23,24 @@
 
 #![no_std]
 
+#[cfg(not(any(feature = "esp32c6", feature = "esp32c3", feature = "esp32c5", feature = "esp32s3")))]
+compile_error!("iotkit-app: enable one chip feature: esp32c6, esp32c3, esp32c5 or esp32s3");
+#[cfg(any(
+    all(feature = "esp32c6", any(feature = "esp32c3", feature = "esp32c5", feature = "esp32s3")),
+    all(feature = "esp32c3", any(feature = "esp32c5", feature = "esp32s3")),
+    all(feature = "esp32c5", feature = "esp32s3"),
+))]
+compile_error!("iotkit-app: enable only one chip feature");
+#[cfg(all(feature = "esp32c5", feature = "matter-wifi"))]
+compile_error!("iotkit-app: `matter-wifi` is not supported on the ESP32-C5 yet (no TRNG in esp-hal 1.2)");
+// Matter over Wi-Fi needs about 21 KB more internal RAM than the ESP32-S3 has left (PSRAM
+// support would fix it; not done yet).
+#[cfg(all(feature = "esp32s3", feature = "matter-wifi"))]
+compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-S3's internal RAM yet (use MQTT, or a C6)");
+// Matter over Wi-Fi needs about 24 KB more static RAM than the ESP32-C3 has.
+#[cfg(all(feature = "esp32c3", feature = "matter-wifi"))]
+compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQTT, or a C6/C5/S3)");
+
 mod console;
 
 use embassy_executor::Spawner;

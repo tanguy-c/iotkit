@@ -305,6 +305,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-device-driver"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c051592f59fe68053524b4c4935249b806f72c1f544cfb7abe4f57c3be258e"
+dependencies = [
+ "aligned",
+]
+
+[[package]]
 name = "brownstone"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1062,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "devkit"
-version = "0.8.7"
+version = "0.8.9"
 dependencies = [
  "embassy-executor",
  "embassy-futures",
@@ -1505,6 +1514,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-usb-synopsys-otg"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6efd0c0e0b21bcf91b475b8fa47347c1df32c9a99728ae1e1b0e6625862dfd1a"
+dependencies = [
+ "critical-section",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embassy-usb-driver",
+ "portable-atomic",
+]
+
+[[package]]
 name = "embedded-can"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1724,6 +1746,7 @@ dependencies = [
  "esp-println",
  "heapless 0.9.3",
  "riscv",
+ "semihosting",
  "xtensa-lx",
 ]
 
@@ -1774,6 +1797,8 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-sync 0.8.0",
+ "embassy-usb-driver",
+ "embassy-usb-synopsys-otg",
  "embedded-can",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -1790,14 +1815,14 @@ dependencies = [
  "esp-sync",
  "esp32",
  "esp32c2",
- "esp32c3",
- "esp32c5",
+ "esp32c3 0.33.0",
+ "esp32c5 0.3.0",
  "esp32c6 0.24.0",
  "esp32c61",
- "esp32h2",
+ "esp32h2 0.20.0",
  "esp32p4",
  "esp32s2",
- "esp32s3",
+ "esp32s3 0.36.0",
  "esp32s31",
  "fugit",
  "instability",
@@ -1809,6 +1834,7 @@ dependencies = [
  "rand_core 0.6.4",
  "rand_core 0.9.5",
  "riscv",
+ "sdio",
  "somni-template",
  "static_cell",
  "strum 0.27.2",
@@ -1885,8 +1911,16 @@ dependencies = [
  "esp-hal",
  "esp-metadata-generated",
  "esp-sync",
+ "esp-wifi-sys-esp32c3",
+ "esp-wifi-sys-esp32c5",
  "esp-wifi-sys-esp32c6",
+ "esp-wifi-sys-esp32h2",
+ "esp-wifi-sys-esp32s3",
+ "esp32c3 0.34.0",
+ "esp32c5 0.4.0",
  "esp32c6 0.25.0",
+ "esp32h2 0.21.0",
+ "esp32s3 0.37.0",
  "log",
 ]
 
@@ -1934,12 +1968,17 @@ dependencies = [
  "esp-wifi-sys-esp32",
  "esp-wifi-sys-esp32c2",
  "esp-wifi-sys-esp32c3",
+ "esp-wifi-sys-esp32c5",
  "esp-wifi-sys-esp32c6",
  "esp-wifi-sys-esp32h2",
  "esp-wifi-sys-esp32s2",
  "esp-wifi-sys-esp32s3",
  "esp-wifi-sys-esp32s31",
+ "esp32c3 0.34.0",
+ "esp32c5 0.4.0",
  "esp32c6 0.25.0",
+ "esp32h2 0.21.0",
+ "esp32s3 0.37.0",
  "heapless 0.9.3",
  "ieee802154",
  "instability",
@@ -1949,6 +1988,7 @@ dependencies = [
  "portable-atomic",
  "portable_atomic_enum",
  "xarxa-driver",
+ "xtensa-lx-rt",
 ]
 
 [[package]]
@@ -1980,7 +2020,11 @@ checksum = "e933ff78374b763b65998b64ad671b4890ed4ba13a80deff9f53afe95ede289d"
 dependencies = [
  "document-features",
  "esp-metadata-generated",
+ "esp32c3 0.33.0",
+ "esp32c5 0.3.0",
  "esp32c6 0.24.0",
+ "esp32h2 0.20.0",
+ "esp32s3 0.36.0",
 ]
 
 [[package]]
@@ -2023,7 +2067,11 @@ dependencies = [
  "esp-metadata-generated",
  "esp-rom-sys",
  "esp-sync",
+ "esp32c3 0.33.0",
+ "esp32c5 0.3.0",
  "esp32c6 0.24.0",
+ "esp32h2 0.20.0",
+ "esp32s3 0.36.0",
 ]
 
 [[package]]
@@ -2067,6 +2115,12 @@ checksum = "c1345555a7856033077e8ca26572e4739a1b43f8d52daaa0fdf6a1497fe88845"
 dependencies = [
  "log",
 ]
+
+[[package]]
+name = "esp-wifi-sys-esp32c5"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e025f203485a3ed0f00b2cb79bc86c6073d5ca11832507b3b474f33ef45a6ffa"
 
 [[package]]
 name = "esp-wifi-sys-esp32c6"
@@ -2141,10 +2195,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32c3"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "569e03d871eac998bc62ef95a9a6d31a91fc0aaef0e0017a6b5a6a9c4759768a"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32c5"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97afa80d8110c7234f840252baa8ee8de28f78e8dc233d2d430c0ccfbe59a2b5"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32c5"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6309dc0ad85475c03b0676054d924123782ffe2855082747ab12ad221497e0b"
 dependencies = [
  "vcell",
 ]
@@ -2186,6 +2258,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32h2"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdba9857bb32848de7aa3c0f4b84d5f13f369c87c34b271275e628fdc9bac747"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
 name = "esp32p4"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2209,6 +2290,15 @@ name = "esp32s3"
 version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab08eb1f516ba72b7eb272cdd88cd74899552292a294b831b2143a3e60f1666a"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32s3"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3e2e7d1a9bd72304ef0e55c90405195489ff902c908a57cd81fc8a4d51ff4ae"
 dependencies = [
  "vcell",
 ]
@@ -2834,6 +2924,7 @@ dependencies = [
  "esp-hal",
  "esp-storage",
  "log",
+ "portable-atomic",
  "postcard",
  "sequential-storage",
  "serde",
@@ -2853,6 +2944,7 @@ dependencies = [
  "iotkit-config",
  "iotkit-runtime",
  "log",
+ "portable-atomic",
  "postcard",
  "serde",
 ]
@@ -2907,6 +2999,7 @@ dependencies = [
  "iotkit-net",
  "iotkit-runtime",
  "log",
+ "portable-atomic",
  "serde",
  "serde-json-core",
 ]
@@ -2918,6 +3011,7 @@ dependencies = [
  "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -2959,6 +3053,7 @@ dependencies = [
  "iotkit-image",
  "iotkit-net",
  "log",
+ "portable-atomic",
  "serde",
 ]
 
@@ -2992,6 +3087,7 @@ dependencies = [
  "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -4322,6 +4418,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "sdio"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02f8dcf75e0f6aeeda4819e3adea9a2c0705c2f109970abcc07edcfef372b68a"
+dependencies = [
+ "aligned",
+ "block-device-driver",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+]
+
+[[package]]
 name = "sec1"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4334,6 +4442,12 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "semihosting"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8e4abf97879f4e80db69a9fba7bd64998e9bdad25f58ef045a778e191172fd4"
 
 [[package]]
 name = "semver"

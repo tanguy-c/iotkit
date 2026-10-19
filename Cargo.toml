@@ -27,12 +27,13 @@ iotkit-link-matter = { path = "crates/iotkit-link-matter" }
 iotkit-app    = { path = "crates/iotkit-app" }
 iotkit-build  = { path = "crates/iotkit-build" }
 
-esp-hal                = { version = "~1.2.2", features = ["esp32c6", "log-04", "unstable"] }
-esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32c6", "log-04"] }
-esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c6", "log-04"] }
-esp-println            = { version = "0.18.0", features = ["esp32c6", "log-04"] }
-esp-hal-smartled       = { version = "0.18", features = ["esp32c6"] }
-esp-alloc              = { version = "0.11.0", features = ["esp32c6"] }
+# No chip feature here: each app picks its chip (`esp32c6` by default) and forwards it.
+esp-hal                = { version = "~1.2.2", features = ["log-04", "unstable"] }
+esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "log-04"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["log-04"] }
+esp-println            = { version = "0.18.0", features = ["log-04"] }
+esp-hal-smartled       = { version = "0.18" }
+esp-alloc              = { version = "0.11.0" }
 embassy-executor       = { version = "0.10.0", features = ["log"] }
 embassy-time           = { version = "0.5.1", features = ["log"] }
 smart-leds             = "0.4"

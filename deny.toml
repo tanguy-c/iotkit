@@ -1,6 +1,6 @@
 # cargo-deny: licenses, advisories, sources. Checks the firmware workspace.
 [graph]
-targets = ["riscv32imac-unknown-none-elf", "x86_64-unknown-linux-gnu"]
+targets = ["riscv32imac-unknown-none-elf", "riscv32imc-unknown-none-elf", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 yanked = "deny"

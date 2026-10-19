@@ -4,13 +4,28 @@ A `no_std` firmware kit for the ESP32-C6 (esp-hal + Embassy): Wi-Fi setup, signe
 with automatic rollback, crash records and watchdogs, and Home Assistant over MQTT and Matter.
 A device's `main` describes its entities and hardware, and calls `iotkit_app::start` for the rest.
 
-Only the ESP32-C6 is supported for now (tested on an ESP32-C6-DevKitC-1 with 8 MB of flash).
+## Chips
+
+| Chip | Wi-Fi, MQTT, OTA, setup | Matter | Tested on hardware |
+| --- | --- | --- | --- |
+| ESP32-C6 | yes | Wi-Fi (`matter-wifi`), Thread (`apps/thread-light`) | yes (ESP32-C6-DevKitC-1, 8 MB) |
+| ESP32-C3 | yes | no: Matter needs about 24 KB more RAM than the C3 has | build only |
+| ESP32-C5 | yes | no: esp-hal 1.2 has no true RNG on the C5 yet | build only |
+| ESP32-S3 | yes | no: does not fit in internal RAM (PSRAM support later) | build only |
+| ESP32-H2 | no Wi-Fi | Thread (`apps/thread-light`) | build only |
+
+The ESP32-C6 is the reference: support for the other chips is added without changing it.
+`cargo iotkit ... --chip esp32c3` builds a firmware for another chip (`--flash-size 4mb` for
+4 MB boards); a generated project records its chip in `[package.metadata.iotkit]`.
 
 ## 1. Prerequisites
 
 ```bash
-rustup target add riscv32imac-unknown-none-elf
+rustup target add riscv32imac-unknown-none-elf riscv32imc-unknown-none-elf   # C6/C5/H2, C3
 cargo install espflash cargo-generate
+# ESP32-S3 only (Xtensa): Espressif's toolchain, then `. ~/export-esp.sh` in each shell.
+# Use 1.98.1.0: 1.99 fails to link esp-hal 1.2.2.
+cargo install espup && espup install --toolchain-version 1.98.1.0
 # The iotkit CLI (signed builds, flashing, OTA), from this checkout:
 cargo install --path xtask
 ```

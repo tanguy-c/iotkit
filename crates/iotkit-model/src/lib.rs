@@ -19,9 +19,15 @@
 
 #![no_std]
 
+/// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
+#[cfg(not(feature = "portable-atomic"))]
+pub(crate) use core::sync::atomic;
+#[cfg(feature = "portable-atomic")]
+pub(crate) use portable_atomic as atomic;
+
 mod entities;
 
-use core::sync::atomic::{AtomicU8, Ordering};
+use crate::atomic::{AtomicU8, Ordering};
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 pub use entities::{BinarySensor, Button, Light, LightState, Sensor, Switch};

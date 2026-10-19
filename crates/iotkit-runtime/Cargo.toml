@@ -6,7 +6,12 @@ rust-version.workspace = true
 version.workspace      = true
 license.workspace      = true
 
+[features]
+## Atomics for chips without compare-and-swap (ESP32-C3); turned on by the `esp32c3` feature.
+portable-atomic = ["dep:portable-atomic"]
+
 [dependencies]
+portable-atomic  = { version = "1.11", optional = true, default-features = false }  # esp-hal sets its single-core mode
 embassy-sync = "0.8"
 
 [dev-dependencies]

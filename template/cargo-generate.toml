@@ -6,8 +6,8 @@ ignore  = ["README.md", "check-sync.sh"]
 
 [placeholders.chip]
 type    = "string"
-prompt  = "Chip?"
-choices = ["esp32c6"]
+prompt  = "Chip? (only the ESP32-C6 is tested on hardware; Matter is C6-only)"
+choices = ["esp32c6", "esp32c3", "esp32c5", "esp32s3"]
 default = "esp32c6"
 
 [placeholders.iotkit_path]

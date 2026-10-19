@@ -1,11 +1,7 @@
 //! The MQTT client on the chip: connects, announces the entities to Home Assistant, publishes
 //! their states, applies commands, reconnects.
 
-use core::{
-    net::Ipv4Addr,
-    ops::Range,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::{net::Ipv4Addr, ops::Range};
 
 use embassy_futures::select::{Either4, select4};
 use embassy_net::{dns::DnsQueryType, tcp::TcpSocket};
@@ -18,6 +14,7 @@ use iotkit_net::{backoff::Backoff, esp::Net};
 
 use crate::{
     Broker,
+    atomic::{AtomicBool, Ordering},
     codec::{self, Packet, Will},
     ha,
 };

@@ -9,6 +9,9 @@ license.workspace      = true
 [features]
 ## ESP32-C6 Wi-Fi (`esp` module). Without a chip feature the protocol logic is host-testable.
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-radio/esp32c6", "iotkit-config/esp32c6"]
+esp32c3 = ["_esp", "esp-hal/esp32c3", "esp-radio/esp32c3", "iotkit-config/esp32c3"]
+esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-radio/esp32c5", "iotkit-config/esp32c5"]
+esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-radio/esp32s3", "iotkit-config/esp32s3"]
 ## For Matter (`iotkit-link-matter`): IPv6 link-local address, room for its sockets, and its own
 ## mDNS responder instead of ours (it also answers `<hostname>.local`).
 matter = ["embassy-net?/proto-ipv6"]

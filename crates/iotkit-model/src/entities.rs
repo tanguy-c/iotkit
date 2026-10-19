@@ -1,9 +1,8 @@
 //! The entity types.
 
-use core::{
-    cell::Cell,
-    sync::atomic::{AtomicU8, AtomicU32, Ordering},
-};
+use core::cell::Cell;
+
+use crate::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use embassy_sync::{
     blocking_mutex::{Mutex, raw::CriticalSectionRawMutex},

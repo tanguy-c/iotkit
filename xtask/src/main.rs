@@ -18,11 +18,41 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use iotkit_image::{Manifest, Version, app, hex_decode, hex_encode, sha256};
 
-/// Chip of every build for now; C3/S3/H2 come later.
-const CHIP: &str = "esp32c6";
-const TARGET: &str = "riscv32imac-unknown-none-elf";
-/// Flash size `partitions.csv` is laid out for.
-const FLASH_SIZE: &str = "8mb";
+/// The chips iotkit builds for: name (cargo feature and `espflash --chip`), target, image id.
+const CHIPS: &[Chip] = &[
+    Chip { name: "esp32c6", target: "riscv32imac-unknown-none-elf", id: app::ESP32C6 },
+    Chip { name: "esp32c3", target: "riscv32imc-unknown-none-elf", id: app::ESP32C3 },
+    Chip { name: "esp32c5", target: "riscv32imac-unknown-none-elf", id: app::ESP32C5 },
+    Chip { name: "esp32h2", target: "riscv32imac-unknown-none-elf", id: app::ESP32H2 },
+    Chip { name: "esp32s3", target: "xtensa-esp32s3-none-elf", id: app::ESP32S3 },
+];
+/// Chip and flash size when neither `--chip` nor `[package.metadata.iotkit]` says.
+const DEFAULT_CHIP: &str = "esp32c6";
+const DEFAULT_FLASH_SIZE: &str = "8mb";
+/// Toolchain for the Xtensa chips (`espup install`); `IOTKIT_ESP_TOOLCHAIN` overrides it.
+const ESP_TOOLCHAIN: &str = "esp";
+
+#[derive(Clone, Copy)]
+struct Chip {
+    name: &'static str,
+    target: &'static str,
+    id: u16,
+}
+
+impl Chip {
+    fn find(name: &str) -> Result<Self> {
+        let names: Vec<_> = CHIPS.iter().map(|c| c.name).collect();
+        CHIPS
+            .iter()
+            .copied()
+            .find(|c| c.name == name)
+            .with_context(|| format!("unknown chip {name} (one of {names:?})"))
+    }
+
+    fn xtensa(&self) -> bool {
+        self.target.starts_with("xtensa")
+    }
+}
 /// Key pair written by `keygen`, relative to the repository root.
 const DEFAULT_KEY: &str = "keys/ota";
 
@@ -89,6 +119,14 @@ struct App {
     /// Cargo features of the firmware, e.g. `matter-wifi`.
     #[arg(short = 'F', long)]
     features: Option<String>,
+    /// Chip, when not the app's default (`[package.metadata.iotkit] chip`, else esp32c6): builds
+    /// with `--no-default-features --features <chip>`.
+    #[arg(long)]
+    chip: Option<String>,
+    /// Flash size: `8mb` (`partitions.csv`) or `4mb` (`partitions-4mb.csv`). Default:
+    /// `[package.metadata.iotkit] flash-size`, else 8mb.
+    #[arg(long)]
+    flash_size: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -134,7 +172,7 @@ fn main() -> Result<()> {
             };
             verify(&manifest, &key)
         }
-        Cmd::Flash { app } => run(cargo().arg("run").args(Build::new(app)?.cargo_args())),
+        Cmd::Flash { app } => flash(&Build::new(app)?),
         Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, key }) => {
             let app = Build::new(app)?;
             if !no_build {
@@ -188,6 +226,12 @@ impl Metadata {
         self.0["packages"].as_array().context("cargo metadata: no packages")
     }
 
+    /// `[package.metadata.iotkit] <key>` of `package`.
+    fn iotkit(&self, package: &str, key: &str) -> Option<String> {
+        let found = self.packages().ok()?.iter().find(|p| p["name"] == package)?;
+        found["metadata"]["iotkit"][key].as_str().map(str::to_owned)
+    }
+
     fn target_dir(&self) -> PathBuf {
         self.0["target_directory"].as_str().map_or_else(|| PathBuf::from("target"), PathBuf::from)
     }
@@ -200,6 +244,10 @@ struct Build {
     features: Option<String>,
     version: String,
     target_dir: PathBuf,
+    chip: Chip,
+    /// Not the app's default chip: build with `--no-default-features`.
+    other_chip: bool,
+    flash_size: String,
 }
 
 impl Build {
@@ -207,13 +255,53 @@ impl Build {
         let meta = Metadata::read()?;
         let package = meta.package(app.package)?;
         let version = meta.version(&package)?;
-        Ok(Self { version, target_dir: meta.target_dir(), package, release: app.release, features: app.features })
+        let default_chip = meta.iotkit(&package, "chip").unwrap_or_else(|| DEFAULT_CHIP.to_owned());
+        let chip = Chip::find(app.chip.as_deref().unwrap_or(&default_chip))?;
+        let other_chip = chip.name != default_chip;
+        let features = match (other_chip, app.features) {
+            (false, features) => features,
+            (true, None) => Some(chip.name.to_owned()),
+            (true, Some(f)) => Some(format!("{},{f}", chip.name)),
+        };
+        let flash_size = app
+            .flash_size
+            .or_else(|| meta.iotkit(&package, "flash-size"))
+            .unwrap_or_else(|| DEFAULT_FLASH_SIZE.to_owned());
+        ensure!(matches!(flash_size.as_str(), "4mb" | "8mb"), "--flash-size: 4mb or 8mb");
+        Ok(Self {
+            version,
+            target_dir: meta.target_dir(),
+            package,
+            release: app.release,
+            features,
+            chip,
+            other_chip,
+            flash_size,
+        })
+    }
+
+    /// `cargo` for this chip: the Xtensa ones use Espressif's toolchain.
+    fn cargo(&self) -> Command {
+        if self.chip.xtensa() {
+            let toolchain = std::env::var("IOTKIT_ESP_TOOLCHAIN").unwrap_or_else(|_| ESP_TOOLCHAIN.to_owned());
+            let mut cmd = Command::new("rustup");
+            cmd.args(["run", &toolchain, "cargo"]);
+            cmd
+        } else {
+            cargo()
+        }
     }
 
     fn cargo_args(&self) -> Vec<&str> {
-        let mut args = vec!["-p", &self.package];
+        let mut args = vec!["-p", &self.package, "--target", self.chip.target];
+        if self.chip.xtensa() {
+            args.push("-Zbuild-std=core,alloc");
+        }
         if self.release {
             args.push("--release");
+        }
+        if self.other_chip {
+            args.push("--no-default-features");
         }
         if let Some(features) = &self.features {
             args.extend(["--features", features]);
@@ -223,8 +311,21 @@ impl Build {
 
     fn elf(&self) -> PathBuf {
         let profile = if self.release { "release" } else { "debug" };
-        self.target_dir.join(TARGET).join(profile).join(&self.package)
+        self.target_dir.join(self.chip.target).join(profile).join(&self.package)
     }
+
+    fn partition_table(&self) -> &'static str {
+        if self.flash_size == "4mb" { "partitions-4mb.csv" } else { "partitions.csv" }
+    }
+}
+
+/// Flashes over USB, then opens the serial monitor.
+fn flash(app: &Build) -> Result<()> {
+    run(app.cargo().arg("build").args(app.cargo_args()))?;
+    run(Command::new("espflash")
+        .args(["flash", "--monitor", "--chip", app.chip.name, "--flash-size", &app.flash_size])
+        .args(["--partition-table", app.partition_table(), "--erase-parts", "otadata"])
+        .arg(app.elf()))
 }
 
 fn keygen(out: &Path, force: bool) -> Result<()> {
@@ -261,14 +362,15 @@ fn build(app: &Build, min_version: &str, key: &Path) -> Result<()> {
     let min_version = Version::parse(min_version).map_err(|e| anyhow::anyhow!("--min-version: {e}"))?;
     ensure!(min_version <= version, "--min-version {min_version} is newer than the build ({version})");
 
-    run(cargo().arg("build").args(app.cargo_args()))?;
+    run(app.cargo().arg("build").args(app.cargo_args()))?;
 
     let dir = Path::new("dist").join(&app.package);
     fs::create_dir_all(&dir)?;
     let file = format!("{}-{version}.bin", app.package);
     let image = dir.join(&file);
     run(Command::new("espflash")
-        .args(["save-image", "--chip", CHIP, "--flash-size", FLASH_SIZE, "--partition-table", "partitions.csv"])
+        .args(["save-image", "--chip", app.chip.name, "--flash-size", &app.flash_size])
+        .args(["--partition-table", app.partition_table()])
         .arg(app.elf())
         .arg(&image))?;
 
@@ -283,7 +385,7 @@ fn build(app: &Build, min_version: &str, key: &Path) -> Result<()> {
         signature: [0; 64],
     };
     // The device checks the same: the app descriptor must name this package and version.
-    manifest.check_app(&data, app::ESP32C6).map_err(|e| anyhow::anyhow!("{}: {e}", image.display()))?;
+    manifest.check_app(&data, app.chip.id).map_err(|e| anyhow::anyhow!("{}: {e}", image.display()))?;
     manifest.sign(&secret).map_err(|e| anyhow::anyhow!("signing: {e}"))?;
 
     let mut buf = [0; 1024];

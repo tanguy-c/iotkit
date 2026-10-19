@@ -6,34 +6,37 @@
 #![no_main]
 
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Ticker};
-use esp_hal::{
-    Async,
-    clock::CpuClock,
-    rmt::Rmt,
-    time::Rate,
-    timer::timg::TimerGroup,
-    tsens::{self, TemperatureSensor},
-};
+use esp_hal::{Async, clock::CpuClock, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
+// The chip temperature sensor: on the ESP32-C6 only (the H2 has none).
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
 use iotkit_config::esp::SharedStore;
 use iotkit_link_matter::thread::Product;
-use iotkit_model::{Device, Entity, Light, LightState, Sensor};
+use iotkit_model::{Device, Entity, Light, LightState};
 use log::{error, info, warn};
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
 use static_cell::StaticCell;
+#[cfg(feature = "esp32c6")]
+use {
+    embassy_futures::select::{Either, select},
+    embassy_time::{Duration, Ticker},
+    esp_hal::tsens::{self, TemperatureSensor},
+    iotkit_model::Sensor,
+};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 static LED: Light = Light::new("led", "LED");
+#[cfg(feature = "esp32c6")]
 static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
     .unit("°C")
     .device_class("temperature")
     .measurement()
     .precision(1);
+#[cfg(feature = "esp32c6")]
 static ENTITIES: [&dyn Entity; 2] = [&LED, &TEMPERATURE];
+#[cfg(not(feature = "esp32c6"))]
+static ENTITIES: [&dyn Entity; 1] = [&LED];
 
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
@@ -65,8 +68,11 @@ async fn main(spawner: Spawner) -> ! {
     let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).unwrap().into_async();
     let led = Led::new(WS2812_TIMING, rmt.channel0, peripherals.GPIO8, Rate::from_mhz(80)).unwrap();
     spawner.spawn(led_task(led).unwrap());
-    let tsens = TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
-    spawner.spawn(temperature_task(tsens).unwrap());
+    #[cfg(feature = "esp32c6")]
+    {
+        let tsens = TemperatureSensor::new(peripherals.TSENS, tsens::Config::default()).unwrap();
+        spawner.spawn(temperature_task(tsens).unwrap());
+    }
 
     static NAME: StaticCell<heapless::String<16>> = StaticCell::new();
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or_default();
@@ -114,6 +120,7 @@ async fn led_task(mut led: Led) {
     }
 }
 
+#[cfg(feature = "esp32c6")]
 #[embassy_executor::task]
 async fn temperature_task(tsens: TemperatureSensor<'static>) {
     let mut ticker = Ticker::every(Duration::from_secs(30));

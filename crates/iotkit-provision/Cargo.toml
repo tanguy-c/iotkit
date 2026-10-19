@@ -9,6 +9,9 @@ license.workspace      = true
 [features]
 ## ESP32-C6 Bluetooth and serial front-ends (`esp` module).
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-radio/esp32c6", "esp-println/esp32c6", "iotkit-config/esp32c6", "iotkit-net/esp32c6", "iotkit-diag/esp32c6"]
+esp32c3 = ["_esp", "esp-hal/esp32c3", "esp-radio/esp32c3", "esp-println/esp32c3", "iotkit-config/esp32c3", "iotkit-net/esp32c3", "iotkit-diag/esp32c3"]
+esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-radio/esp32c5", "esp-println/esp32c5", "iotkit-config/esp32c5", "iotkit-net/esp32c5", "iotkit-diag/esp32c5"]
+esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-radio/esp32s3", "esp-println/esp32s3", "iotkit-config/esp32s3", "iotkit-net/esp32s3", "iotkit-diag/esp32s3"]
 _esp = ["dep:esp-hal", "dep:esp-radio", "dep:esp-println", "dep:trouble-host", "dep:bt-hci", "dep:embassy-executor", "dep:embassy-futures", "dep:embassy-sync", "dep:embassy-time", "dep:iotkit-config", "dep:iotkit-net", "dep:iotkit-diag", "dep:static_cell", "dep:embassy-net", "dep:embedded-io-async"]
 
 [dependencies]

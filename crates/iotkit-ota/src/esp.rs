@@ -1,10 +1,7 @@
 //! OTA on the chip: slots, download into flash, boot handling, confirmation, and a small HTTP
 //! endpoint (`cargo xtask ota push`).
 
-use core::{
-    fmt::{self, Write as _},
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::fmt::{self, Write as _};
 
 use embassy_futures::select::{Either, select};
 use embassy_net::tcp::TcpSocket;
@@ -27,7 +24,21 @@ use iotkit_net::{
     http,
 };
 
-use crate::{BootAction, LastUpdate, Outcome, Pending, on_boot};
+use crate::{
+    BootAction, LastUpdate, Outcome, Pending,
+    atomic::{AtomicBool, Ordering},
+    on_boot,
+};
+
+/// The chip this firmware runs on, as the image header names it.
+#[cfg(feature = "esp32c6")]
+const CHIP_ID: u16 = app::ESP32C6;
+#[cfg(feature = "esp32c3")]
+const CHIP_ID: u16 = app::ESP32C3;
+#[cfg(feature = "esp32c5")]
+const CHIP_ID: u16 = app::ESP32C5;
+#[cfg(feature = "esp32s3")]
+const CHIP_ID: u16 = app::ESP32S3;
 
 /// Raw subtype of `ota_0`; `ota_n` is this plus n.
 const OTA_SUBTYPE: u8 = 0x10;
@@ -228,7 +239,7 @@ pub fn early_guard() {
         let layout = Layout::read(flash)?;
         let mut ota = layout.ota(flash)?;
         let early: *mut [u32; 2] = &raw mut EARLY;
-        // SAFETY: single core, at boot, and nothing else touches it.
+        // SAFETY: core 0 only, at boot, and nothing else touches it.
         let early = unsafe { &mut *early };
         if !unconfirmed(&mut ota) {
             *early = [0; 2];
@@ -511,7 +522,7 @@ impl Sink for FlashSink<'_> {
             self.fill += n;
             bytes = &bytes[n..];
             if !self.header_checked && self.written == 0 && self.fill >= app::HEAD_LEN {
-                self.manifest.check_app(&self.sector[..self.fill], app::ESP32C6).map_err(OtaError::Image)?;
+                self.manifest.check_app(&self.sector[..self.fill], CHIP_ID).map_err(OtaError::Image)?;
                 self.header_checked = true;
             }
             if self.fill == SECTOR {

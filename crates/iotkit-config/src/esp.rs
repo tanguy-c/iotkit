@@ -5,11 +5,7 @@
 //! duration (a sector erase is about 50 ms). Interrupts stay on between sectors: esp-storage
 //! masks them only for each ROM call, as it must while the cache is off.
 
-use core::{
-    cell::UnsafeCell,
-    ops::Range,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::{cell::UnsafeCell, ops::Range};
 
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embedded_storage::nor_flash::{ErrorType, MultiwriteNorFlash, NorFlash, ReadNorFlash};
@@ -17,7 +13,10 @@ use esp_bootloader_esp_idf::partitions::{PARTITION_TABLE_MAX_LEN, read_partition
 use esp_hal::peripherals::FLASH;
 use esp_storage::{FlashStorage, FlashStorageError};
 
-use crate::{Error, Store};
+use crate::{
+    Error, Store,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// Label of the settings partition in `partitions.csv`.
 pub const CONFIG_LABEL: &str = "config";
@@ -30,7 +29,7 @@ struct Slot {
 }
 
 // SAFETY: `busy` gives one user at a time. The flash is only used from tasks (never from an
-// interrupt handler), on the single core.
+// interrupt handler), on core 0 only (iotkit never starts the ESP32-S3's second core).
 unsafe impl Sync for Slot {}
 
 static FLASH_STORAGE: Slot = Slot { storage: UnsafeCell::new(None), busy: AtomicBool::new(false) };

@@ -6,10 +6,15 @@ rust-version = "1.95"
 version      = "0.1.0"
 publish      = false
 
-[features]
-## Matter over Wi-Fi, next to MQTT (needs the 8 MB partition table).
-matter-wifi = ["iotkit-app/matter-wifi"]
+# Read by `cargo iotkit` (signed builds, flashing, OTA).
+[package.metadata.iotkit]
+chip       = "{{chip}}"
+flash-size = "{% if chip == "esp32c3" %}4mb{% else %}8mb{% endif %}"
 
+[features]
+{% if chip == "esp32c6" %}## Matter over Wi-Fi, next to MQTT (needs the 8 MB partition table).
+matter-wifi = ["iotkit-app/matter-wifi"]
+{% endif %}
 [dependencies]
 iotkit-app = { path = "{{iotkit_path}}/crates/iotkit-app", features = ["{{chip}}"] }
 

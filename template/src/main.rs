@@ -1,5 +1,5 @@
-//! {{project-name}}: the ESP32-C6-DevKitC-1's RGB LED as a light in Home Assistant (MQTT, and
-//! Matter with `--features matter-wifi`), toggled by a short press of BOOT.
+//! {{project-name}}: the {% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% else %}DevKit{% endif %}'s RGB LED as a light in Home Assistant (MQTT{% if chip == "esp32c6" %}, and
+//! Matter with `--features matter-wifi`{% endif %}), toggled by a short press of BOOT.
 //!
 //! `iotkit_app::start` brings the rest: Wi-Fi setup (access point, Improv), signed updates
 //! (`cargo iotkit ota push`), crash records, the watchdog, the USB console (`help`).
@@ -28,8 +28,8 @@ static ENTITIES: [&dyn Entity; 2] = [&LED, &UPTIME];
 static CONFIG: Config = Config {
     firmware: iotkit_app::firmware!(&OTA_KEY),
     manufacturer: "Me",
-    model: "ESP32-C6-DevKitC-1",
-    chip: "ESP32-C6",
+    model: "{% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% elsif chip == "esp32c3" %}ESP32-C3-DevKitM-1{% elsif chip == "esp32c5" %}ESP32-C5-DevKitC-1{% else %}ESP32-S3-DevKitC-1{% endif %}",
+    chip: "{% if chip == "esp32c6" %}ESP32-C6{% elsif chip == "esp32c3" %}ESP32-C3{% elsif chip == "esp32c5" %}ESP32-C5{% else %}ESP32-S3{% endif %}",
     product_name: "{{project-name}}",
     entities: &ENTITIES,
     watches: &[],
@@ -37,7 +37,7 @@ static CONFIG: Config = Config {
     console: None,
 };
 
-/// The DevKit's WS2812 LED on GPIO8, driven by an RMT channel.
+/// The DevKit's WS2812 LED on {% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}, driven by an RMT channel.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
 #[esp_rtos::main]
@@ -55,12 +55,12 @@ async fn main(spawner: Spawner) -> ! {
         bt: p.BT,
         timg1: p.TIMG1,
         usb: p.USB_DEVICE,
-        boot_button: Some(p.GPIO9.into()),
+        boot_button: Some(p.{% if chip == "esp32s3" %}GPIO0{% elsif chip == "esp32c5" %}GPIO28{% else %}GPIO9{% endif %}.into()),
     };
     iotkit_app::start(spawner, board, &CONFIG).await;
 
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
-    let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
+    let led = Led::new(WS2812_TIMING, rmt.channel0, p.{% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}, Rate::from_mhz(80)).unwrap();
     spawner.spawn(led_task(led).unwrap());
 
     let mut ticker = Ticker::every(Duration::from_secs(60));

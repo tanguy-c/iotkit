@@ -13,6 +13,10 @@ thread = ["_esp", "rs-matter-embassy/openthread", "rs-matter-embassy/mbedtls", "
 ## Matter over Wi-Fi, on `iotkit-net`'s network (commissioned on the network).
 wifi = ["_esp", "dep:iotkit-net", "iotkit-net/matter", "rs-matter-embassy/embassy-net", "rs-matter-embassy/rustcrypto", "rs-matter-embassy/trouble"]
 esp32c6 = ["esp-hal/esp32c6", "iotkit-net?/esp32c6", "iotkit-config/esp32c6", "iotkit-diag?/esp32c6"]
+esp32c3 = ["esp-hal/esp32c3", "iotkit-net?/esp32c3", "iotkit-config/esp32c3", "iotkit-diag?/esp32c3"]
+esp32c5 = ["esp-hal/esp32c5", "iotkit-net?/esp32c5", "iotkit-config/esp32c5", "iotkit-diag?/esp32c5"]
+esp32s3 = ["esp-hal/esp32s3", "iotkit-net?/esp32s3", "iotkit-config/esp32s3", "iotkit-diag?/esp32s3"]
+esp32h2 = ["esp-hal/esp32h2", "iotkit-config/esp32h2", "iotkit-diag?/esp32h2"]
 _esp = ["dep:rs-matter-embassy", "dep:esp-hal", "dep:embassy-executor", "dep:embassy-futures", "dep:embassy-sync", "dep:static_cell", "iotkit-config/_esp", "dep:embassy-embedded-hal", "dep:heapless", "dep:iotkit-diag", "dep:embassy-time"]
 
 [dependencies]

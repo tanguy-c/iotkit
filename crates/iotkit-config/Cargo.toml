@@ -7,12 +7,19 @@ version.workspace      = true
 license.workspace      = true
 
 [features]
+## Atomics for chips without compare-and-swap (ESP32-C3); turned on by the `esp32c3` feature.
+portable-atomic = ["dep:portable-atomic"]
 ## The ESP32-C6 flash and partition table (`esp` module). Without a chip feature the crate is
 ## host-testable over any async NOR flash.
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-storage/esp32c6", "esp-bootloader-esp-idf/esp32c6"]
+esp32c3 = ["portable-atomic", "_esp", "esp-hal/esp32c3", "esp-storage/esp32c3", "esp-bootloader-esp-idf/esp32c3"]
+esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-storage/esp32c5", "esp-bootloader-esp-idf/esp32c5"]
+esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-storage/esp32s3", "esp-bootloader-esp-idf/esp32s3"]
+esp32h2 = ["_esp", "esp-hal/esp32h2", "esp-storage/esp32h2", "esp-bootloader-esp-idf/esp32h2"]
 _esp = ["dep:esp-hal", "dep:esp-storage", "dep:esp-bootloader-esp-idf", "dep:embassy-embedded-hal", "dep:embedded-storage", "dep:embassy-sync"]
 
 [dependencies]
+portable-atomic  = { version = "1.11", optional = true, default-features = false }  # esp-hal sets its single-core mode
 embedded-storage-async = "0.4"
 log                    = "0.4.27"
 postcard               = { version = "1.1", default-features = false }

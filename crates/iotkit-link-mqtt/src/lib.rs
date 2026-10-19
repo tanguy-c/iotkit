@@ -5,6 +5,12 @@
 
 #![no_std]
 
+/// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
+#[cfg(all(feature = "_esp", not(feature = "portable-atomic")))]
+pub(crate) use core::sync::atomic;
+#[cfg(all(feature = "_esp", feature = "portable-atomic"))]
+pub(crate) use portable_atomic as atomic;
+
 pub mod codec;
 #[cfg(feature = "_esp")]
 pub mod esp;

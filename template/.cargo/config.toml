@@ -3,13 +3,18 @@ include = [{ path = "secrets.toml", optional = true }]
 
 # Run cargo from the project root: the runner's partition table path is relative to it.
 # `--erase-parts otadata` makes every USB flash boot `ota_0`, even after an OTA switched slots.
-[target.riscv32imac-unknown-none-elf]
-runner    = "espflash flash --monitor --chip {{chip}} --flash-size 8mb --partition-table partitions.csv --erase-parts otadata"
-# Backtraces (esp-backtrace) need frame pointers.
-rustflags = ["-C", "force-frame-pointers"]
+[target.{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp32c3" %}riscv32imc-unknown-none-elf{% else %}riscv32imac-unknown-none-elf{% endif %}]
+runner    = "espflash flash --monitor --chip {{chip}} --flash-size {% if chip == "esp32c3" %}4mb{% else %}8mb{% endif %} --partition-table {% if chip == "esp32c3" %}partitions-4mb.csv{% else %}partitions.csv{% endif %} --erase-parts otadata"
+{% if chip == "esp32s3" %}rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Wl,--no-warn-rwx-segments"]
 
+# The Xtensa chips build `core` and `alloc` themselves (the `esp` toolchain, `espup install`).
+[unstable]
+build-std = ["core", "alloc"]
+{% else %}# Backtraces (esp-backtrace) need frame pointers.
+rustflags = ["-C", "force-frame-pointers"]
+{% endif %}
 [build]
-target = "riscv32imac-unknown-none-elf"
+target = "{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp32c3" %}riscv32imc-unknown-none-elf{% else %}riscv32imac-unknown-none-elf{% endif %}"
 
 [env]
 # Log level, read at build time by esp-println.

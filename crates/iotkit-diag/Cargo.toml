@@ -7,14 +7,21 @@ version.workspace      = true
 license.workspace      = true
 
 [features]
+## Atomics for chips without compare-and-swap (ESP32-C3); turned on by the `esp32c3` feature.
+portable-atomic = ["dep:portable-atomic", "iotkit-runtime/portable-atomic"]
 ## The ESP32-C6 side (`esp` module): reset reason, RTC crash record, hardware watchdog.
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-backtrace/esp32c6", "esp-println/esp32c6"]
+esp32c3 = ["portable-atomic", "_esp", "esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-println/esp32c3"]
+esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-backtrace/esp32c5", "esp-println/esp32c5"]
+esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3"]
+esp32h2 = ["_esp", "esp-hal/esp32h2", "esp-backtrace/esp32h2", "esp-println/esp32h2"]
 ## Installs iotkit's `#[panic_handler]`: records the panic, prints it with a backtrace, restarts.
 ## Use instead of esp-backtrace's `panic-handler` feature.
 panic-handler = []
 _esp = ["dep:esp-hal", "dep:esp-backtrace", "dep:esp-println", "dep:embassy-executor", "dep:embassy-time"]
 
 [dependencies]
+portable-atomic  = { version = "1.11", optional = true, default-features = false }  # esp-hal sets its single-core mode
 iotkit-config    = { workspace = true }
 iotkit-runtime   = { workspace = true }
 heapless         = { version = "0.9", features = ["serde"] }

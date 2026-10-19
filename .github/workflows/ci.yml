@@ -52,6 +52,48 @@ jobs:
           name: devkit
           path: dist/
 
+  # The other chips: build-tested only (the C6 job above is the one tested on hardware).
+  chips-riscv:
+    name: Firmware (${{ matrix.chip }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { chip: esp32c3, app: devkit, target: riscv32imc-unknown-none-elf }
+          - { chip: esp32c5, app: devkit, target: riscv32imac-unknown-none-elf }
+          - { chip: esp32h2, app: thread-light, target: riscv32imac-unknown-none-elf }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.chip }}
+      - run: cargo xtask keygen
+      - if: matrix.app == 'thread-light'
+        run: sudo apt-get update && sudo apt-get install -y clang cmake
+      - run: cargo clippy -p ${{ matrix.app }} --no-default-features --features ${{ matrix.chip }} --target ${{ matrix.target }} -- -D warnings
+      - if: matrix.app == 'devkit'
+        run: cargo xtask build --release --chip ${{ matrix.chip }} && cargo xtask verify
+
+  chip-s3:
+    name: Firmware (esp32s3, Xtensa)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 1.98.1.0: 1.99 fails to link esp-hal 1.2.2 ("dangerous relocation: l32r").
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+          version: "1.98.1.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: esp32s3
+      - run: cargo xtask keygen
+      - run: cargo +esp clippy -p devkit --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
+      - run: cargo xtask build --release --chip esp32s3 && cargo xtask verify
+
   template:
     name: Template
     runs-on: ubuntu-latest
@@ -69,6 +111,12 @@ jobs:
       - run: cargo generate --path template --name ci-device --destination "$RUNNER_TEMP" --silent --define chip=esp32c6 --define "iotkit_path=$GITHUB_WORKSPACE"
       - run: cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify
         working-directory: ${{ runner.temp }}/ci-device
+      # The RISC-V chips too (the S3 template needs the esp toolchain: see the chip-s3 job).
+      - run: |
+          for chip in esp32c3 esp32c5; do
+            cargo generate --path template --name "ci-$chip" --destination "$RUNNER_TEMP" --silent --define chip=$chip --define "iotkit_path=$GITHUB_WORKSPACE"
+            (cd "$RUNNER_TEMP/ci-$chip" && cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify)
+          done
 
   deny:
     name: cargo-deny

@@ -21,6 +21,10 @@
 // The Thread stack's nested futures go deeper than the default limit.
 #![recursion_limit = "256"]
 
+// esp-hal 1.2 has no true random number generator on the ESP32-C5, and Matter needs one.
+#[cfg(feature = "esp32c5")]
+compile_error!("iotkit-link-matter: Matter is not supported on the ESP32-C5 yet (no TRNG in esp-hal 1.2)");
+
 #[cfg(feature = "_esp")]
 extern crate alloc;
 

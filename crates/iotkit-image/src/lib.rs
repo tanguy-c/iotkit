@@ -279,8 +279,12 @@ pub mod app {
     const IMAGE_MAGIC: u8 = 0xe9;
     /// `ESP_APP_DESC_MAGIC_WORD`, first in the first segment (`esp_app_desc!`).
     const DESC_MAGIC: u32 = 0xabcd_5432;
-    /// Chip ids in the image header.
+    /// Chip ids in the image header (espflash's `Chip::id`).
+    pub const ESP32C3: u16 = 5;
+    pub const ESP32S3: u16 = 9;
     pub const ESP32C6: u16 = 13;
+    pub const ESP32H2: u16 = 16;
+    pub const ESP32C5: u16 = 23;
 
     /// What an app image says about itself.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

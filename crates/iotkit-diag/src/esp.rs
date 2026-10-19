@@ -32,11 +32,14 @@ fn uptime_s() -> u32 {
 /// Why the chip restarted, and the crash recorded before, if any (taken: the next boot will not
 /// see it again). Call once at boot.
 pub fn boot() -> Boot {
-    // SAFETY: single core, and nothing else touches the record outside a crash.
+    // SAFETY: only core 0 runs (iotkit never starts a second core), and nothing else touches
+    // the record outside a crash.
     let crash = unsafe { rtc::take(&mut *record()) };
     Boot { cause: reset_reason().map_or(ResetCause::Other(0), cause), crash }
 }
 
+// The reset reasons differ by chip: one mapping per family.
+#[cfg(any(feature = "esp32c6", feature = "esp32c5"))]
 fn cause(reason: SocResetReason) -> ResetCause {
     use SocResetReason as R;
     match reason {
@@ -53,6 +56,50 @@ fn cause(reason: SocResetReason) -> ResetCause {
         R::SysBrownOut => ResetCause::BrownOut,
         R::CoreDeepSleep => ResetCause::DeepSleep,
         R::CoreUsbUart | R::CoreUsbJtag | R::Cpu0JtagCpu => ResetCause::Debugger,
+        other => ResetCause::Other(other as u8),
+    }
+}
+
+/// No `Cpu0JtagCpu` on the ESP32-C3 and H2.
+#[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
+fn cause(reason: SocResetReason) -> ResetCause {
+    use SocResetReason as R;
+    match reason {
+        R::ChipPowerOn => ResetCause::PowerOn,
+        R::CoreSw | R::Cpu0Sw => ResetCause::Software,
+        R::CoreMwdt0
+        | R::CoreMwdt1
+        | R::CoreRtcWdt
+        | R::Cpu0Mwdt0
+        | R::Cpu0Mwdt1
+        | R::Cpu0RtcWdt
+        | R::SysRtcWdt
+        | R::SysSuperWdt => ResetCause::Watchdog,
+        R::SysBrownOut => ResetCause::BrownOut,
+        R::CoreDeepSleep => ResetCause::DeepSleep,
+        R::CoreUsbUart | R::CoreUsbJtag => ResetCause::Debugger,
+        other => ResetCause::Other(other as u8),
+    }
+}
+
+/// The ESP32-S3 names its CPU resets `Cpu*` (two cores), and has no `Cpu0JtagCpu`.
+#[cfg(feature = "esp32s3")]
+fn cause(reason: SocResetReason) -> ResetCause {
+    use SocResetReason as R;
+    match reason {
+        R::ChipPowerOn => ResetCause::PowerOn,
+        R::CoreSw | R::CpuSw => ResetCause::Software,
+        R::CoreMwdt0
+        | R::CoreMwdt1
+        | R::CoreRtcWdt
+        | R::CpuMwdt0
+        | R::CpuMwdt1
+        | R::CpuRtcWdt
+        | R::SysRtcWdt
+        | R::SysSuperWdt => ResetCause::Watchdog,
+        R::SysBrownOut => ResetCause::BrownOut,
+        R::CoreDeepSleep => ResetCause::DeepSleep,
+        R::CoreUsbUart | R::CoreUsbJtag => ResetCause::Debugger,
         other => ResetCause::Other(other as u8),
     }
 }
@@ -94,7 +141,7 @@ pub async fn watchdog_task(mut wdt: Wdt<TIMG1<'static>>, watches: &'static [&'st
 #[cfg(feature = "panic-handler")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    use core::sync::atomic::{AtomicBool, Ordering};
+    use crate::atomic::{AtomicBool, Ordering};
     use esp_println::println;
 
     static PANICKING: AtomicBool = AtomicBool::new(false);

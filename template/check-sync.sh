@@ -7,7 +7,6 @@ for pair in \
     .cargo/secrets.toml.example:template/.cargo/secrets.toml.example \
     partitions.csv:template/partitions.csv \
     partitions-4mb.csv:template/partitions-4mb.csv \
-    rust-toolchain.toml:template/rust-toolchain.toml \
     rustfmt.toml:template/rustfmt.toml \
     .clippy.toml:template/.clippy.toml \
     .vscode/extensions.json:template/.vscode/extensions.json; do
