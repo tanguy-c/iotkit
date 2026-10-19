@@ -26,7 +26,7 @@ pub type Topic = String<128>;
 fn component(kind: Kind) -> &'static str {
     // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM. In
     // the order of `Kind`.
-    static COMPONENTS: [&str; 14] = [
+    static COMPONENTS: [&str; 15] = [
         "sensor",
         "binary_sensor",
         "switch",
@@ -41,6 +41,7 @@ fn component(kind: Kind) -> &'static str {
         "lock",
         "fan",
         "climate",
+        "update",
     ];
     COMPONENTS[kind as usize]
 }
@@ -151,6 +152,7 @@ pub fn discovery_payload<const N: usize>(device: &Device, node: &str, entity: &d
                 | Kind::Valve
                 | Kind::Lock
                 | Kind::Fan
+                | Kind::Update
         ) {
             write!(s, ",\"command_topic\":\"{}\"", command_topic(node, m.id))?;
         }
@@ -208,6 +210,12 @@ fn spec_fields(s: &mut impl Write, node: &str, entity: &dyn Entity) -> core::fmt
         t
     };
     let spec = entity.spec();
+    if m.kind == Kind::Update {
+        s.write_str(",\"pl_inst\":\"install\"")?;
+        if m.device_class.is_none() {
+            s.write_str(",\"dev_cla\":\"firmware\"")?;
+        }
+    }
     if matches!(spec, Spec::Cover { position: true } if m.kind == Kind::Cover)
         || matches!(spec, Spec::Fan { .. } | Spec::Climate { .. })
     {
@@ -282,6 +290,27 @@ fn spec_fields(s: &mut impl Write, node: &str, entity: &dyn Entity) -> core::fmt
     Ok(())
 }
 
+/// The JSON state of an update entity (up to about 330 bytes: written straight into the packet).
+pub fn update_payload(entity: &dyn Entity, out: &mut impl Write) -> core::fmt::Result {
+    let Some(u) = entity.update() else { return Err(core::fmt::Error) };
+    out.write_str("{\"installed_version\":")?;
+    json_str(out, &u.installed)?;
+    out.write_str(",\"latest_version\":")?;
+    // Unknown until checked: the installed one, so Home Assistant shows no update.
+    json_str(out, if u.latest.is_empty() { &u.installed } else { &u.latest })?;
+    if !u.summary.is_empty() {
+        out.write_str(",\"release_summary\":")?;
+        json_str(out, &u.summary)?;
+    }
+    if !u.release_url.is_empty() {
+        out.write_str(",\"release_url\":")?;
+        json_str(out, &u.release_url)?;
+    }
+    write!(out, ",\"in_progress\":{},\"update_percentage\":", u.in_progress)?;
+    json_opt(out, u.percentage)?;
+    out.write_char('}')
+}
+
 /// Whether the state is published retained: events are not states.
 pub fn retained(entity: &dyn Entity) -> bool {
     entity.meta().kind != Kind::Event
@@ -302,7 +331,11 @@ pub fn state_payload(entity: &dyn Entity) -> Option<String<128>> {
     match entity.state() {
         State::None => return None,
         // The JSON light schema takes no bare `None`: an unknown light publishes nothing.
-        State::Unknown if matches!(entity.meta().kind, Kind::Light | Kind::Fan | Kind::Climate | Kind::Event) => {
+        // An update's state does not fit here: see [`update_payload`].
+        State::Update => return None,
+        State::Unknown
+            if matches!(entity.meta().kind, Kind::Light | Kind::Fan | Kind::Climate | Kind::Event | Kind::Update) =>
+        {
             return None;
         }
         State::Unknown => s.push_str("None").ok()?,
@@ -460,6 +493,7 @@ pub fn parse_command(entity: &dyn Entity, feature: &str, payload: &[u8]) -> Opti
             _ => None,
         },
         Kind::Fan => on_off(payload).map(|on| Command::Fan(FanCommand::On(on))),
+        Kind::Update => (payload == b"install").then_some(Command::Install),
         Kind::Light => {
             let (j, _) = serde_json_core::from_slice::<LightJson>(payload).ok()?;
             let on = match j.state {
@@ -661,6 +695,37 @@ mod tests {
                 state_payload(&CLIMATE).unwrap(),
                 "{\"mode\":\"heat\",\"target\":21.5,\"current\":null,\"action\":\"heating\"}"
             );
+        }
+
+        #[test]
+        fn updates() {
+            use iotkit_model::Update;
+            static U: Update = Update::new("firmware", "Firmware").config();
+            static ONE: [&dyn Entity; 1] = [&U];
+            static D: Device =
+                Device { name: "D", manufacturer: "iotkit", model: "devkit", sw_version: "1.2.0", entities: &ONE };
+            let p: String<1024> = discovery_payload(&D, "n", &U).unwrap();
+            json(&p);
+            assert!(p.contains("\"pl_inst\":\"install\"") && p.contains("\"dev_cla\":\"firmware\""));
+            assert_eq!(discovery_topic("n", &U), "homeassistant/update/n/firmware/config");
+            assert_eq!(state_payload(&U), None);
+            U.set_installed("1.2.0");
+            let mut out: String<512> = String::new();
+            update_payload(&U, &mut out).unwrap();
+            json(&out);
+            assert_eq!(
+                out,
+                "{\"installed_version\":\"1.2.0\",\"latest_version\":\"1.2.0\",\"in_progress\":false,\"update_percentage\":null}"
+            );
+            U.set_latest("1.3.0", &"é".repeat(40), &"u".repeat(96));
+            U.set_progress(true, Some(35));
+            out.clear();
+            update_payload(&U, &mut out).unwrap();
+            json(&out);
+            assert!(out.contains("\"latest_version\":\"1.3.0\"") && out.contains("\"update_percentage\":35"));
+            assert!(out.len() < 400, "{}", out.len());
+            assert_eq!(parse_command(&U, "", b"install"), Some(Command::Install));
+            assert_eq!(parse_command(&U, "", b"INSTALL"), None);
         }
 
         #[test]

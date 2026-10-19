@@ -28,6 +28,7 @@ pub(crate) use portable_atomic as atomic;
 mod appliances;
 mod entities;
 mod inputs;
+mod update;
 
 use crate::atomic::{AtomicU8, Ordering};
 
@@ -38,6 +39,7 @@ pub use appliances::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 pub use entities::{BinarySensor, Button, Light, LightState, Sensor, Switch};
 pub use inputs::{Event, Number, Select, TEXT_LEN, TextSensor};
+pub use update::{Update, UpdateState};
 
 /// What kind of entity: decides the state, the commands, and how a binding shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +63,8 @@ pub enum Kind {
     Fan,
     /// A thermostat.
     Climate,
+    /// The firmware: installed and latest version, install from the controller.
+    Update,
 }
 
 /// Where Home Assistant files an entity.
@@ -144,6 +148,8 @@ pub enum State {
     Lock(LockState),
     Fan(FanState),
     Climate(ClimateState),
+    /// Update: read it with [`Entity::update`].
+    Update,
 }
 
 /// A command from a controller.
@@ -167,6 +173,8 @@ pub enum Command {
     Lock(LockCommand),
     Fan(FanCommand),
     Climate(ClimateCommand),
+    /// Update: install the latest version.
+    Install,
 }
 
 /// What an entity kind can do beyond its [`Meta`], for the bindings.
@@ -224,6 +232,10 @@ pub trait Entity: Sync {
     }
     /// The text of a text sensor; `None` for the other kinds, or before the first `set`.
     fn text(&self) -> Option<heapless::String<TEXT_LEN>> {
+        None
+    }
+    /// The state of an update entity; `None` for the other kinds.
+    fn update(&self) -> Option<UpdateState> {
         None
     }
     /// Hands a command to the app. `false` if the entity takes no such command.

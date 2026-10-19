@@ -41,6 +41,12 @@ const MATTER_HELP: &str = "
 #[cfg(not(feature = "matter-wifi"))]
 const MATTER_HELP: &str = "";
 
+#[cfg(feature = "ha-update")]
+const UPDATE_HELP: &str = "
+  update-url [URL]  the manifest Home Assistant's updates come from (set: checks it now)";
+#[cfg(not(feature = "ha-update"))]
+const UPDATE_HELP: &str = "";
+
 const TEST_HELP: &str = "
   panic          panic (recorded, then restart)
   hang           block the executor (hardware watchdog reset after 5 s)
@@ -90,7 +96,7 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
     match cmd {
         "" => {}
         "help" => {
-            println!("{HELP}{MATTER_HELP}{TEST_HELP}");
+            println!("{HELP}{UPDATE_HELP}{MATTER_HELP}{TEST_HELP}");
             if let Some(ext) = config.console {
                 println!("{}", ext.help);
             }
@@ -160,6 +166,29 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
                     Err(e) => println!("could not save: {e}"),
                 },
                 None => println!("usage: mqtt HOST[:PORT] [USER PASSWORD]"),
+            }
+        }
+        #[cfg(feature = "ha-update")]
+        "update-url" => match crate::update::source(store).await {
+            Some(url) => println!("updates from {url}"),
+            None => println!("no manifest URL: `update-url http://server/<package>/manifest.json`"),
+        },
+        #[cfg(feature = "ha-update")]
+        _ if cmd.starts_with("update-url ") => {
+            let url = cmd["update-url ".len()..].trim();
+            let valid = iotkit_net::http::Url::parse(url).is_ok();
+            match heapless::String::try_from(url) {
+                Ok(manifest_url) if valid => {
+                    let source = iotkit_ota::UpdateSource { manifest_url };
+                    match store.lock().await.save(&source).await {
+                        Ok(()) => {
+                            println!("updates from {url}, checking");
+                            crate::update::SOURCE_CHANGED.signal(());
+                        }
+                        Err(e) => println!("could not save: {e}"),
+                    }
+                }
+                _ => println!("usage: update-url http://server/<package>/manifest.json (200 bytes at most)"),
             }
         }
         _ if cmd.starts_with("ota ") => {

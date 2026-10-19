@@ -9,7 +9,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal}
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::Write;
 use iotkit_config::esp::SharedStore;
-use iotkit_model::{Binding, Device};
+use iotkit_model::{Binding, Device, Kind};
 use iotkit_net::{backoff::Backoff, esp::Net};
 
 use crate::{
@@ -156,6 +156,16 @@ async fn session(
     loop {
         // States first: the changes that came while the last packet was handled.
         for entity in device.entities {
+            // An update's state is longer than the others: formatted straight into the packet.
+            if entity.meta().kind == Kind::Update {
+                if entity.take_dirty(Binding::MQTT) {
+                    let topic = ha::state_topic(node, entity.meta().id);
+                    let n = codec::publish_with(&mut out, &topic, true, |mut w| ha::update_payload(*entity, &mut w))
+                        .map_err(|_| Error::Protocol)?;
+                    socket.write_all(&out[..n]).await.map_err(|_| Error::Io)?;
+                }
+                continue;
+            }
             if entity.take_dirty(Binding::MQTT)
                 && let Some(state) = ha::state_payload(*entity)
             {

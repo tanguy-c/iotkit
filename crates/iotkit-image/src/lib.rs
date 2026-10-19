@@ -9,6 +9,9 @@
 //!
 //! The Ed25519 signature covers everything except `url` (see [`Manifest::signed_message`]), so a
 //! device checks the manifest before downloading, then the image's size and SHA-256 after.
+//!
+//! Optional `summary` and `release_url` (shown by Home Assistant's update entity) are signed too.
+//! A manifest without them is signed exactly as before they existed.
 
 #![no_std]
 
@@ -19,12 +22,20 @@ pub use sha2::{Digest, Sha256};
 
 /// Prefix of every signed message, so a key is never tricked into signing something else.
 const DOMAIN: &[u8; 16] = b"iotkit-image-v1\0";
+/// The same, for a manifest with a summary or a release URL.
+const DOMAIN_V2: &[u8; 16] = b"iotkit-image-v2\0";
 
 /// Longest product name.
 pub const MAX_PRODUCT_LEN: usize = 32;
+/// Longest release summary.
+pub const MAX_SUMMARY_LEN: usize = 64;
+/// Longest release notes URL.
+pub const MAX_RELEASE_URL_LEN: usize = 96;
 
-/// Largest signed message: domain, product length and name, two versions, size, SHA-256.
-const MAX_MESSAGE_LEN: usize = DOMAIN.len() + 1 + MAX_PRODUCT_LEN + 6 + 6 + 4 + 32;
+/// Largest signed message: domain, product length and name, two versions, size, SHA-256, then
+/// the summary and the release URL with their lengths.
+const MAX_MESSAGE_LEN: usize =
+    DOMAIN.len() + 1 + MAX_PRODUCT_LEN + 6 + 6 + 4 + 32 + 1 + MAX_SUMMARY_LEN + 1 + MAX_RELEASE_URL_LEN;
 
 /// Ed25519 public key that verifies manifests (32 bytes).
 pub type PublicKey = [u8; 32];
@@ -40,6 +51,8 @@ pub enum Error {
     Version,
     /// The product name is empty or longer than [`MAX_PRODUCT_LEN`].
     Product,
+    /// The summary or the release URL is too long.
+    Release,
     /// The signature does not match the public key.
     Signature,
     /// The manifest is for another product.
@@ -67,6 +80,7 @@ impl fmt::Display for Error {
             Error::Hex => "invalid hex field",
             Error::Version => "version is not major.minor.patch",
             Error::Product => "product name empty or too long",
+            Error::Release => "release summary or URL too long",
             Error::Signature => "bad signature",
             Error::WrongProduct => "manifest is for another product",
             Error::NotNewer => "update is not newer than the running firmware",
@@ -138,6 +152,10 @@ pub struct Manifest<'a> {
     pub sha256: [u8; 32],
     /// Where to download the image, relative to the manifest or absolute.
     pub url: &'a str,
+    /// What the release changes (empty: none).
+    pub summary: &'a str,
+    /// Where the release notes are (empty: none).
+    pub release_url: &'a str,
     pub signature: [u8; 64],
 }
 
@@ -150,6 +168,10 @@ struct Json<'a> {
     size: u32,
     sha256: &'a str,
     url: &'a str,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    summary: &'a str,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    release_url: &'a str,
     signature: &'a str,
 }
 
@@ -160,6 +182,9 @@ impl<'a> Manifest<'a> {
         if j.product.is_empty() || j.product.len() > MAX_PRODUCT_LEN {
             return Err(Error::Product);
         }
+        if j.summary.len() > MAX_SUMMARY_LEN || j.release_url.len() > MAX_RELEASE_URL_LEN {
+            return Err(Error::Release);
+        }
         Ok(Self {
             product: j.product,
             version: Version::parse(j.version)?,
@@ -167,6 +192,8 @@ impl<'a> Manifest<'a> {
             size: j.size,
             sha256: hex_decode(j.sha256)?,
             url: j.url,
+            summary: j.summary,
+            release_url: j.release_url,
             signature: hex_decode(j.signature)?,
         })
     }
@@ -182,29 +209,43 @@ impl<'a> Manifest<'a> {
             size: self.size,
             sha256: hex_encode(&self.sha256, &mut sha256),
             url: self.url,
+            summary: self.summary,
+            release_url: self.release_url,
             signature: hex_encode(&self.signature, &mut signature),
         };
         serde_json_core::to_slice(&j, buf).map_err(|_| Error::Json)
     }
 
-    /// The bytes the signature covers: every field but `url` and `signature`.
+    /// The bytes the signature covers: every field but `url` and `signature`. Without a summary
+    /// and a release URL, the message of the first manifest format.
     pub fn signed_message(&self, buf: &mut [u8; MAX_MESSAGE_LEN]) -> Result<usize, Error> {
         let product = self.product.as_bytes();
         if product.is_empty() || product.len() > MAX_PRODUCT_LEN {
             return Err(Error::Product);
         }
+        let (summary, release_url) = (self.summary.as_bytes(), self.release_url.as_bytes());
+        if summary.len() > MAX_SUMMARY_LEN || release_url.len() > MAX_RELEASE_URL_LEN {
+            return Err(Error::Release);
+        }
+        let extended = !summary.is_empty() || !release_url.is_empty();
         let mut n = 0;
         let mut put = |bytes: &[u8]| {
             buf[n..n + bytes.len()].copy_from_slice(bytes);
             n += bytes.len();
         };
-        put(DOMAIN);
+        put(if extended { DOMAIN_V2 } else { DOMAIN });
         put(&[product.len() as u8]);
         put(product);
         put(&self.version.to_le_bytes());
         put(&self.min_version.to_le_bytes());
         put(&self.size.to_le_bytes());
         put(&self.sha256);
+        if extended {
+            put(&[summary.len() as u8]);
+            put(summary);
+            put(&[release_url.len() as u8]);
+            put(release_url);
+        }
         Ok(n)
     }
 
@@ -407,6 +448,8 @@ mod tests {
             size: 4,
             sha256: sha256(b"fw!!"),
             url: "devkit-1.2.0.bin",
+            summary: "",
+            release_url: "",
             signature: [0; 64],
         };
         let n = {
@@ -484,6 +527,31 @@ mod tests {
         assert_eq!(Manifest { url: "https://mirror/x.bin", ..m }.verify(&key), Ok(()));
         let other = KeyPair::from_seed(Seed::new([8; 32])).pk;
         assert_eq!(m.verify(&other), Err(Error::Signature));
+    }
+
+    #[test]
+    fn release_notes_are_signed() {
+        let key = keys();
+        let plain = signed();
+        // No summary: the first format's message, byte for byte.
+        let mut buf = [0; MAX_MESSAGE_LEN];
+        let n = plain.signed_message(&mut buf).unwrap();
+        assert_eq!(&buf[..16], DOMAIN);
+        assert_eq!(n, DOMAIN.len() + 1 + 6 + 6 + 6 + 4 + 32);
+        let mut m = Manifest { summary: "Faster Wi-Fi", release_url: "https://example.com/1.2.0", ..plain };
+        let n = m.signed_message(&mut buf).unwrap();
+        m.signature = *key.sk.sign(&buf[..n], None);
+        assert_eq!(&buf[..16], DOMAIN_V2);
+        assert_eq!(m.verify(&key.pk), Ok(()));
+        assert_eq!(Manifest { summary: "Slower Wi-Fi", ..m }.verify(&key.pk), Err(Error::Signature));
+        assert_eq!(Manifest { release_url: "", ..m }.verify(&key.pk), Err(Error::Signature));
+        let mut json = [0; 640];
+        let len = m.to_json(&mut json).unwrap();
+        assert_eq!(Manifest::parse(&json[..len]), Ok(m));
+        let len = plain.to_json(&mut json).unwrap();
+        assert!(!core::str::from_utf8(&json[..len]).unwrap().contains("summary"), "omitted when empty");
+        let long = "x".repeat(MAX_SUMMARY_LEN + 1);
+        assert_eq!(Manifest { summary: &long, ..plain }.signed_message(&mut buf), Err(Error::Release));
     }
 
     #[test]

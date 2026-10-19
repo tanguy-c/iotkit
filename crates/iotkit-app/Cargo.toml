@@ -33,6 +33,9 @@ esp32s3 = [
     "iotkit-provision/esp32s3", "iotkit-link-mqtt/esp32s3",
     "iotkit-link-matter?/esp32s3",
 ]
+## Updates from Home Assistant: a `firmware` update entity; the device checks the manifest URL
+## set with `update-url` (or `OTA_MANIFEST_URL` at build time) and installs on request.
+ha-update = ["iotkit-ota/check", "dep:embassy-futures"]
 ## Matter over Wi-Fi, next to MQTT (8 MB flash: about 2.1 MB of firmware).
 matter-wifi = ["dep:iotkit-link-matter", "iotkit-link-matter/wifi", "iotkit-net/matter"]
 
@@ -49,6 +52,7 @@ iotkit-provision   = { workspace = true }
 iotkit-runtime     = { workspace = true }
 
 embassy-executor  = { workspace = true }
+embassy-futures   = { version = "0.1", optional = true }
 embassy-sync      = { workspace = true }
 embassy-time      = { workspace = true }
 embedded-io-async = { workspace = true }

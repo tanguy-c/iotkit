@@ -48,6 +48,8 @@ pub mod keys {
     pub const OTA_PENDING: u16 = 0x0030;
     /// `iotkit-ota`: what the last update did.
     pub const OTA_LAST: u16 = 0x0031;
+    /// `iotkit-ota`: the manifest URL to check for updates.
+    pub const UPDATE_SOURCE: u16 = 0x0032;
     /// `iotkit-link-mqtt`: the broker.
     pub const MQTT_BROKER: u16 = 0x0040;
     /// `iotkit-link-matter`: the setup code (passcode and discriminator).

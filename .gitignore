@@ -8,3 +8,5 @@ keys/*.key
 # Home Assistant state of the test server.
 test-server/ha-config/
 test-server/matter-data/
+# Releases published for the test server (`cargo iotkit ota publish --to published`).
+published/

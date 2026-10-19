@@ -17,7 +17,8 @@ services:
     command: caddy file-server --root /srv --listen :8080 --browse
     ports: ["8080:8080"]
     volumes:
-      - ../dist:/srv:ro,Z
+      # What `cargo iotkit ota publish --to published` puts there: devices check its manifests.
+      - ../published:/srv:ro,Z
 
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable

@@ -118,6 +118,37 @@ pub fn publish(out: &mut [u8], topic: &str, payload: &[u8], retain: bool) -> Res
     finish(out, 0x30 | u8::from(retain), len)
 }
 
+/// A QoS 0 publish whose payload `write` formats straight into `out` (no other buffer).
+pub fn publish_with(
+    out: &mut [u8],
+    topic: &str,
+    retain: bool,
+    write: impl FnOnce(&mut dyn core::fmt::Write) -> core::fmt::Result,
+) -> Result<usize, Error> {
+    let mut w = body(out)?;
+    w.string(topic.as_bytes())?;
+    let start = w.len;
+    let mut payload = Payload { out: &mut w.out[start..], len: 0 };
+    write(&mut payload).map_err(|_| Error::Full)?;
+    let len = start + payload.len;
+    finish(out, 0x30 | u8::from(retain), len)
+}
+
+/// A `fmt::Write` into a byte slice.
+struct Payload<'a> {
+    out: &'a mut [u8],
+    len: usize,
+}
+
+impl core::fmt::Write for Payload<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let dst = self.out.get_mut(self.len..self.len + s.len()).ok_or(core::fmt::Error)?;
+        dst.copy_from_slice(s.as_bytes());
+        self.len += s.len();
+        Ok(())
+    }
+}
+
 /// Subscribes to `filters` at QoS 0.
 pub fn subscribe(out: &mut [u8], packet_id: u16, filters: &[&str]) -> Result<usize, Error> {
     let mut w = body(out)?;
@@ -254,6 +285,11 @@ mod tests {
         let (p, len) = parse(&out[..n]).unwrap().unwrap();
         assert_eq!((p, len), (Packet::Publish { topic: "t", payload: &payload }, n));
         assert_eq!(publish(&mut [0; 8], "topic", b"payload", false), Err(Error::Full));
+        // The same packet, formatted in place.
+        let mut other = [0; 512];
+        let m = publish_with(&mut other, "t", false, |w| w.write_str(core::str::from_utf8(&payload).unwrap())).unwrap();
+        assert_eq!(&other[..m], &out[..n]);
+        assert_eq!(publish_with(&mut [0; 12], "t", true, |w| w.write_str("too long")), Err(Error::Full));
     }
 
     #[test]

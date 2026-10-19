@@ -129,6 +129,25 @@ The repository's devkit has two test switches: `DEVKIT_PANIC_AT_BOOT=1 cargo xta
 pushes a build that never gets healthy, and `IOTKIT_PANIC_EARLY=1` one that crashes before the
 trial is counted; `push` then reports the rollback.
 
+### Updates from Home Assistant
+
+With `iotkit-app`'s `ha-update` feature (on in the template), the device has a *Firmware* update
+entity: Home Assistant shows the installed and latest versions, the release summary and its
+link, and installs the update with progress. The device checks a manifest URL at start, then
+every 6 hours:
+
+```bash
+# Build, sign and copy to a folder a web server serves (test-server's `updates` service serves
+# published/ on port 8080):
+cargo iotkit ota publish --to published --release --base-url http://192.168.1.10:8080 \
+    --summary "Faster Wi-Fi" --release-url https://example.com/notes/1.2.0
+# On the device's console, once (or OTA_MANIFEST_URL in .cargo/secrets.toml):
+update-url http://192.168.1.10:8080/my-device/manifest.json
+```
+
+The summary and the link are signed with the manifest. A failed install shows its error as the
+summary and keeps the running firmware.
+
 ## 6. Home Assistant
 
 - **MQTT:** install the Mosquitto add-on and the MQTT integration, then point the device at the

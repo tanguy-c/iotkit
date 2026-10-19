@@ -84,6 +84,8 @@ enum Cmd {
         /// Oldest running version allowed to install this image.
         #[arg(long, default_value = "0.0.0")]
         min_version: String,
+        #[command(flatten)]
+        release: Release,
         /// Secret signing key.
         #[arg(long, default_value = "keys/ota.key")]
         key: PathBuf,
@@ -129,6 +131,19 @@ struct App {
     flash_size: Option<String>,
 }
 
+/// What Home Assistant shows about an update (signed with the manifest).
+#[derive(clap::Args)]
+struct Release {
+    /// What the release changes, up to 64 bytes.
+    #[arg(long, default_value = "")]
+    summary: String,
+    /// Where the release notes are, up to 96 bytes.
+    #[arg(long, default_value = "")]
+    release_url: String,
+}
+
+// Built once per run: the size difference between the variants does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Ota {
     /// Build, then have a device install it: serves `dist/` and calls the device's endpoint.
@@ -146,13 +161,32 @@ enum Ota {
         port: u16,
         #[arg(long, default_value = "0.0.0")]
         min_version: String,
+        #[command(flatten)]
+        release: Release,
         #[arg(long, default_value = "keys/ota.key")]
         key: PathBuf,
     },
-    /// Upload a build to an update server that devices poll.
+    /// Build, then copy the signed manifest and image to `DIR/<package>/`, a folder a web server
+    /// serves: devices that poll its manifest (`update-url` on their console) offer the update
+    /// in Home Assistant.
     Publish {
+        /// The served folder (e.g. a web server's root, or a mounted share).
         #[arg(long)]
-        server: String,
+        to: PathBuf,
+        /// Where `DIR` is served from, to print the manifest URL to give the devices.
+        #[arg(long)]
+        base_url: Option<String>,
+        #[command(flatten)]
+        app: App,
+        /// Publish the last build instead of building.
+        #[arg(long)]
+        no_build: bool,
+        #[arg(long, default_value = "0.0.0")]
+        min_version: String,
+        #[command(flatten)]
+        release: Release,
+        #[arg(long, default_value = "keys/ota.key")]
+        key: PathBuf,
     },
 }
 
@@ -164,7 +198,7 @@ fn main() -> Result<()> {
     std::env::set_current_dir(&root)?;
     match cli.command {
         Cmd::Keygen { out, force } => keygen(&out, force),
-        Cmd::Build { app, min_version, key } => build(&Build::new(app)?, &min_version, &key),
+        Cmd::Build { app, min_version, release, key } => build(&Build::new(app)?, &min_version, &release, &key),
         Cmd::Verify { manifest, package, key } => {
             let manifest = match manifest {
                 Some(m) => m,
@@ -173,14 +207,20 @@ fn main() -> Result<()> {
             verify(&manifest, &key)
         }
         Cmd::Flash { app } => flash(&Build::new(app)?),
-        Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, key }) => {
+        Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, release, key }) => {
             let app = Build::new(app)?;
             if !no_build {
-                build(&app, &min_version, &key)?;
+                build(&app, &min_version, &release, &key)?;
             }
             push(&host, &app.package, port)
         }
-        Cmd::Ota(Ota::Publish { server }) => bail!("ota publish to {server}: not implemented yet (M2)"),
+        Cmd::Ota(Ota::Publish { to, base_url, app, no_build, min_version, release, key }) => {
+            let app = Build::new(app)?;
+            if !no_build {
+                build(&app, &min_version, &release, &key)?;
+            }
+            publish(&app.package, &to, base_url.as_deref())
+        }
     }
 }
 
@@ -354,7 +394,7 @@ fn write_secret(path: &Path, contents: &str) -> Result<()> {
     Ok(fs::write(path, format!("{contents}\n"))?)
 }
 
-fn build(app: &Build, min_version: &str, key: &Path) -> Result<()> {
+fn build(app: &Build, min_version: &str, release: &Release, key: &Path) -> Result<()> {
     let secret: [u8; 64] = read_hex(key).context("no signing key: run `cargo iotkit keygen`")?;
     let version_str = &app.version;
     let version =
@@ -382,6 +422,8 @@ fn build(app: &Build, min_version: &str, key: &Path) -> Result<()> {
         size: data.len().try_into().context("image over 4 GiB")?,
         sha256: sha256(&data),
         url: &file,
+        summary: &release.summary,
+        release_url: &release.release_url,
         signature: [0; 64],
     };
     // The device checks the same: the app descriptor must name this package and version.
@@ -445,6 +487,26 @@ fn push(host: &str, package: &str, port: u16) -> Result<()> {
         }
         ensure!(Instant::now() < deadline, "the device did not come back within 90 s");
     }
+}
+
+/// Copies `dist/<package>/manifest.json` and its image to `to/<package>/`. The image goes
+/// first: a device never sees a manifest whose image is not there yet.
+fn publish(package: &str, to: &Path, base_url: Option<&str>) -> Result<()> {
+    let from = Path::new("dist").join(package);
+    let json = fs::read(from.join("manifest.json")).with_context(|| format!("reading {}", from.display()))?;
+    let manifest = Manifest::parse(&json).map_err(|e| anyhow::anyhow!("{}: {e}", from.display()))?;
+    let dir = to.join(package);
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    fs::copy(from.join(manifest.url), dir.join(manifest.url)).context("copying the image")?;
+    // Written next to it, then renamed: a manifest is never half-written.
+    let tmp = dir.join("manifest.json.tmp");
+    fs::write(&tmp, &json)?;
+    fs::rename(&tmp, dir.join("manifest.json"))?;
+    println!("published {package} {} to {}", manifest.version, dir.display());
+    if let Some(base) = base_url {
+        println!("devices: update-url {}/{package}/manifest.json", base.trim_end_matches('/'));
+    }
+    Ok(())
 }
 
 /// A GET over plain HTTP/1.1; returns the body of a 2xx response, or an error with it.

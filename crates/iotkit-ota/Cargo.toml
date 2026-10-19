@@ -7,6 +7,8 @@ version.workspace      = true
 license.workspace      = true
 
 [features]
+## Release checks (`request_check`) and download progress, for Home Assistant's update entity.
+check = []
 ## Atomics for chips without compare-and-swap (ESP32-C3); turned on by the `esp32c3` feature.
 portable-atomic = ["dep:portable-atomic", "iotkit-config/portable-atomic", "iotkit-diag/portable-atomic"]
 ## ESP32-C6 slots and download (`esp` module). Without it the boot policy is host-testable.
@@ -22,7 +24,7 @@ iotkit-config = { workspace = true }
 iotkit-image  = { workspace = true }
 iotkit-net    = { workspace = true }
 iotkit-diag   = { workspace = true }
-heapless      = "0.9"
+heapless      = { version = "0.9", features = ["serde"] }
 log           = "0.4.27"
 serde         = { version = "1", default-features = false, features = ["derive"] }
 

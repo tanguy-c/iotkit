@@ -42,6 +42,11 @@ compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-S3's interna
 compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQTT, or a C6/C5/S3)");
 
 mod console;
+#[cfg(feature = "ha-update")]
+mod update;
+
+#[cfg(feature = "ha-update")]
+extern crate alloc;
 
 use embassy_executor::Spawner;
 use embassy_sync::mutex::Mutex;
@@ -229,13 +234,18 @@ async fn start_services(
     unprovisioned: bool,
 ) -> iotkit_provision::esp::Provisioner {
     spawn(spawner, network_check_task(net));
+    // With `ha-update`, the kit's firmware entity after the app's.
+    #[cfg(feature = "ha-update")]
+    let entities = update::with_update(config.entities);
+    #[cfg(not(feature = "ha-update"))]
+    let entities = config.entities;
     static DEVICE: StaticCell<Device> = StaticCell::new();
     let device = &*DEVICE.init(Device {
         name: net.hostname,
         manufacturer: config.manufacturer,
         model: config.model,
         sw_version: config.firmware.version_text,
-        entities: config.entities,
+        entities,
     });
     #[cfg(feature = "matter-wifi")]
     {
@@ -258,6 +268,8 @@ async fn start_services(
         }
     }
     spawn(spawner, iotkit_ota::esp::serve_task(net, store, config.firmware));
+    #[cfg(feature = "ha-update")]
+    spawn(spawner, update::update_task(net, store, config.firmware));
     let info = iotkit_provision::esp::DeviceInfo {
         firmware: config.firmware.product,
         version: config.firmware.version_text,

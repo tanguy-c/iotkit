@@ -3,7 +3,10 @@
 
 use core::fmt::{self, Write as _};
 
+#[cfg(not(feature = "check"))]
 use embassy_futures::select::{Either, select};
+#[cfg(feature = "check")]
+use embassy_futures::select::{Either3, select3};
 use embassy_net::tcp::TcpSocket;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{Duration, Timer, with_timeout};
@@ -314,6 +317,60 @@ pub async fn request_install(manifest_url: &str) -> Result<Version, OtaError> {
     RESULT.wait().await
 }
 
+/// A newer release, from its manifest.
+#[cfg(feature = "check")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Release {
+    pub version: Version,
+    pub summary: String<{ iotkit_image::MAX_SUMMARY_LEN }>,
+    pub release_url: String<{ iotkit_image::MAX_RELEASE_URL_LEN }>,
+}
+
+/// A check asked for by [`request_check`], run by [`serve_task`].
+#[cfg(feature = "check")]
+static CHECK: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
+#[cfg(feature = "check")]
+static CHECKED: Signal<CriticalSectionRawMutex, Result<Option<Release>, OtaError>> = Signal::new();
+
+/// Has [`serve_task`] fetch and verify the manifest at `manifest_url`: the release if it is an
+/// update for this firmware, `None` if it is not newer.
+#[cfg(feature = "check")]
+pub async fn request_check(manifest_url: &str) -> Result<Option<Release>, OtaError> {
+    let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
+    let url = String::try_from(manifest_url).map_err(|_| OtaError::Download(GetError::Url(http::Error::Url)))?;
+    CHECKED.reset();
+    CHECK.signal(url);
+    CHECKED.wait().await
+}
+
+#[cfg(feature = "check")]
+async fn check(net: Net, fw: Firmware, manifest_url: &str) -> Result<Option<Release>, OtaError> {
+    let mut collect = Collect { buf: [0; MAX_MANIFEST], len: 0 };
+    get(net.stack, manifest_url, &mut collect).await.map_err(|e| OtaError::Download(drop_sink(e)))?;
+    let manifest = Manifest::parse(&collect.buf[..collect.len]).map_err(OtaError::Manifest)?;
+    manifest.verify(fw.key).map_err(OtaError::Manifest)?;
+    match manifest.check_update(fw.product, fw.version) {
+        Ok(()) => Ok(Some(Release {
+            version: manifest.version,
+            // Both fit: the manifest's lengths are checked when parsed.
+            summary: String::try_from(manifest.summary).unwrap_or_default(),
+            release_url: String::try_from(manifest.release_url).unwrap_or_default(),
+        })),
+        Err(iotkit_image::Error::NotNewer) => Ok(None),
+        Err(e) => Err(OtaError::Manifest(e)),
+    }
+}
+
+/// Download progress of the install running, in % (in steps of 5).
+#[cfg(feature = "check")]
+static PROGRESS: Signal<CriticalSectionRawMutex, u8> = Signal::new();
+
+/// Waits for the next progress step of an install (0-100 %).
+#[cfg(feature = "check")]
+pub async fn wait_progress() -> u8 {
+    PROGRESS.wait().await
+}
+
 /// Downloads and installs the update described by the manifest at `manifest_url`. On success
 /// the new firmware is selected: restart to boot it (on trial).
 async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
@@ -487,8 +544,17 @@ impl<'m> FlashSink<'m> {
             log::error!("ota: flash write at {at:#x} failed: {e:?}");
             OtaError::Flash
         })?;
+        #[cfg(feature = "check")]
+        let before = self.written * 20 / self.manifest.size.max(1);
         self.written += self.fill as u32;
         self.fill = 0;
+        #[cfg(feature = "check")]
+        {
+            let step = self.written * 20 / self.manifest.size.max(1);
+            if step != before {
+                PROGRESS.signal((step * 5).min(100) as u8);
+            }
+        }
         Ok(())
     }
 
@@ -549,12 +615,28 @@ pub async fn serve_task(net: Net, store: &'static SharedStore, fw: Firmware) {
     loop {
         let mut socket = TcpSocket::new(net.stack, &mut rx, &mut tx);
         socket.set_timeout(Some(Duration::from_secs(10)));
+        #[cfg(not(feature = "check"))]
         match select(socket.accept(PORT), REQUEST.wait()).await {
             Either::First(Ok(())) => {}
             Either::First(Err(_)) => continue,
             Either::Second(url) => {
                 drop(socket);
                 RESULT.signal(install(net, store, fw, &url).await);
+                continue;
+            }
+        }
+        #[cfg(feature = "check")]
+        match select3(socket.accept(PORT), REQUEST.wait(), CHECK.wait()).await {
+            Either3::First(Ok(())) => {}
+            Either3::First(Err(_)) => continue,
+            Either3::Second(url) => {
+                drop(socket);
+                RESULT.signal(install(net, store, fw, &url).await);
+                continue;
+            }
+            Either3::Third(url) => {
+                drop(socket);
+                CHECKED.signal(check(net, fw, &url).await);
                 continue;
             }
         }

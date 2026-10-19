@@ -201,3 +201,20 @@ fn fans_and_thermostats_build_on_the_target() {
     assert!(T.command(Command::Climate(ClimateCommand::Target(50.0))));
     assert_eq!(block_on(T.wait_command()).target, 35.0);
 }
+
+#[test]
+fn updates() {
+    static U: Update = Update::new("firmware", "Firmware").config();
+    assert_eq!(U.state(), State::Unknown);
+    U.set_installed("1.2.0");
+    assert!(U.take_dirty(Binding::MQTT));
+    U.set_latest("1.3.0", "Faster Wi-Fi", "");
+    let s = U.update().unwrap();
+    assert_eq!((s.installed.as_str(), s.latest.as_str(), s.summary.as_str()), ("1.2.0", "1.3.0", "Faster Wi-Fi"));
+    U.set_latest("1.3.0", "Faster Wi-Fi", "");
+    assert!(U.take_dirty(Binding::MQTT));
+    assert!(!U.take_dirty(Binding::MQTT), "the same release again: nothing to publish");
+    assert!(U.command(Command::Install));
+    block_on(U.wait_install());
+    assert!(!U.command(Command::Press));
+}

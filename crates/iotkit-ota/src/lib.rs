@@ -73,6 +73,17 @@ impl Setting for LastUpdate {
     const VERSION: u8 = 1;
 }
 
+/// Where to check for updates: a manifest URL (`cargo iotkit ota publish`), kept in flash.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateSource {
+    pub manifest_url: heapless::String<200>,
+}
+
+impl Setting for UpdateSource {
+    const KEY: u16 = keys::UPDATE_SOURCE;
+    const VERSION: u8 = 1;
+}
+
 /// What to do at boot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BootAction {

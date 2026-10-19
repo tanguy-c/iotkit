@@ -4,7 +4,7 @@ description  = "One entity of each kind, simulated: to try them in Home Assistan
 publish      = false
 edition.workspace      = true
 rust-version.workspace = true
-version      = "0.1.0"
+version      = "0.1.3"
 license.workspace      = true
 
 [features]
@@ -14,7 +14,7 @@ esp32c6 = ["iotkit-app/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-all
 matter-wifi = ["iotkit-app/matter-wifi"]
 
 [dependencies]
-iotkit-app = { workspace = true }
+iotkit-app = { workspace = true, features = ["ha-update"] }
 
 esp-alloc              = { workspace = true }
 esp-hal                = { workspace = true }

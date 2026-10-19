@@ -137,7 +137,7 @@ pub fn matter_kind(entity: &dyn Entity) -> Option<MatterKind> {
         Kind::Fan => Some(MatterKind::Fan),
         Kind::Climate => Some(MatterKind::Thermostat),
         Kind::Select => Some(MatterKind::ModeSelect),
-        Kind::Button | Kind::Number | Kind::TextSensor => None,
+        Kind::Button | Kind::Number | Kind::TextSensor | Kind::Update => None,
     }
 }
 
