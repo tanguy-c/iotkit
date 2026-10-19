@@ -1,0 +1,26 @@
+# A battery ESP32-C3: reports every 15 min, with the battery level. CI generates and builds it.
+name = "Garden sensor"
+maker = "CI"
+board = "esp32c3-devkitm-1"
+power = "battery"
+report_every_min = 15
+battery_pin = 3
+battery_curve = "2aa"
+
+[[parts]]
+kind = "temperature"
+pin = 4
+
+[[parts]]
+kind = "soil_moisture"
+pin = 2
+
+[[parts]]
+kind = "contact"
+name = "Gate"
+pin = 5
+
+[[parts]]
+kind = "relay"
+name = "Sprinkler"
+pin = 6

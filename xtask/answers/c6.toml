@@ -1,0 +1,89 @@
+# `cargo iotkit new --answers answers/c6.toml`: a plugged-in ESP32-C6 with Matter (fixed code)
+# and one part of every kind. CI generates and builds it.
+name = "Kitchen hub"
+maker = "CI"
+board = "esp32c6-devkitc-1"
+matter = "fixed"
+mqtt_host = "192.168.1.10"
+updates_url = "http://192.168.1.10:8080/kitchen-hub/manifest.json"
+
+[[parts]]
+kind = "relay"
+name = "Pump"
+pin = 4
+
+[[parts]]
+kind = "temperature"
+pin = 5
+
+[[parts]]
+kind = "humidity"
+
+[[parts]]
+kind = "pressure"
+
+[[parts]]
+kind = "light_level"
+
+[[parts]]
+kind = "co2"
+
+[[parts]]
+kind = "pm25"
+
+[[parts]]
+kind = "soil_moisture"
+pin = 2
+
+[[parts]]
+kind = "number"
+
+[[parts]]
+kind = "motion"
+pin = 6
+
+[[parts]]
+kind = "contact"
+pin = 7
+
+[[parts]]
+kind = "leak"
+pin = 10
+
+[[parts]]
+kind = "smoke"
+pin = 11
+
+[[parts]]
+kind = "light"
+pin = 18
+
+[[parts]]
+kind = "cover"
+pin = 19
+
+[[parts]]
+kind = "valve"
+pin = 20
+
+[[parts]]
+kind = "lock"
+pin = 21
+
+[[parts]]
+kind = "fan"
+pin = 22
+
+[[parts]]
+kind = "thermostat"
+pin = 23
+
+[[parts]]
+kind = "setting"
+
+[[parts]]
+kind = "mode"
+
+[[parts]]
+kind = "button"
+pin = 3

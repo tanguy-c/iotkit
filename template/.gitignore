@@ -3,3 +3,4 @@ dist/
 keys/*.key
 .cargo/secrets.toml
 **/*.rs.bk
+matter-pairing.svg

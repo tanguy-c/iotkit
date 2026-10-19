@@ -22,7 +22,7 @@ The ESP32-C6 is the reference: support for the other chips is added without chan
 
 ```bash
 rustup target add riscv32imac-unknown-none-elf riscv32imc-unknown-none-elf   # C6/C5/H2, C3
-cargo install espflash cargo-generate
+cargo install espflash
 # ESP32-S3 only (Xtensa): Espressif's toolchain, then `. ~/export-esp.sh` in each shell.
 # Use 1.98.1.0: 1.99 fails to link esp-hal 1.2.2.
 cargo install espup && espup install --toolchain-version 1.98.1.0
@@ -35,13 +35,31 @@ Linux: add yourself to the serial group (`sudo usermod -aG dialout $USER`), then
 ## 2. Create a project
 
 ```bash
-cargo generate --path /path/to/iotkit/template --name my-device
-# asks for the chip, and the absolute path of this checkout (the crates are used from there)
-cd my-device
-cargo iotkit keygen        # keys/ota.key (secret, git-ignored) and keys/ota.pub (in the firmware)
+cargo iotkit new garden-sensor
 ```
 
-The generated `src/main.rs` shows the RGB LED as a light, toggled by a short press of BOOT:
+It asks what you are making, in plain words:
+
+- **what it is** (its name in Home Assistant) and your name or brand;
+- **the board** (ESP32-C6, C3, C5 or S3 DevKit, or another board with one of these chips);
+- **the power**: plugged in, or on battery (wakes up every few minutes, reports, sleeps; with
+  the battery level if you want);
+- **connectivity**: your Wi-Fi now or later from a phone, Home Assistant's MQTT broker, Matter
+  (C6) with **one fixed pairing code** shown as a QR code to print as a label (or a code per
+  device), and where you publish updates;
+- **the parts**, one by one, each with its pin: temperature, humidity, pressure, light level,
+  CO2, fine dust, soil moisture; motion, door, leak, smoke; relay, light, blind, valve, lock,
+  fan, thermostat, settings; push buttons. Pins are checked for the chip (no flash or USB pin, an
+  ADC pin for analog parts).
+
+The project gets one entity per part (Home Assistant and Matter types follow), a task per part
+with a `TODO` for its driver, a README with the wiring table, `.cargo/secrets.toml` with what
+you gave, and its signing keys. Scripts and CI: `cargo iotkit new DIR --answers FILE` (see
+`xtask/answers/`).
+
+Without the questions: `cargo generate --path /path/to/iotkit/template --name my-device` (asks
+the chip and the checkout's path; then `cargo iotkit keygen`). Its `src/main.rs`, and the one a
+wizard project with no parts gets, shows the RGB LED as a light, toggled by a short press of BOOT:
 
 ```rust
 static LED: Light = Light::new("led", "LED");
@@ -55,7 +73,8 @@ static CONFIG: Config = Config {
 iotkit_app::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
 ```
 
-Entities are `Sensor`, `BinarySensor`, `Switch`, `Light` and `Button`: set their state from any
+Entities are `Sensor`, `BinarySensor`, `Switch`, `Light`, `Button`, `Event`, `Number`, `Select`,
+`TextSensor`, `Cover`, `Valve`, `Lock`, `Fan` and `Climate`: set their state from any
 task (`TEMP.set(21.5)`), wait for commands (`LED.wait_command().await`), and report the result
 with `set`. `iotkit_app::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
 `apps/devkit` is a fuller example: watched tasks, its own health check, an extra console command.

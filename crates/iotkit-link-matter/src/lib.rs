@@ -206,6 +206,13 @@ impl MatterSetup {
         let passcode = a % 99_999_998 + 1;
         valid_passcode(passcode).then_some(Self { passcode, discriminator: (b & 0xfff) as u16 })
     }
+
+    /// A setup code given as text (`MATTER_PASSCODE`, `MATTER_DISCRIMINATOR`); `None` if invalid.
+    pub fn parse(passcode: &str, discriminator: &str) -> Option<Self> {
+        let passcode = passcode.trim().parse().ok().filter(|p| valid_passcode(*p))?;
+        let discriminator = discriminator.trim().parse().ok().filter(|d: &u16| *d < 4096)?;
+        Some(Self { passcode, discriminator })
+    }
 }
 
 #[cfg(test)]
@@ -281,5 +288,17 @@ mod tests {
                 assert!(valid_passcode(s.passcode) && s.discriminator < 4096);
             }
         }
+    }
+
+    #[test]
+    fn built_in_codes() {
+        assert_eq!(
+            MatterSetup::parse(" 79771663", "985 "),
+            Some(MatterSetup { passcode: 79771663, discriminator: 985 })
+        );
+        assert_eq!(MatterSetup::parse("12345678", "985"), None, "forbidden passcode");
+        assert_eq!(MatterSetup::parse("79771663", "4096"), None, "12 bits");
+        assert_eq!(MatterSetup::parse("79771663", ""), None);
+        assert_eq!(MatterSetup::parse("abc", "1"), None);
     }
 }

@@ -1,6 +1,6 @@
-//! `cargo iotkit` (`cargo xtask` in the iotkit repository): build, sign, flash and update iotkit
-//! firmware. Works on the project in the current directory: the nearest one with a
-//! `partitions.csv` next to its `Cargo.toml`.
+//! `cargo iotkit` (`cargo xtask` in the iotkit repository): create (`new`), build, sign, flash and
+//! update iotkit firmware. Works on the project in the current directory: the nearest one with a
+//! `partitions.csv` next to its `Cargo.toml` (`new` makes one).
 //!
 //! Install it with `cargo install --path xtask` from an iotkit checkout.
 
@@ -13,6 +13,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+mod new;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
@@ -69,6 +71,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Create a device project: asks what it is, its board, power, connectivity and parts.
+    New {
+        /// The project's folder (default: from the device's name).
+        dir: Option<PathBuf>,
+        /// Take the answers from a TOML file instead of asking (see `xtask/answers/`).
+        #[arg(long)]
+        answers: Option<PathBuf>,
+        /// Ask nothing: the defaults (a plugged-in ESP32-C6 with its LED).
+        #[arg(long, conflicts_with = "answers")]
+        defaults: bool,
+        /// The iotkit checkout the project uses (default: the one this CLI was installed from).
+        #[arg(long)]
+        iotkit_path: Option<PathBuf>,
+    },
     /// Create the OTA signing key pair (`<out>.key` secret, `<out>.pub` public).
     Keygen {
         #[arg(long, default_value = DEFAULT_KEY)]
@@ -194,9 +210,13 @@ fn main() -> Result<()> {
     // As a cargo subcommand (`cargo iotkit ...`), cargo passes the subcommand name first.
     let args = std::env::args_os().enumerate().filter(|(i, a)| !(*i == 1 && a == "iotkit")).map(|(_, a)| a);
     let cli = Cli::parse_from(args);
+    if let Cmd::New { dir, answers, defaults, iotkit_path } = cli.command {
+        return new::run(new::NewArgs { dir, answers, defaults, iotkit_path });
+    }
     let root = project_root()?;
     std::env::set_current_dir(&root)?;
     match cli.command {
+        Cmd::New { .. } => unreachable!("handled above"),
         Cmd::Keygen { out, force } => keygen(&out, force),
         Cmd::Build { app, min_version, release, key } => build(&Build::new(app)?, &min_version, &release, &key),
         Cmd::Verify { manifest, package, key } => {

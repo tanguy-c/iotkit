@@ -67,8 +67,16 @@ pub fn forget_pairings() {
     REQUESTS.signal(Request::Reset);
 }
 
-/// The stored setup code, or a new one (stored).
+/// The code built into the firmware (`MATTER_PASSCODE` and `MATTER_DISCRIMINATOR`, e.g. from
+/// `cargo iotkit new`: one code for the project's label); else the stored one, or a new one
+/// (stored).
 pub(crate) async fn setup_code(store: &SharedStore, rand: &mut impl Rng) -> MatterSetup {
+    if let Some(passcode) = option_env!("MATTER_PASSCODE") {
+        match MatterSetup::parse(passcode, option_env!("MATTER_DISCRIMINATOR").unwrap_or("")) {
+            Some(setup) => return setup,
+            None => log::error!("matter: invalid MATTER_PASSCODE or MATTER_DISCRIMINATOR; using the device's own code"),
+        }
+    }
     let mut store = store.lock().await;
     if let Ok(Some(s)) = store.load::<MatterSetup>().await {
         return s;

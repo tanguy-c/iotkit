@@ -5,11 +5,12 @@
 
 [package]
 name         = "iotkit-cli"
-description  = "cargo iotkit: signed builds, flashing and OTA for iotkit firmware"
+description  = "cargo iotkit: new projects, signed builds, flashing and OTA for iotkit firmware"
 publish      = false
 edition      = "2024"
 rust-version = "1.95"
 version      = "0.1.0"
+license      = "Apache-2.0"
 
 [[bin]]
 name = "cargo-iotkit"
@@ -21,3 +22,9 @@ ed25519-compact = { version = "2.6", default-features = false, features = ["rand
 anyhow          = "1"
 clap            = { version = "4.6", features = ["derive"] }
 serde_json      = "1"
+inquire         = { version = "0.9", default-features = false, features = ["crossterm"] }
+liquid          = "0.26"
+toml            = { version = "0.9", default-features = false, features = ["display", "parse", "serde"] }
+getrandom       = { version = "0.4", default-features = false }
+qrcode          = { version = "0.14", default-features = false, features = ["svg"] }
+serde           = { version = "1", features = ["derive"] }

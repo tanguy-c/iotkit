@@ -21,7 +21,8 @@ jobs:
       - run: cargo fmt --all --check --manifest-path xtask/Cargo.toml
       - run: cargo test-host --features iotkit-image/sign
       - run: cargo clippy -p iotkit-image -p iotkit-config -p iotkit-diag -p iotkit-runtime -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-model -p iotkit-link-mqtt -p iotkit-link-matter -p iotkit-build --target host-tuple --all-targets --features iotkit-image/sign -- -D warnings
-      - run: cargo clippy --manifest-path xtask/Cargo.toml --target host-tuple -- -D warnings
+      - run: cargo clippy --manifest-path xtask/Cargo.toml --target host-tuple --all-targets -- -D warnings
+      - run: cargo test --manifest-path xtask/Cargo.toml --target host-tuple
 
   firmware:
     name: Firmware (ESP32-C6)
@@ -100,6 +101,11 @@ jobs:
       - run: cargo +esp clippy -p devkit --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
       - run: cargo +esp clippy -p iotkit-app --features iotkit-app/esp32s3,iotkit-app/deep-sleep --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
       - run: cargo xtask build --release --chip esp32s3 && cargo xtask verify
+      # `cargo iotkit new` for the S3 (its project uses the esp toolchain).
+      - run: cargo install --locked --path xtask
+      - run: cargo iotkit new "$RUNNER_TEMP/new-s3" --answers xtask/answers/s3.toml
+      - run: cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify
+        working-directory: ${{ runner.temp }}/new-s3
 
   template:
     name: Template
@@ -123,6 +129,12 @@ jobs:
           for chip in esp32c3 esp32c5; do
             cargo generate --path template --name "ci-$chip" --destination "$RUNNER_TEMP" --silent --define chip=$chip --define "iotkit_path=$GITHUB_WORKSPACE"
             (cd "$RUNNER_TEMP/ci-$chip" && cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify)
+          done
+      # `cargo iotkit new` from answers files: every part kind with Matter on the C6, a battery C3.
+      - run: |
+          for c in c6 c3; do
+            cargo iotkit new "$RUNNER_TEMP/new-$c" --answers xtask/answers/$c.toml
+            (cd "$RUNNER_TEMP/new-$c" && cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify)
           done
 
   deny:
