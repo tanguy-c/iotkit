@@ -33,6 +33,9 @@ compile_error!("iotkit-app: enable one chip feature: esp32c6, esp32c3, esp32c5 o
 compile_error!("iotkit-app: enable only one chip feature");
 #[cfg(all(feature = "esp32c5", feature = "matter-wifi"))]
 compile_error!("iotkit-app: `matter-wifi` is not supported on the ESP32-C5 yet (no TRNG in esp-hal 1.2)");
+// Matter does not sleep (an always-on controller session).
+#[cfg(all(feature = "deep-sleep", feature = "matter-wifi"))]
+compile_error!("iotkit-app: `deep-sleep` is for MQTT devices; not with `matter-wifi`");
 // Matter over Wi-Fi needs about 21 KB more internal RAM than the ESP32-S3 has left (PSRAM
 // support would fix it; not done yet).
 #[cfg(all(feature = "esp32s3", feature = "matter-wifi"))]
@@ -41,9 +44,15 @@ compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-S3's interna
 #[cfg(all(feature = "esp32c3", feature = "matter-wifi"))]
 compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQTT, or a C6/C5/S3)");
 
+pub mod battery;
 mod console;
+#[cfg(feature = "deep-sleep")]
+mod sleep;
 #[cfg(feature = "ha-update")]
 mod update;
+
+#[cfg(feature = "deep-sleep")]
+pub use sleep::{SleepConfig, SleepyApp, WakeReason, start_sleepy, wake_reason};
 
 #[cfg(feature = "ha-update")]
 extern crate alloc;

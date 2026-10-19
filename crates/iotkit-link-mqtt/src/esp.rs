@@ -5,6 +5,7 @@ use core::{net::Ipv4Addr, ops::Range};
 
 use embassy_futures::select::{Either4, select4};
 use embassy_net::{dns::DnsQueryType, tcp::TcpSocket};
+#[cfg(not(feature = "sleepy"))]
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::Write;
@@ -24,6 +25,7 @@ const KEEP_ALIVE_S: u16 = 60;
 const PACKET_MAX: usize = 1280;
 
 static CONNECTED: AtomicBool = AtomicBool::new(false);
+#[cfg(not(feature = "sleepy"))]
 static UP: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Connected to the broker, entities announced.
@@ -31,10 +33,20 @@ pub fn is_connected() -> bool {
     CONNECTED.load(Ordering::Relaxed)
 }
 
-/// Waits for the first successful connection (for the health check).
+/// Waits for the first successful connection (for the health check; one waiter).
+#[cfg(not(feature = "sleepy"))]
 pub async fn wait_connected() {
     while !is_connected() {
         UP.wait().await;
+    }
+}
+
+/// Waits for the first successful connection. A sleepy device has several waiters (a signal
+/// wakes only one), so the state is polled.
+#[cfg(feature = "sleepy")]
+pub async fn wait_connected() {
+    while !is_connected() {
+        Timer::after_millis(50).await;
     }
 }
 
@@ -64,6 +76,25 @@ enum Error {
     Timeout,
 }
 
+/// A deep-sleeping device's MQTT options.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Sleepy {
+    /// How long a reading stays valid in Home Assistant (about twice the sleep).
+    pub expire_after_s: u32,
+    /// The discovery hash sent at the last wake-up ([`discovery_hash`] then): unchanged, the
+    /// discovery is not sent again.
+    pub discovery_hash: u32,
+}
+
+/// The hash of the discovery sent (or found unchanged), to keep for the next wake-up.
+#[cfg(feature = "sleepy")]
+static DISCOVERY_HASH: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+#[cfg(feature = "sleepy")]
+pub fn discovery_hash() -> u32 {
+    DISCOVERY_HASH.load(Ordering::Relaxed)
+}
+
 /// Runs the MQTT link for `device` as node `net.hostname`; never returns.
 #[embassy_executor::task]
 pub async fn mqtt_task(net: Net, device: &'static Device, broker: Broker) {
@@ -71,7 +102,15 @@ pub async fn mqtt_task(net: Net, device: &'static Device, broker: Broker) {
     let mut backoff = Backoff::new();
     loop {
         net.wait_online().await;
-        let result = session(net, device, &broker, party.as_mut()).await;
+        let result = session::<false>(
+            net,
+            device,
+            &broker,
+            party.as_mut(),
+            #[cfg(feature = "sleepy")]
+            Sleepy::default(),
+        )
+        .await;
         if let Some(p) = party.as_mut()
             && p.is_requested()
         {
@@ -93,11 +132,44 @@ pub async fn mqtt_task(net: Net, device: &'static Device, broker: Broker) {
     }
 }
 
-async fn session(
+/// [`mqtt_task`] for a deep-sleeping device: no last will or availability (asleep is not
+/// offline), retained commands (one-shot ones cleared once applied), discovery only when it
+/// changed, and on shutdown the pending states then a clean disconnect.
+#[cfg(feature = "sleepy")]
+#[embassy_executor::task]
+pub async fn mqtt_sleepy_task(net: Net, device: &'static Device, broker: Broker, sleepy: Sleepy) {
+    let mut party = iotkit_runtime::shutdown::register();
+    let mut backoff = Backoff::new();
+    loop {
+        net.wait_online().await;
+        let result = session::<true>(net, device, &broker, party.as_mut(), sleepy).await;
+        if let Some(p) = party.as_mut()
+            && p.is_requested()
+        {
+            // Restarting: no reconnection.
+            p.done();
+            core::future::pending::<()>().await;
+        }
+        // A session that got connected restarts the backoff: the next attempt comes at once.
+        if CONNECTED.swap(false, Ordering::Relaxed) {
+            backoff.succeeded();
+        }
+        let delay = backoff.failed();
+        match &result {
+            Err(Error::Refused(code)) => log::error!("mqtt: broker refused the connection (code {code})"),
+            Err(e) => log::warn!("mqtt: {e:?}, reconnecting in {delay} s"),
+            Ok(()) => {}
+        }
+        Timer::after_secs(delay.into()).await;
+    }
+}
+
+async fn session<const SLEEPY: bool>(
     net: Net,
     device: &'static Device,
     broker: &Broker,
     mut party: Option<&mut iotkit_runtime::shutdown::Party>,
+    #[cfg(feature = "sleepy")] sleepy: Sleepy,
 ) -> Result<(), Error> {
     let ip = match broker.host.parse::<Ipv4Addr>() {
         Ok(ip) => ip,
@@ -122,7 +194,8 @@ async fn session(
     let will = Will { topic: &availability, payload: b"offline", retain: true };
     let user = (!broker.user.is_empty()).then_some(broker.user.as_str());
     let password = (!broker.password.is_empty()).then_some(broker.password.as_str());
-    let n = codec::connect(&mut out, node, KEEP_ALIVE_S, Some(&will), user, password).map_err(|_| Error::Protocol)?;
+    let will = if SLEEPY { None } else { Some(&will) };
+    let n = codec::connect(&mut out, node, KEEP_ALIVE_S, will, user, password).map_err(|_| Error::Protocol)?;
     socket.write_all(&out[..n]).await.map_err(|_| Error::Io)?;
 
     let mut inbox = Inbox { buf: [0; PACKET_MAX], len: 0 };
@@ -143,16 +216,30 @@ async fn session(
     }
     .map_err(|_| Error::Protocol)?;
     socket.write_all(&out[..n]).await.map_err(|_| Error::Io)?;
-    publish(&mut socket, &mut out, &availability, b"online", true).await?;
-    announce(&mut socket, &mut out, device, node).await?;
+    if !SLEEPY {
+        publish(&mut socket, &mut out, &availability, b"online", true).await?;
+    }
+    announce::<SLEEPY>(
+        &mut socket,
+        &mut out,
+        device,
+        node,
+        #[cfg(feature = "sleepy")]
+        sleepy,
+    )
+    .await?;
     log::info!("mqtt: connected to {}:{}, {} entities announced", broker.host, broker.port, device.entities.len());
     CONNECTED.store(true, Ordering::Relaxed);
+    #[cfg(not(feature = "sleepy"))]
     UP.signal(());
 
     let ping_every = Duration::from_secs(u64::from(KEEP_ALIVE_S) / 2);
     let mut last_rx = Instant::now();
     // A fixed deadline: state changes wake the loop often, and must not keep postponing it.
     let mut next_ping = last_rx + ping_every;
+    // A sleepy device going to sleep: the pending states are being sent.
+    #[cfg(feature = "sleepy")]
+    let mut closing = false;
     loop {
         // States first: the changes that came while the last packet was handled.
         for entity in device.entities {
@@ -175,6 +262,14 @@ async fn session(
             }
         }
         let ping = Timer::at(next_ping);
+        #[cfg(feature = "sleepy")]
+        if SLEEPY && closing {
+            socket.write_all(&codec::DISCONNECT).await.map_err(|_| Error::Io)?;
+            let _ = socket.flush().await;
+            socket.close();
+            log::info!("mqtt: states sent, disconnected for the sleep");
+            return Ok(());
+        }
         let restart = async {
             match party.as_mut() {
                 Some(p) => p.requested().await,
@@ -183,8 +278,17 @@ async fn session(
         };
         match select4(inbox.fill(&mut socket), iotkit_model::changed(Binding::MQTT), ping, restart).await {
             Either4::Fourth(()) => {
-                // A planned restart: say so, so Home Assistant shows the device unavailable.
-                publish(&mut socket, &mut out, &availability, b"offline", true).await?;
+                #[cfg(feature = "sleepy")]
+                if SLEEPY && !closing {
+                    // Going to sleep: once more round the loop, which sends the states not sent
+                    // yet, then a clean disconnect.
+                    closing = true;
+                    continue;
+                }
+                if !SLEEPY {
+                    // A planned restart: say so, so Home Assistant shows the device unavailable.
+                    publish(&mut socket, &mut out, &availability, b"offline", true).await?;
+                }
                 socket.write_all(&codec::DISCONNECT).await.map_err(|_| Error::Io)?;
                 let _ = socket.flush().await;
                 socket.close();
@@ -201,7 +305,15 @@ async fn session(
                         if payload == b"online" {
                             log::info!("mqtt: Home Assistant restarted, announcing again");
                             inbox.consume(end);
-                            announce(&mut socket, &mut out, device, node).await?;
+                            announce::<SLEEPY>(
+                                &mut socket,
+                                &mut out,
+                                device,
+                                node,
+                                #[cfg(feature = "sleepy")]
+                                Sleepy::default(),
+                            )
+                            .await?;
                             continue;
                         }
                     } else if let Some((entity, feature)) =
@@ -209,8 +321,15 @@ async fn session(
                     {
                         match ha::parse_command(entity, feature, payload) {
                             Some(command) if entity.command(command) => {
-                                log::info!("mqtt: {} <- {command:?}", entity.meta().id)
+                                log::info!("mqtt: {} <- {command:?}", entity.meta().id);
+                                // A retained one-shot command would run again at each wake-up.
+                                if SLEEPY && ha::one_shot(&command) {
+                                    let n = codec::publish(&mut out, topic, b"", true).map_err(|_| Error::Protocol)?;
+                                    socket.write_all(&out[..n]).await.map_err(|_| Error::Io)?;
+                                }
                             }
+                            // An empty payload: a cleared retained command.
+                            _ if SLEEPY && payload.is_empty() => {}
                             _ => log::warn!("mqtt: bad command for {}", entity.meta().id),
                         }
                     }
@@ -229,15 +348,39 @@ async fn session(
     }
 }
 
-/// Discovery for every entity, then every known state (all retained).
-async fn announce(
+/// Discovery for every entity, then every known state (all retained). A sleepy device skips
+/// the discovery when its hash is `sleepy.discovery_hash` (0 forces it: after Home Assistant
+/// restarts).
+async fn announce<const SLEEPY: bool>(
     socket: &mut TcpSocket<'_>,
     out: &mut [u8; PACKET_MAX],
     device: &Device,
     node: &str,
+    #[cfg(feature = "sleepy")] sleepy: Sleepy,
 ) -> Result<(), Error> {
+    #[cfg(feature = "sleepy")]
+    if SLEEPY {
+        let hash = device.entities.iter().fold(0x811c_9dc5, |h, e| {
+            let p = ha::sleepy_discovery_payload::<1024>(device, node, *e, sleepy.expire_after_s);
+            ha::hash(p.as_deref().unwrap_or("").as_bytes(), h)
+        });
+        DISCOVERY_HASH.store(hash, Ordering::Relaxed);
+        if hash == sleepy.discovery_hash {
+            log::info!("mqtt: discovery unchanged, not sent");
+            device.entities.iter().for_each(|e| e.mark_dirty(Binding::MQTT));
+            return Ok(());
+        }
+    }
     for entity in device.entities {
-        let Some(config) = ha::discovery_payload::<1024>(device, node, *entity) else {
+        #[cfg(feature = "sleepy")]
+        let config = if SLEEPY {
+            ha::sleepy_discovery_payload::<1024>(device, node, *entity, sleepy.expire_after_s)
+        } else {
+            ha::discovery_payload::<1024>(device, node, *entity)
+        };
+        #[cfg(not(feature = "sleepy"))]
+        let config = ha::discovery_payload::<1024>(device, node, *entity);
+        let Some(config) = config else {
             log::error!("mqtt: discovery payload of {} too large", entity.meta().id);
             continue;
         };

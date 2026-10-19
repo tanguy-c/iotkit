@@ -130,13 +130,45 @@ fn json_str(out: &mut impl Write, s: &str) -> core::fmt::Result {
 
 /// The discovery payload of `entity`.
 pub fn discovery_payload<const N: usize>(device: &Device, node: &str, entity: &dyn Entity) -> Option<String<N>> {
+    discovery_payload_with(device, node, entity, None)
+}
+
+/// The discovery payload of `entity` of a deep-sleeping device (`expire_after_s`: how long a
+/// reading stays valid): no availability (asleep is not offline), commands retained (applied at
+/// the next wake-up), readings that expire.
+pub fn sleepy_discovery_payload<const N: usize>(
+    device: &Device,
+    node: &str,
+    entity: &dyn Entity,
+    expire_after_s: u32,
+) -> Option<String<N>> {
+    discovery_payload_with(device, node, entity, Some(expire_after_s))
+}
+
+fn discovery_payload_with<const N: usize>(
+    device: &Device,
+    node: &str,
+    entity: &dyn Entity,
+    sleepy: Option<u32>,
+) -> Option<String<N>> {
     let m = entity.meta();
     let mut s = String::<N>::new();
     (|| -> core::fmt::Result {
         s.write_str("{\"name\":")?;
         json_str(&mut s, m.name)?;
         write!(s, ",\"unique_id\":\"{node}_{}\"", m.id)?;
-        write!(s, ",\"availability_topic\":\"{}\"", availability_topic(node))?;
+        match sleepy {
+            None => write!(s, ",\"availability_topic\":\"{}\"", availability_topic(node))?,
+            Some(expire) => {
+                if !matches!(m.kind, Kind::Sensor | Kind::BinarySensor | Kind::TextSensor | Kind::Button | Kind::Event)
+                {
+                    s.write_str(",\"ret\":true")?;
+                }
+                if matches!(m.kind, Kind::Sensor | Kind::BinarySensor | Kind::TextSensor) {
+                    write!(s, ",\"exp_aft\":{expire}")?;
+                }
+            }
+        }
         // A thermostat has a topic per setting, below.
         if !matches!(m.kind, Kind::Button | Kind::Climate) {
             write!(s, ",\"state_topic\":\"{}\"", state_topic(node, m.id))?;
@@ -309,6 +341,20 @@ pub fn update_payload(entity: &dyn Entity, out: &mut impl Write) -> core::fmt::R
     write!(out, ",\"in_progress\":{},\"update_percentage\":", u.in_progress)?;
     json_opt(out, u.percentage)?;
     out.write_char('}')
+}
+
+/// A command that acts once (a press, a stop, an unlatch, an install): a sleepy device clears
+/// its retained copy, so that it does not run again at the next wake-up.
+pub fn one_shot(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Press | Command::Cover(CoverCommand::Stop) | Command::Lock(LockCommand::Open) | Command::Install
+    )
+}
+
+/// FNV-1a: a sleepy device sends discovery again only when its hash changed.
+pub fn hash(data: &[u8], seed: u32) -> u32 {
+    data.iter().fold(seed, |h, &b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
 }
 
 /// Whether the state is published retained: events are not states.
@@ -695,6 +741,20 @@ mod tests {
                 state_payload(&CLIMATE).unwrap(),
                 "{\"mode\":\"heat\",\"target\":21.5,\"current\":null,\"action\":\"heating\"}"
             );
+        }
+
+        #[test]
+        fn sleepy_discovery() {
+            let p: String<1024> = sleepy_discovery_payload(&DEV, "n", &NUMBER, 180).unwrap();
+            json(&p);
+            assert!(p.contains("\"ret\":true") && !p.contains("availability") && !p.contains("exp_aft"));
+            let p: String<1024> = sleepy_discovery_payload(&DEV, "n", &TEXT, 180).unwrap();
+            assert!(p.contains("\"exp_aft\":180") && !p.contains("\"ret\""));
+            let p: String<1024> = sleepy_discovery_payload(&DEV, "iotkit-aefc", &CLIMATE, 180).unwrap();
+            json(&p);
+            assert!(p.contains("\"ret\":true"));
+            assert!(one_shot(&Command::Press) && !one_shot(&Command::Set(true)));
+            assert_ne!(hash(b"a", 0x811c_9dc5), hash(b"b", 0x811c_9dc5));
         }
 
         #[test]

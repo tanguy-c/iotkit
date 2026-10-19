@@ -1,0 +1,88 @@
+//! A deep-sleeping sensor on the ESP32-C6-DevKitC-1: wakes up every minute, sends the chip
+//! temperature and the number of wake-ups over MQTT, then sleeps.
+//!
+//! "Stay awake" (a switch in Home Assistant, retained) keeps it awake for maintenance: the USB
+//! console, OTA pushes. Updates from Home Assistant install at the next wake-up.
+
+#![no_std]
+#![no_main]
+
+use embassy_executor::Spawner;
+use embassy_time::Duration;
+use esp_hal::{
+    clock::CpuClock,
+    timer::timg::TimerGroup,
+    tsens::{self, TemperatureSensor},
+};
+use iotkit_app::{Board, Config, Entity, PublicKey, Sensor, SleepConfig, Switch};
+use log::info;
+
+esp_bootloader_esp_idf::esp_app_desc!();
+
+static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
+
+static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
+    .unit("°C")
+    .device_class("temperature")
+    .measurement()
+    .precision(1);
+static WAKEUPS: Sensor = Sensor::new("wakeups", "Wake-ups").measurement().diagnostic();
+static STAY_AWAKE: Switch = Switch::new("stay_awake", "Stay awake").icon("mdi:sleep-off").config();
+static ENTITIES: [&dyn Entity; 3] = [&TEMPERATURE, &WAKEUPS, &STAY_AWAKE];
+
+static CONFIG: Config = Config {
+    firmware: iotkit_app::firmware!(&OTA_KEY),
+    manufacturer: "iotkit",
+    model: "ESP32-C6-DevKitC-1",
+    chip: "ESP32-C6",
+    product_name: "iotkit sleepy",
+    entities: &ENTITIES,
+    watches: &[],
+    checks: &[],
+    console: None,
+};
+
+static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(60), max_awake: Duration::from_secs(30) };
+
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -> ! {
+    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
+    esp_alloc::heap_allocator!(size: 96 * 1024);
+    let timg0 = TimerGroup::new(p.TIMG0);
+    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
+
+    // Measured first: before the radio warms the chip.
+    let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();
+    let celsius = tsens.get_temperature().to_celsius();
+
+    let board = Board {
+        flash: p.FLASH,
+        wifi: p.WIFI,
+        bt: p.BT,
+        timg1: p.TIMG1,
+        usb: p.USB_DEVICE,
+        boot_button: Some(p.GPIO9.into()),
+    };
+    let app = iotkit_app::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
+    TEMPERATURE.set((celsius * 10.0 + 0.5f32.copysign(celsius)) as i32 as f32 / 10.0);
+    WAKEUPS.set(app.boots as f32);
+    // Until Home Assistant says otherwise (its retained command comes right after connecting).
+    STAY_AWAKE.set(false);
+    spawner.spawn(stay_awake_task().unwrap());
+
+    app.settled().await;
+    while STAY_AWAKE.get() == Some(true) {
+        info!("staying awake (\"Stay awake\" is on)");
+        embassy_time::Timer::after_secs(5).await;
+    }
+    app.sleep().await
+}
+
+#[embassy_executor::task]
+async fn stay_awake_task() {
+    loop {
+        let on = STAY_AWAKE.wait_command().await;
+        STAY_AWAKE.set(on);
+    }
+}

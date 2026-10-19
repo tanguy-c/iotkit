@@ -22,6 +22,7 @@ pub(crate) use core::sync::atomic;
 #[cfg(feature = "portable-atomic")]
 pub(crate) use portable_atomic as atomic;
 
+pub mod battery;
 pub mod shutdown;
 
 use crate::atomic::{AtomicU32, Ordering};

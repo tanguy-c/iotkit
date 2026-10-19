@@ -98,6 +98,11 @@ impl Update {
     pub async fn wait_install(&self) {
         self.install.wait().await
     }
+
+    /// Asked to install, and [`Self::wait_install`] has not taken it yet.
+    pub fn install_requested(&self) -> bool {
+        self.install.signaled()
+    }
 }
 
 impl Entity for Update {

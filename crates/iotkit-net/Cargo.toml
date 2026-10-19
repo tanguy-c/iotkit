@@ -14,6 +14,8 @@ esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-radio/esp32c5", "iotkit-config/esp32c
 esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-radio/esp32s3", "iotkit-config/esp32s3"]
 ## For Matter (`iotkit-link-matter`): IPv6 link-local address, room for its sockets, and its own
 ## mDNS responder instead of ours (it also answers `<hostname>.local`).
+## Joins a remembered access point and keeps its address (deep-sleeping devices).
+fast-connect = []
 matter = ["embassy-net?/proto-ipv6"]
 _esp = ["dep:esp-hal", "dep:esp-radio", "dep:embassy-net", "dep:embassy-executor", "dep:embassy-time", "dep:embassy-futures", "dep:embassy-sync", "dep:embedded-io-async", "dep:static_cell", "dep:smoltcp"]
 

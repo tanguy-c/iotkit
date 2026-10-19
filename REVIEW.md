@@ -71,6 +71,7 @@ The path a new developer takes, and where it hurts:
 |---|---|
 | O1 | Twice the boot counter went up without a recorded crash (31 → 35 while the hotspot was off, 40 → 41 around killing two serial monitors). Not reproduced in a 6-minute soak. The reset cause is printed but not kept, so it can't be traced afterwards: keep the last few causes in `BootStats` |
 | O2 | The early guard (R3) rolls back, but the crash records of those early boots are lost (`record_boot` never runs) |
+| O4 | Deep sleep: about one wake-up in ten on the NOKIA-3420 hotspot, with the reused lease, both first connections (MQTT and the manifest check) timed out after 10 s, and the reconnect worked at once. Probably the access point not forwarding for a client that skipped DHCP; costs 10 s awake. To watch on another AP; a shorter first connect timeout on a wake-up would halve it |
 
 ## Status
 

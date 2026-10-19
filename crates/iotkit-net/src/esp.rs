@@ -100,6 +100,50 @@ pub async fn credentials(store: &SharedStore) -> Option<WifiCredentials> {
     Some(built_in)
 }
 
+/// What a deep-sleeping device remembers to join faster: the access point (channel, BSSID) and
+/// the last DHCP lease.
+#[cfg(feature = "fast-connect")]
+#[derive(Clone, Debug)]
+pub struct FastConnect {
+    /// Channel and BSSID: no scan.
+    pub ap: Option<(u8, [u8; 6])>,
+    /// The address to use instead of asking DHCP.
+    pub ipv4: Option<embassy_net::StaticConfigV4>,
+}
+
+/// An access point's channel and BSSID.
+#[cfg(feature = "fast-connect")]
+type ApCell = embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::Cell<Option<(u8, [u8; 6])>>>;
+#[cfg(feature = "fast-connect")]
+static AP_HINT: ApCell = embassy_sync::blocking_mutex::Mutex::new(core::cell::Cell::new(None));
+#[cfg(feature = "fast-connect")]
+static STATIC_V4: embassy_sync::blocking_mutex::Mutex<
+    CriticalSectionRawMutex,
+    core::cell::RefCell<Option<embassy_net::StaticConfigV4>>,
+> = embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(None));
+#[cfg(feature = "fast-connect")]
+static CONNECTED_AP: ApCell = embassy_sync::blocking_mutex::Mutex::new(core::cell::Cell::new(None));
+
+/// [`start`], joining the remembered access point first (a scan if that fails) and with the
+/// remembered address (no DHCP).
+#[cfg(feature = "fast-connect")]
+pub fn start_fast(
+    spawner: Spawner,
+    wifi: WIFI<'static>,
+    credentials: Option<WifiCredentials>,
+    fast: FastConnect,
+) -> Result<Net, StartError> {
+    AP_HINT.lock(|h| h.set(fast.ap));
+    STATIC_V4.lock(|v| *v.borrow_mut() = fast.ipv4);
+    start(spawner, wifi, credentials)
+}
+
+/// The access point (channel, BSSID) of the current connection, to remember.
+#[cfg(feature = "fast-connect")]
+pub fn connected_ap() -> Option<(u8, [u8; 6])> {
+    CONNECTED_AP.lock(core::cell::Cell::get)
+}
+
 /// Starts Wi-Fi and the network stack; returns at once. Wait for an address with
 /// `net.wait_online().await`. Without `credentials` it waits for [`join`].
 pub fn start(spawner: Spawner, wifi: WIFI<'static>, credentials: Option<WifiCredentials>) -> Result<Net, StartError> {
@@ -119,6 +163,11 @@ pub fn start(spawner: Spawner, wifi: WIFI<'static>, credentials: Option<WifiCred
     dhcp.hostname = hostname.try_into().ok();
     #[allow(unused_mut)]
     let mut config = NetConfig::dhcpv4(dhcp);
+    #[cfg(feature = "fast-connect")]
+    if let Some(v4) = STATIC_V4.lock(|v| v.borrow_mut().take()) {
+        log::info!("net: address {} kept from before the sleep", v4.address);
+        config.ipv4 = embassy_net::ConfigV4::Static(v4);
+    }
     #[cfg(feature = "matter")]
     {
         // Matter needs IPv6; a link-local address is enough on one network.
@@ -220,6 +269,8 @@ async fn wifi_task(
                 Either::First(Ok(info)) => {
                     log::info!("net: Wi-Fi connected to '{}' (channel {})", current.ssid, info.channel);
                     w.channel = info.channel;
+                    #[cfg(feature = "fast-connect")]
+                    CONNECTED_AP.lock(|c| c.set(Some((info.channel, info.bssid))));
                 }
                 Either::First(Err(e)) => {
                     let delay = backoff.failed();
@@ -299,6 +350,12 @@ impl Wifi {
     /// Applies the station network (or none) and the access point, if open.
     fn configure(&mut self, credentials: Option<&WifiCredentials>) {
         let station = credentials.map_or_else(StationConfig::default, station_config);
+        // The remembered access point, for the first connection only: later ones scan.
+        #[cfg(feature = "fast-connect")]
+        let station = match AP_HINT.lock(core::cell::Cell::take) {
+            Some((channel, bssid)) => station.with_channel(channel).with_bssid(bssid),
+            None => station,
+        };
         let config = match &self.ap {
             Some(ap) => WifiConfig::AccessPointStation(station, ap.clone()),
             None => WifiConfig::Station(station),

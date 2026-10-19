@@ -297,6 +297,12 @@ pub async fn confirm(store: &SharedStore) {
 }
 
 static BUSY: AtomicBool = AtomicBool::new(false);
+
+/// An install is asked for, running, or done and waiting for the restart (a deep-sleeping
+/// device does not sleep then).
+pub fn installing() -> bool {
+    BUSY.load(Ordering::Acquire) || REQUEST.signaled()
+}
 /// An install asked for by [`request_install`], run by [`serve_task`].
 static REQUEST: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
 static RESULT: Signal<CriticalSectionRawMutex, Result<Version, OtaError>> = Signal::new();
@@ -374,7 +380,8 @@ pub async fn wait_progress() -> u8 {
 /// Downloads and installs the update described by the manifest at `manifest_url`. On success
 /// the new firmware is selected: restart to boot it (on trial).
 async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
-    /// Clears [`BUSY`] however the install ends, a dropped future included.
+    /// Clears [`BUSY`] however the install fails, a dropped future included. After a success it
+    /// stays set: the selected image waits for the restart, and must not be overwritten.
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
@@ -384,8 +391,12 @@ async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str
     if BUSY.swap(true, Ordering::Acquire) {
         return Err(OtaError::Busy);
     }
-    let _guard = Guard;
-    install_inner(net, store, fw, manifest_url).await
+    let guard = Guard;
+    let installed = install_inner(net, store, fw, manifest_url).await;
+    if installed.is_ok() {
+        core::mem::forget(guard);
+    }
+    installed
 }
 
 async fn install_inner(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {

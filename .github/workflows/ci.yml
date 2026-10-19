@@ -39,6 +39,7 @@ jobs:
       - run: cargo clippy -p devkit -- -D warnings
       - run: cargo clippy -p showcase -- -D warnings
       - run: cargo clippy -p showcase --features matter-wifi -- -D warnings
+      - run: cargo clippy -p sleepy -- -D warnings
       # The chip side of the libraries, which the host jobs do not build.
       - run: cargo clippy -p iotkit-config -p iotkit-diag -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-link-mqtt -p iotkit-app --features iotkit-config/esp32c6,iotkit-diag/esp32c6,iotkit-net/esp32c6,iotkit-ota/esp32c6,iotkit-provision/esp32c6,iotkit-link-mqtt/esp32c6,iotkit-app/esp32c6 -- -D warnings
       # Matter over Wi-Fi next to MQTT (git dependency, 8 MB partitions).
@@ -74,6 +75,9 @@ jobs:
       - if: matrix.app == 'thread-light'
         run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: cargo clippy -p ${{ matrix.app }} --no-default-features --features ${{ matrix.chip }} --target ${{ matrix.target }} -- -D warnings
+      # Deep sleep (Wi-Fi chips only).
+      - if: matrix.app == 'devkit'
+        run: cargo clippy -p iotkit-app --features iotkit-app/${{ matrix.chip }},iotkit-app/deep-sleep --target ${{ matrix.target }} -- -D warnings
       - if: matrix.app == 'devkit'
         run: cargo xtask build --release --chip ${{ matrix.chip }} && cargo xtask verify
 
@@ -94,6 +98,7 @@ jobs:
           key: esp32s3
       - run: cargo xtask keygen
       - run: cargo +esp clippy -p devkit --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
+      - run: cargo +esp clippy -p iotkit-app --features iotkit-app/esp32s3,iotkit-app/deep-sleep --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
       - run: cargo xtask build --release --chip esp32s3 && cargo xtask verify
 
   template:
