@@ -138,7 +138,10 @@ trial is counted; `push` then reports the rollback.
 - **Matter over Wi-Fi** (`--features matter-wifi`, 8 MB flash): runs next to MQTT. Each device
   draws its own pairing code at first boot (boot log, or `matter` on the console). In Home
   Assistant: *Settings > Devices > Add > Matter*, with the code (no Bluetooth step: the device is
-  already on the network). Lights, switches (as plugs), temperature and contact sensors appear;
+  already on the network). Lights, switches (as plugs), sensors (temperature, humidity, pressure,
+  illuminance, air quality, battery), binary sensors (contact, motion, leak, smoke/CO), buttons
+  (as switches with events), covers, valves, locks, fans, thermostats and selects appear, named
+  after the entities;
   other entities stay MQTT-only. `matter pair` lets another controller pair for 15 minutes;
   `matter reset` forgets every pairing. Matter uses the test vendor's attestation: fine for
   development, not for selling devices.
@@ -163,7 +166,12 @@ Type `help`: `info` (version, boot counters, last crash, last update), `net`, `p
 `ota URL`, `mqtt [HOST[:PORT] [USER PASS]]`, `matter [pair|reset]`, and test commands (`panic`,
 `hang`, `reboot`, `factory-reset`). Apps add their own with `Config::console`.
 
-## 8. VSCode
+## 8. Logs
+
+`ESP_LOG` in `.cargo/config.toml` sets the level at build time (`info` by default). Release builds
+compile out debug and trace logs (they would cost RAM): for those, build without `--release`.
+
+## 9. VSCode
 
 Accept the recommended extensions (rust-analyzer, probe-rs, Even Better TOML, Error Lens). Tasks
 (`Ctrl+Shift+B`): **Flash USB**, **Monitor**, **Build signed**, **OTA push**. Debug (`F5`) uses

@@ -31,9 +31,9 @@ use static_cell::StaticCell;
 
 pub use crate::common::{PAIRING_WINDOW_S, PairingCodes, Product, forget_pairings, open_pairing_window, pairing_codes};
 use crate::{
-    clusters::Colors,
+    clusters::{Colors, Identifies},
     common::{REQUESTS, Request, identity, setup_code},
-    endpoints::{self, COLOR, DESC},
+    endpoints::{self, COLOR, DESC, IDENTIFY},
     handler::Entities,
 };
 
@@ -95,7 +95,11 @@ async fn run(
             Async(desc::DescHandler::new(Dataver::new_rand(&mut rand)).adapt()),
         )
         .chain(|e, c| e != ROOT_ENDPOINT_ID && c == COLOR.id, Colors::new(eps, &mut rand))
-        .chain(|e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id, Async(Entities { eps }));
+        .chain(|e, c| e != ROOT_ENDPOINT_ID && c == IDENTIFY.id, Async(Identifies::new(eps, &mut rand)))
+        .chain(
+            |e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id && c != IDENTIFY.id,
+            Async(Entities { eps }),
+        );
 
     let range = find_partition(NVS_LABEL).ok_or(Error::from(ErrorCode::NoSpace))?;
     let mut kv_store = SeqMapKvBlobStore::new(BlockingAsync::new(SharedFlash), range.clone());

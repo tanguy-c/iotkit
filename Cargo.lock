@@ -2963,6 +2963,7 @@ dependencies = [
 name = "iotkit-link-matter"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",

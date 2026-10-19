@@ -4,12 +4,12 @@ use alloc::{boxed::Box, vec::Vec};
 use core::{future::Future, pin::Pin};
 
 use embassy_futures::select::select_slice;
-use iotkit_model::Command;
+use iotkit_model::{Command, Spec};
 use rs_matter_embassy::matter::{
     crypto::Rng,
     dm::{
-        AsyncHandler, Cluster, Dataver, HandlerContext, InvokeContext, InvokeReply, LifecycleOp, MatchContext,
-        ReadContext, ReadReply, WriteContext,
+        ArrayAttributeRead, AsyncHandler, Cluster, Dataver, EndptId, Handler, HandlerContext, InvokeContext,
+        InvokeReply, LifecycleOp, MatchContext, NonBlockingHandler, ReadContext, ReadReply, WriteContext,
         clusters::{
             app::{
                 color_control::{
@@ -19,16 +19,31 @@ use rs_matter_embassy::matter::{
                 level_control::NoOnOff,
                 on_off::NoLevelControl,
             },
-            decl::{boolean_state, level_control, on_off, temperature_measurement as temperature},
+            decl::{
+                air_quality, boolean_state, carbon_dioxide_concentration_measurement as co2,
+                carbon_monoxide_concentration_measurement as co,
+                globals::{MeasurementMediumEnum, MeasurementUnitEnum},
+                illuminance_measurement as lux, level_control, nitrogen_dioxide_concentration_measurement as no2,
+                occupancy_sensing as occupancy, on_off, ozone_concentration_measurement as o3,
+                pm_1_concentration_measurement as pm1, pm_10_concentration_measurement as pm10,
+                pm_25_concentration_measurement as pm25, power_source, pressure_measurement as pressure,
+                relative_humidity_measurement as humidity, switch, temperature_measurement as temperature,
+                total_volatile_organic_compounds_concentration_measurement as tvoc,
+            },
+            identify::{self, IdentifyAction, IdentifyHandler, IdentifyHooks},
         },
     },
     error::{Error, ErrorCode},
-    tlv::Nullable,
+    tlv::{Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder},
 };
 
 use crate::{
     MatterKind,
-    endpoints::{BOOLEAN, COLOR, Ep, LEVEL, ON_OFF, TEMPERATURE},
+    endpoints::{
+        AIR_QUALITY, BOOLEAN, CO, CO2, COLOR, Ep, HUMIDITY, LEVEL, LUX, NO2, O3, OCCUPANCY, ON_OFF, PM1, PM10, PM25,
+        POWER_SOURCE, PRESSURE, SWITCH, TEMPERATURE, TVOC,
+    },
+    map::{self, SwitchFeatures},
     temperature_hundredths,
 };
 
@@ -72,9 +87,261 @@ impl boolean_state::ClusterHandler for BooleanH<'_> {
         self.0.datavers[0].changed();
     }
 
-    /// Contact sensor: `true` is "closed" in Matter, "on" (open) in the model.
+    /// Contact sensor: `true` is "closed" in Matter, "on" (open) in the model. Leak detector:
+    /// `true` is a leak.
     fn state_value(&self, _ctx: impl ReadContext) -> Result<bool, Error> {
-        Ok(!self.0.on())
+        Ok(map::state_value(self.0.kind, self.0.on()))
+    }
+}
+
+/// A measurement cluster: `MeasuredValue` from the sensor, in Matter's encoding.
+macro_rules! measurement {
+    ($name:ident, $module:ident, $cluster:ident, $ty:ty) => {
+        pub(crate) struct $name<'a>(pub(crate) &'a Ep);
+
+        impl $module::ClusterHandler for $name<'_> {
+            const CLUSTER: Cluster<'static> = $cluster;
+
+            fn dataver(&self) -> u32 {
+                self.0.datavers[0].get()
+            }
+
+            fn dataver_changed(&self) {
+                self.0.datavers[0].changed();
+            }
+
+            fn measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<$ty>, Error> {
+                Ok(self.0.measured())
+            }
+
+            fn min_measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<$ty>, Error> {
+                Ok(Nullable::none())
+            }
+
+            fn max_measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<$ty>, Error> {
+                Ok(Nullable::none())
+            }
+        }
+    };
+}
+
+measurement!(HumidityH, humidity, HUMIDITY, u16);
+measurement!(LuxH, lux, LUX, u16);
+measurement!(PressureH, pressure, PRESSURE, i16);
+
+pub(crate) struct OccupancyH<'a>(pub(crate) &'a Ep);
+
+impl occupancy::ClusterHandler for OccupancyH<'_> {
+    const CLUSTER: Cluster<'static> = OCCUPANCY;
+
+    fn dataver(&self) -> u32 {
+        self.0.datavers[0].get()
+    }
+
+    fn dataver_changed(&self) {
+        self.0.datavers[0].changed();
+    }
+
+    fn occupancy(&self, _ctx: impl ReadContext) -> Result<occupancy::OccupancyBitmap, Error> {
+        let mut bits = occupancy::OccupancyBitmap::empty();
+        bits.set(occupancy::OccupancyBitmap::OCCUPIED, self.0.on());
+        Ok(bits)
+    }
+
+    fn occupancy_sensor_type(&self, _ctx: impl ReadContext) -> Result<occupancy::OccupancySensorTypeEnum, Error> {
+        Ok(occupancy::OccupancySensorTypeEnum::PIR)
+    }
+
+    fn occupancy_sensor_type_bitmap(
+        &self,
+        _ctx: impl ReadContext,
+    ) -> Result<occupancy::OccupancySensorTypeBitmap, Error> {
+        Ok(occupancy::OccupancySensorTypeBitmap::PIR)
+    }
+}
+
+pub(crate) struct AirQualityH<'a>(pub(crate) &'a Ep);
+
+impl air_quality::ClusterHandler for AirQualityH<'_> {
+    const CLUSTER: Cluster<'static> = AIR_QUALITY;
+
+    fn dataver(&self) -> u32 {
+        self.0.datavers[0].get()
+    }
+
+    fn dataver_changed(&self) {
+        self.0.datavers[0].changed();
+    }
+
+    fn air_quality(&self, _ctx: impl ReadContext) -> Result<air_quality::AirQualityEnum, Error> {
+        use air_quality::AirQualityEnum::*;
+        let MatterKind::AirQualitySensor(p) = self.0.kind else { return Ok(Unknown) };
+        Ok(match map::air_quality(p, self.0.matter_value().unwrap_or(f32::NAN)) {
+            1 => Good,
+            2 => Fair,
+            3 => Moderate,
+            4 => Poor,
+            5 => VeryPoor,
+            6 => ExtremelyPoor,
+            _ => Unknown,
+        })
+    }
+}
+
+/// An air quality sensor's reading, in ppm or µg/m³ (on the endpoint's second data version).
+macro_rules! concentration {
+    ($name:ident, $module:ident, $cluster:ident) => {
+        pub(crate) struct $name<'a>(pub(crate) &'a Ep);
+
+        impl $module::ClusterHandler for $name<'_> {
+            const CLUSTER: Cluster<'static> = $cluster;
+
+            fn dataver(&self) -> u32 {
+                self.0.datavers[1].get()
+            }
+
+            fn dataver_changed(&self) {
+                self.0.datavers[1].changed();
+            }
+
+            fn measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<f32>, Error> {
+                Ok(self.0.matter_value().map_or(Nullable::none(), Nullable::some))
+            }
+
+            fn min_measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<f32>, Error> {
+                Ok(Nullable::none())
+            }
+
+            fn max_measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<f32>, Error> {
+                Ok(Nullable::none())
+            }
+
+            fn measurement_unit(&self, _ctx: impl ReadContext) -> Result<MeasurementUnitEnum, Error> {
+                Ok(match self.0.concentration_unit() {
+                    map::ConcentrationUnit::Ppm => MeasurementUnitEnum::PPM,
+                    map::ConcentrationUnit::Ugm3 => MeasurementUnitEnum::UGM3,
+                })
+            }
+
+            fn measurement_medium(&self, _ctx: impl ReadContext) -> Result<MeasurementMediumEnum, Error> {
+                Ok(MeasurementMediumEnum::Air)
+            }
+        }
+    };
+}
+
+concentration!(Co2H, co2, CO2);
+concentration!(CoH, co, CO);
+concentration!(No2H, no2, NO2);
+concentration!(O3H, o3, O3);
+concentration!(Pm1H, pm1, PM1);
+concentration!(Pm25H, pm25, PM25);
+concentration!(Pm10H, pm10, PM10);
+concentration!(TvocH, tvoc, TVOC);
+
+/// A battery level, as the power source of the whole node.
+pub(crate) struct PowerSourceH<'a>(pub(crate) &'a Ep, pub(crate) &'a [Ep]);
+
+impl power_source::ClusterHandler for PowerSourceH<'_> {
+    const CLUSTER: Cluster<'static> = POWER_SOURCE;
+
+    fn dataver(&self) -> u32 {
+        self.0.datavers[0].get()
+    }
+
+    fn dataver_changed(&self) {
+        self.0.datavers[0].changed();
+    }
+
+    fn status(&self, _ctx: impl ReadContext) -> Result<power_source::PowerSourceStatusEnum, Error> {
+        Ok(power_source::PowerSourceStatusEnum::Active)
+    }
+
+    fn order(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+        Ok(0)
+    }
+
+    fn description<P: TLVBuilderParent>(&self, _ctx: impl ReadContext, builder: Utf8StrBuilder<P>) -> Result<P, Error> {
+        builder.set("Battery")
+    }
+
+    fn bat_percent_remaining(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
+        Ok(self.0.measured())
+    }
+
+    fn bat_charge_level(&self, _ctx: impl ReadContext) -> Result<power_source::BatChargeLevelEnum, Error> {
+        use power_source::BatChargeLevelEnum::*;
+        Ok(match map::battery_charge_level(self.0.matter_value().unwrap_or(f32::NAN)) {
+            2 => Critical,
+            1 => Warning,
+            _ => OK,
+        })
+    }
+
+    fn bat_replacement_needed(&self, _ctx: impl ReadContext) -> Result<bool, Error> {
+        Ok(map::battery_charge_level(self.0.matter_value().unwrap_or(f32::NAN)) == 2)
+    }
+
+    fn bat_replaceability(&self, _ctx: impl ReadContext) -> Result<power_source::BatReplaceabilityEnum, Error> {
+        Ok(power_source::BatReplaceabilityEnum::Unspecified)
+    }
+
+    /// The battery powers the whole node.
+    fn endpoint_list<P: TLVBuilderParent>(
+        &self,
+        _ctx: impl ReadContext,
+        builder: ArrayAttributeRead<ToTLVArrayBuilder<P, EndptId>, ToTLVBuilder<P, EndptId>>,
+    ) -> Result<P, Error> {
+        let ids = || core::iter::once(0).chain(self.1.iter().map(|ep| ep.id));
+        match builder {
+            ArrayAttributeRead::ReadAll(mut array) => {
+                for id in ids() {
+                    array = array.push(&id)?;
+                }
+                array.end()
+            }
+            ArrayAttributeRead::ReadOne(index, item) => {
+                let id = ids().nth(index as usize).ok_or(ErrorCode::ConstraintError)?;
+                item.set(&id)
+            }
+            ArrayAttributeRead::ReadNone(array) => array.end(),
+        }
+    }
+}
+
+/// The switch features of an event entity.
+pub(crate) fn switch_features(ep: &Ep) -> SwitchFeatures {
+    match ep.entity.spec() {
+        Spec::Event { types } => SwitchFeatures::of(types),
+        _ => SwitchFeatures::of(&[]),
+    }
+}
+
+/// A button: a momentary Generic Switch. Its events are sent by the report loop.
+pub(crate) struct SwitchH<'a>(pub(crate) &'a Ep);
+
+impl switch::ClusterHandler for SwitchH<'_> {
+    const CLUSTER: Cluster<'static> = SWITCH;
+
+    fn dataver(&self) -> u32 {
+        self.0.datavers[0].get()
+    }
+
+    fn dataver_changed(&self) {
+        self.0.datavers[0].changed();
+    }
+
+    fn number_of_positions(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+        Ok(2)
+    }
+
+    fn current_position(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+        Ok(0)
+    }
+
+    fn multi_press_max(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+        let f = switch_features(self.0);
+        if f.multi_press() { Ok(f.multi_press_max) } else { Err(ErrorCode::AttributeNotFound.into()) }
     }
 }
 
@@ -375,3 +642,79 @@ impl AsyncHandler for Colors {
         select_slice(Pin::new(&mut tasks[..])).await.0
     }
 }
+
+/// Passes Identify requests on to [`wait_identify`](crate::wait_identify).
+pub(crate) struct IdentifyHooksImpl;
+
+impl IdentifyHooks for IdentifyHooksImpl {
+    fn identify_type(&self) -> identify::IdentifyTypeEnum {
+        identify::IdentifyTypeEnum::VisibleIndicator
+    }
+
+    fn identify(&self, action: IdentifyAction) {
+        use identify::EffectIdentifierEnum::*;
+        let secs = match action {
+            IdentifyAction::Time(secs) => secs,
+            IdentifyAction::Cancel => 0,
+            // The usual lengths of the effects.
+            IdentifyAction::Effect(Blink | Okay, _) => 1,
+            IdentifyAction::Effect(ChannelChange, _) => 8,
+            IdentifyAction::Effect(Breathe, _) => 15,
+            IdentifyAction::Effect(FinishEffect | StopEffect, _) => 0,
+        };
+        crate::IDENTIFY.signal(secs);
+    }
+}
+
+type IdentifyH = identify::HandlerAdaptor<IdentifyHandler<IdentifyHooksImpl>>;
+
+/// The Identify cluster of every entity endpoint but the battery's (one countdown each).
+pub(crate) struct Identifies(Vec<(u16, IdentifyH)>);
+
+impl Identifies {
+    pub(crate) fn new(eps: &'static [Ep], rand: &mut impl Rng) -> Self {
+        Self(
+            eps.iter()
+                .filter(|ep| ep.kind != MatterKind::Battery)
+                .map(|ep| (ep.id, IdentifyHandler::new_with(Dataver::new_rand(rand), IdentifyHooksImpl).adapt()))
+                .collect(),
+        )
+    }
+
+    fn get(&self, endpoint: u16) -> Result<&IdentifyH, Error> {
+        self.0.iter().find(|(id, _)| *id == endpoint).map(|(_, h)| h).ok_or_else(|| ErrorCode::EndpointNotFound.into())
+    }
+}
+
+impl Handler for Identifies {
+    fn read(&self, ctx: impl ReadContext, reply: impl ReadReply) -> Result<(), Error> {
+        self.get(ctx.attr().endpoint_id)?.read(ctx, reply)
+    }
+
+    fn write(&self, ctx: impl WriteContext) -> Result<(), Error> {
+        self.get(ctx.attr().endpoint_id)?.write(ctx)
+    }
+
+    fn invoke(&self, ctx: impl InvokeContext, reply: impl InvokeReply) -> Result<(), Error> {
+        self.get(ctx.cmd().endpoint_id)?.invoke(ctx, reply)
+    }
+
+    fn bump_dataver(&self, ctx: impl MatchContext) {
+        for (id, handler) in &self.0 {
+            if ctx.endpt().is_none_or(|e| e == *id) {
+                handler.bump_dataver(&ctx);
+            }
+        }
+    }
+
+    async fn run(&self, ctx: impl HandlerContext) -> Result<(), Error> {
+        let ctx = &ctx;
+        let mut tasks: Vec<RunFuture<'_>> = self.0.iter().map(|(_, h)| Box::pin(h.run(ctx)) as RunFuture<'_>).collect();
+        if tasks.is_empty() {
+            return core::future::pending().await;
+        }
+        select_slice(Pin::new(&mut tasks[..])).await.0
+    }
+}
+
+impl NonBlockingHandler for Identifies {}

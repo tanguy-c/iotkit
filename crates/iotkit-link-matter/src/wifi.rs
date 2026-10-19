@@ -16,9 +16,9 @@ use iotkit_net::esp::Net;
 
 pub use crate::common::{PAIRING_WINDOW_S, PairingCodes, Product, forget_pairings, open_pairing_window, pairing_codes};
 use crate::{
-    clusters::Colors,
+    clusters::{Colors, Identifies},
     common::{REQUESTS, Request, identity, setup_code},
-    endpoints::{self, COLOR, DESC, Ep},
+    endpoints::{self, COLOR, DESC, Ep, IDENTIFY},
     handler::Entities,
 };
 use rs_matter_embassy::{
@@ -136,7 +136,11 @@ async fn run<C: Crypto>(
             Async(desc::DescHandler::new(Dataver::new_rand(&mut rand)).adapt()),
         )
         .chain(|e, c| e != ROOT_ENDPOINT_ID && c == COLOR.id, Colors::new(eps, &mut rand))
-        .chain(|e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id, Async(Entities { eps }));
+        .chain(|e, c| e != ROOT_ENDPOINT_ID && c == IDENTIFY.id, Async(Identifies::new(eps, &mut rand)))
+        .chain(
+            |e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id && c != IDENTIFY.id,
+            Async(Entities { eps }),
+        );
 
     // Pairings and the rest of rs-matter's state, in the `nvs` partition. If it does not load
     // (another firmware's data, say), it is erased and Matter starts unpaired.

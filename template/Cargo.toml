@@ -27,7 +27,8 @@ embassy-executor       = { version = "0.10.0", features = ["log"] }
 embassy-futures        = "0.1"
 embassy-time           = { version = "0.5.1", features = ["log"] }
 smart-leds             = "0.4"
-log                    = "0.4.27"
+# Release builds keep info logs and up (debug and trace are compiled out); debug builds keep all.
+log                    = { version = "0.4.27", features = ["release_max_level_info"] }
 
 [build-dependencies]
 iotkit-build = { path = "{{iotkit_path}}/crates/iotkit-build" }

@@ -3,14 +3,20 @@
 //! Each entity with a Matter equivalent ([`matter_kind`]) becomes an endpoint, numbered from 1
 //! in declaration order:
 //!
-//! | Entity | Matter device type | Clusters |
+//! | Entity | Matter device type | Main clusters |
 //! |---|---|---|
 //! | `Light` | Extended Color Light | On/Off, Level Control, Color Control |
 //! | `Switch` | On/Off Plug-in Unit | On/Off |
-//! | `Sensor` with class `temperature` | Temperature Sensor | Temperature Measurement |
-//! | `BinarySensor` | Contact Sensor | Boolean State |
+//! | `Sensor` class `temperature`, `humidity`, `illuminance`, `pressure` | Temperature, Humidity, Light, Pressure Sensor | the Measurement cluster |
+//! | `Sensor` class `carbon_dioxide`, `carbon_monoxide`, `nitrogen_dioxide`, `ozone`, `pm1`, `pm25`, `pm10`, `volatile_organic_compounds` | Air Quality Sensor | Air Quality, Concentration Measurement |
+//! | `Sensor` class `battery` | Power Source | Power Source (battery) |
+//! | `BinarySensor` class `motion`/`occupancy`, `moisture`, `smoke`, `carbon_monoxide`, others | Occupancy Sensor, Water Leak Detector, Smoke CO Alarm, Contact Sensor | |
+//! | `Event` with button types (`press`, `long_press`, `double_press`, ...) | Generic Switch | Switch (events) |
+//! | `Cover`, `Valve`, `Lock`, `Fan`, `Climate`, `Select` | Window Covering, Water Valve, Door Lock, Fan, Thermostat, Mode Select | the matching cluster |
 //!
-//! Buttons and other sensors are MQTT-only for now.
+//! Every endpoint also has Identify ([`wait_identify`]) and a Fixed Label with the entity's name
+//! (Home Assistant names the entity after it). Buttons, numbers and text sensors are MQTT-only,
+//! like sensors in a unit Matter does not take.
 //!
 //! `wifi`: Matter runs on `iotkit-net`'s network (joined with iotkit's provisioning), next to
 //! MQTT and OTA, and is commissioned on that network.
@@ -29,6 +35,8 @@ compile_error!("iotkit-link-matter: Matter is not supported on the ESP32-C5 yet 
 extern crate alloc;
 
 #[cfg(feature = "_esp")]
+mod appliances;
+#[cfg(feature = "_esp")]
 mod clusters;
 #[cfg(feature = "_esp")]
 mod common;
@@ -41,11 +49,12 @@ pub mod thread;
 // Links the C library functions OpenThread and mbedtls call.
 #[cfg(feature = "thread")]
 use tinyrlibc as _;
+pub mod map;
 #[cfg(feature = "wifi")]
 pub mod wifi;
 
 use iotkit_config::{Setting, keys};
-use iotkit_model::{Kind, Meta};
+use iotkit_model::{Entity, Kind, Spec};
 
 /// The Matter device an entity becomes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,18 +62,98 @@ pub enum MatterKind {
     ExtendedColorLight,
     OnOffPlug,
     TemperatureSensor,
+    HumiditySensor,
+    /// Illuminance.
+    LightSensor,
+    PressureSensor,
     ContactSensor,
+    OccupancySensor,
+    WaterLeakDetector,
+    SmokeAlarm,
+    CoAlarm,
+    AirQualitySensor(Pollutant),
+    /// A battery level: the node's power source.
+    Battery,
+    /// A button's events.
+    GenericSwitch,
+    WindowCovering,
+    WaterValve,
+    DoorLock,
+    Fan,
+    Thermostat,
+    ModeSelect,
 }
 
-/// `None`: the entity has no Matter equivalent (it stays MQTT-only).
-pub fn matter_kind(meta: &Meta) -> Option<MatterKind> {
+/// What an air quality sensor measures (its Concentration Measurement cluster).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pollutant {
+    Co2,
+    Co,
+    No2,
+    O3,
+    Pm1,
+    Pm25,
+    Pm10,
+    Tvoc,
+}
+
+/// `None`: the entity has no Matter equivalent (it stays MQTT-only): numbers, text sensors,
+/// buttons, sensors of other classes or in a unit Matter does not take.
+pub fn matter_kind(entity: &dyn Entity) -> Option<MatterKind> {
+    let meta = entity.meta();
+    let class = meta.device_class;
     match meta.kind {
         Kind::Light => Some(MatterKind::ExtendedColorLight),
         Kind::Switch => Some(MatterKind::OnOffPlug),
-        Kind::Sensor if meta.device_class == Some("temperature") => Some(MatterKind::TemperatureSensor),
-        Kind::BinarySensor => Some(MatterKind::ContactSensor),
-        _ => None,
+        Kind::Sensor => {
+            let kind = match class? {
+                "temperature" => MatterKind::TemperatureSensor,
+                "humidity" => MatterKind::HumiditySensor,
+                "illuminance" => MatterKind::LightSensor,
+                "pressure" => MatterKind::PressureSensor,
+                "battery" => MatterKind::Battery,
+                other => MatterKind::AirQualitySensor(map::pollutant(other)?),
+            };
+            // A temperature in an unknown unit is taken as °C, as before.
+            if kind == MatterKind::TemperatureSensor {
+                return Some(kind);
+            }
+            map::to_matter_unit(kind, meta.unit?, 0.0).map(|_| kind)
+        }
+        Kind::BinarySensor => Some(match class {
+            Some("motion" | "occupancy" | "presence") => MatterKind::OccupancySensor,
+            Some("moisture") => MatterKind::WaterLeakDetector,
+            Some("smoke") => MatterKind::SmokeAlarm,
+            Some("carbon_monoxide" | "gas") => MatterKind::CoAlarm,
+            _ => MatterKind::ContactSensor,
+        }),
+        Kind::Event => match entity.spec() {
+            Spec::Event { types } if types.iter().any(|t| map::gesture(t).is_some()) => Some(MatterKind::GenericSwitch),
+            _ => None,
+        },
+        Kind::Cover => Some(MatterKind::WindowCovering),
+        Kind::Valve => Some(MatterKind::WaterValve),
+        Kind::Lock => Some(MatterKind::DoorLock),
+        Kind::Fan => Some(MatterKind::Fan),
+        Kind::Climate => Some(MatterKind::Thermostat),
+        Kind::Select => Some(MatterKind::ModeSelect),
+        Kind::Button | Kind::Number | Kind::TextSensor => None,
     }
+}
+
+/// Identify requests from a controller: show where the device is for this many seconds (0:
+/// stop).
+#[cfg(feature = "_esp")]
+pub(crate) static IDENTIFY: embassy_sync::signal::Signal<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    u16,
+> = embassy_sync::signal::Signal::new();
+
+/// Waits until a controller asks the device to identify itself; the seconds to do so (blink a
+/// LED, beep), 0 to stop.
+#[cfg(feature = "_esp")]
+pub async fn wait_identify() -> u16 {
+    IDENTIFY.wait().await
 }
 
 /// Matter's Level Control (1..=254) from a brightness (0..=255).
@@ -123,7 +212,7 @@ impl MatterSetup {
 mod tests {
     use super::*;
 
-    use iotkit_model::{BinarySensor, Button, Entity, Light, Sensor, Switch};
+    use iotkit_model::{BinarySensor, Button, Event, Light, Number, Sensor, Switch};
 
     #[test]
     fn kinds() {
@@ -133,12 +222,28 @@ mod tests {
         static U: Sensor = Sensor::new("u", "U").unit("s");
         static B: BinarySensor = BinarySensor::new("b", "B");
         static P: Button = Button::new("p", "P");
-        assert_eq!(matter_kind(L.meta()), Some(MatterKind::ExtendedColorLight));
-        assert_eq!(matter_kind(S.meta()), Some(MatterKind::OnOffPlug));
-        assert_eq!(matter_kind(T.meta()), Some(MatterKind::TemperatureSensor));
-        assert_eq!(matter_kind(U.meta()), None);
-        assert_eq!(matter_kind(B.meta()), Some(MatterKind::ContactSensor));
-        assert_eq!(matter_kind(P.meta()), None);
+        assert_eq!(matter_kind(&L), Some(MatterKind::ExtendedColorLight));
+        assert_eq!(matter_kind(&S), Some(MatterKind::OnOffPlug));
+        assert_eq!(matter_kind(&T), Some(MatterKind::TemperatureSensor));
+        assert_eq!(matter_kind(&U), None);
+        assert_eq!(matter_kind(&B), Some(MatterKind::ContactSensor));
+        assert_eq!(matter_kind(&P), None);
+        static H: Sensor = Sensor::new("h", "H").device_class("humidity").unit("%");
+        static HX: Sensor = Sensor::new("hx", "HX").device_class("humidity").unit("g/m³");
+        static C: Sensor = Sensor::new("c", "C").device_class("carbon_dioxide").unit("ppm");
+        static M: BinarySensor = BinarySensor::new("m", "M").device_class("motion");
+        static W: BinarySensor = BinarySensor::new("w", "W").device_class("moisture");
+        static E: Event = Event::new("e", "E", &["press", "long_press"]);
+        static X: Event = Event::new("x", "X", &["spin"]);
+        static N: Number = Number::new("n", "N", 0.0, 1.0, 0.1);
+        assert_eq!(matter_kind(&H), Some(MatterKind::HumiditySensor));
+        assert_eq!(matter_kind(&HX), None, "a unit Matter does not take");
+        assert_eq!(matter_kind(&C), Some(MatterKind::AirQualitySensor(Pollutant::Co2)));
+        assert_eq!(matter_kind(&M), Some(MatterKind::OccupancySensor));
+        assert_eq!(matter_kind(&W), Some(MatterKind::WaterLeakDetector));
+        assert_eq!(matter_kind(&E), Some(MatterKind::GenericSwitch));
+        assert_eq!(matter_kind(&X), None, "no switch gesture");
+        assert_eq!(matter_kind(&N), None);
     }
 
     #[test]

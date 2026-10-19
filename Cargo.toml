@@ -41,7 +41,9 @@ embassy-sync           = "0.8"
 embedded-io-async      = "0.7"
 heapless               = "0.9"
 static_cell            = "2.1"
-log                    = "0.4.27"
+# Release builds keep info logs and up: debug and trace (and the formatting tables they pull in,
+# which esp-hal keeps in RAM) are compiled out. Debug builds keep every level.
+log                    = { version = "0.4.27", features = ["release_max_level_info"] }
 
 [profile.dev]
 # The default debug profile is too slow and too big for the chip.
