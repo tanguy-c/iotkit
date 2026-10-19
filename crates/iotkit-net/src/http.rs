@@ -31,6 +31,10 @@ pub struct Url<'a> {
 
 impl<'a> Url<'a> {
     pub fn parse(url: &'a str) -> Result<Self, Error> {
+        // Control characters would end up in the request head (CR/LF: an injected header).
+        if url.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return Err(Error::Url);
+        }
         if url.starts_with("https://") {
             return Err(Error::Unsupported);
         }
@@ -163,7 +167,16 @@ mod tests {
         );
         assert_eq!(Url::parse("http://pc.local"), Ok(Url { host: "pc.local", port: 80, path: "/" }));
         assert_eq!(Url::parse("https://x/y"), Err(Error::Unsupported));
-        for bad in ["ftp://x/", "http://", "http://:80/", "http://x:port/", "http://x:99999/", "http://u@x/", "x/y"] {
+        for bad in [
+            "ftp://x/",
+            "http://",
+            "http://:80/",
+            "http://x:port/",
+            "http://x:99999/",
+            "http://u@x/",
+            "x/y",
+            "http://x/a\r\nHost: y",
+        ] {
             assert_eq!(Url::parse(bad), Err(Error::Url), "{bad}");
         }
     }

@@ -9,7 +9,7 @@ license.workspace      = true
 [features]
 ## ESP32-C6 slots and download (`esp` module). Without it the boot policy is host-testable.
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-storage/esp32c6", "esp-bootloader-esp-idf/esp32c6", "iotkit-config/esp32c6", "iotkit-net/esp32c6", "iotkit-diag/esp32c6"]
-_esp = ["dep:esp-hal", "dep:esp-storage", "dep:esp-bootloader-esp-idf", "dep:embassy-net", "dep:embassy-time", "dep:embassy-executor", "dep:embedded-io-async"]
+_esp = ["dep:esp-hal", "dep:esp-storage", "dep:esp-bootloader-esp-idf", "dep:embassy-net", "dep:embassy-time", "dep:embassy-executor", "dep:embassy-futures", "dep:embassy-sync", "dep:embedded-io-async"]
 
 [dependencies]
 iotkit-config = { workspace = true }
@@ -21,6 +21,8 @@ log           = "0.4.27"
 serde         = { version = "1", default-features = false, features = ["derive"] }
 
 embassy-executor       = { version = "0.10.0", optional = true }
+embassy-futures        = { version = "0.1", optional = true }
+embassy-sync           = { version = "0.8", optional = true }
 embassy-net            = { version = "0.9.1", optional = true }
 embassy-time           = { version = "0.5.1", optional = true }
 embedded-io-async      = { version = "0.7", optional = true }

@@ -10,7 +10,7 @@ license.workspace      = true
 ## The ESP32-C6 flash and partition table (`esp` module). Without a chip feature the crate is
 ## host-testable over any async NOR flash.
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-storage/esp32c6", "esp-bootloader-esp-idf/esp32c6"]
-_esp = ["dep:esp-hal", "dep:esp-storage", "dep:esp-bootloader-esp-idf", "dep:embassy-embedded-hal", "dep:embedded-storage", "dep:critical-section", "dep:embassy-sync"]
+_esp = ["dep:esp-hal", "dep:esp-storage", "dep:esp-bootloader-esp-idf", "dep:embassy-embedded-hal", "dep:embedded-storage", "dep:embassy-sync"]
 
 [dependencies]
 embedded-storage-async = "0.4"
@@ -19,7 +19,6 @@ postcard               = { version = "1.1", default-features = false }
 sequential-storage     = "3.0"
 serde                  = { version = "1", default-features = false }
 
-critical-section       = { version = "1.2", optional = true }
 embassy-sync           = { version = "0.8", optional = true }
 embassy-embedded-hal   = { version = "0.6", optional = true, default-features = false }
 embedded-storage       = { version = "0.3", optional = true }

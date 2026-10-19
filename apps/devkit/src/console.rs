@@ -149,11 +149,11 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>) {
         }
         _ if cmd.starts_with("ota ") => {
             let url = cmd["ota ".len()..].trim();
-            let Some(net) = net else {
+            if net.is_none() {
                 println!("Wi-Fi not started");
                 return;
-            };
-            match iotkit_ota::esp::install(net, store, crate::FIRMWARE, url).await {
+            }
+            match iotkit_ota::esp::request_install(url).await {
                 Ok(v) => {
                     println!("installed {v}, restarting");
                     iotkit_diag::esp::restart().await;

@@ -6,7 +6,9 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use embassy_futures::select::{Either, select};
 use embassy_net::tcp::TcpSocket;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::Write;
 use esp_bootloader_esp_idf::{
@@ -147,9 +149,23 @@ fn triple(v: Version) -> (u16, u16, u16) {
 /// Handles a pending update at boot: counts a trial boot, or rolls back (and restarts). Call
 /// early, right after opening the store.
 pub async fn boot(store: &SharedStore) -> BootAction {
-    let booted = with(Layout::read).ok().and_then(|l| l.booted);
+    let found = with(|flash| {
+        let layout = Layout::read(flash)?;
+        let unconfirmed = unconfirmed(&mut layout.ota(flash)?);
+        Ok::<_, OtaError>((layout.booted, layout.slots, unconfirmed))
+    });
+    let booted = found.ok().and_then(|(booted, _, _)| booted);
     let mut store = store.lock().await;
-    let pending = store.load::<Pending>().await.ok().flatten();
+    let mut pending = store.load::<Pending>().await.ok().flatten();
+    // The settings were lost (erased as corrupted, say) while an update is on trial: otadata,
+    // in its own partition, still says so. Count its trial boots again rather than keep it.
+    if pending.is_none()
+        && let Ok((Some(slot), slots, true)) = found
+    {
+        log::warn!("ota: this firmware is not confirmed but its record is gone: on trial again");
+        let previous = (slot + slots as u8 - 1) % slots as u8;
+        pending = Some(Pending { slot, previous, version: (0, 0, 0), boots: 0 });
+    }
     let action = on_boot(pending.as_ref(), booted);
     let Some(p) = pending else { return action };
     match action {
@@ -187,6 +203,56 @@ pub async fn boot(store: &SharedStore) -> BootAction {
     action
 }
 
+/// Whether otadata says the running firmware is an update not confirmed yet.
+fn unconfirmed(ota: &mut Ota<'_, 'static>) -> bool {
+    matches!(ota.current_ota_state(), Ok(OtaImageState::New | OtaImageState::PendingVerify))
+}
+
+/// Boots of an unconfirmed firmware, counted in RTC memory (kept across resets, not power
+/// loss): magic, count.
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut EARLY: [u32; 2] = [0; 2];
+const EARLY_MAGIC: u32 = 0x07a0_ea71;
+/// [`boot`] rolls back on the 4th boot of an unconfirmed update; past this, it never ran.
+const EARLY_LIMIT: u32 = 2 * crate::MAX_TRIAL_BOOTS as u32;
+
+/// Call right after `iotkit_config::esp::init`, before anything that can fail. Counts the boots
+/// of an unconfirmed update in RTC memory, and goes back to the previous firmware when they
+/// pass twice the trial boots: an update that crashes before reaching [`boot`] (which counts
+/// them in flash) is rolled back too.
+pub fn early_guard() {
+    let checked = with(|flash| {
+        let layout = Layout::read(flash)?;
+        let mut ota = layout.ota(flash)?;
+        let early: *mut [u32; 2] = &raw mut EARLY;
+        // SAFETY: single core, at boot, and nothing else touches it.
+        let early = unsafe { &mut *early };
+        if !unconfirmed(&mut ota) {
+            *early = [0; 2];
+            return Ok(None);
+        }
+        let boots = if early[0] == EARLY_MAGIC { early[1].saturating_add(1) } else { 1 };
+        *early = [EARLY_MAGIC, boots];
+        if boots <= EARLY_LIMIT {
+            return Ok(None);
+        }
+        let booted = layout.booted.ok_or(OtaError::NoSlots)?;
+        let to = (booted + layout.slots as u8 - 1) % layout.slots as u8;
+        ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
+        ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)?;
+        *early = [0; 2];
+        Ok(Some((to, boots)))
+    });
+    match checked {
+        Ok(Some((to, boots))) => {
+            log::error!("ota: unconfirmed firmware booted {boots} times without counting them, back to ota_{to}");
+            esp_hal::system::software_reset();
+        }
+        Ok(None) | Err(OtaError::NoSlots) => {}
+        Err(e) => log::warn!("ota: early check: {e}"),
+    }
+}
+
 /// The firmware works: keeps it (after an update), so later boots skip the trial.
 pub async fn confirm(store: &SharedStore) {
     let mut store = store.lock().await;
@@ -214,10 +280,29 @@ pub async fn confirm(store: &SharedStore) {
 }
 
 static BUSY: AtomicBool = AtomicBool::new(false);
+/// An install asked for by [`request_install`], run by [`serve_task`].
+static REQUEST: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
+static RESULT: Signal<CriticalSectionRawMutex, Result<Version, OtaError>> = Signal::new();
+/// One [`request_install`] at a time.
+static REQUESTING: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
+
+/// Has [`serve_task`] (which must run) install the update whose manifest is at `manifest_url`.
+/// On success the new firmware is selected: restart to boot it (on trial). Only `serve_task`
+/// runs an install, so its large buffers exist once.
+pub async fn request_install(manifest_url: &str) -> Result<Version, OtaError> {
+    let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
+    if BUSY.load(Ordering::Acquire) {
+        return Err(OtaError::Busy);
+    }
+    let url = String::try_from(manifest_url).map_err(|_| OtaError::Download(GetError::Url(http::Error::Url)))?;
+    RESULT.reset();
+    REQUEST.signal(url);
+    RESULT.wait().await
+}
 
 /// Downloads and installs the update described by the manifest at `manifest_url`. On success
 /// the new firmware is selected: restart to boot it (on trial).
-pub async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
+async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
     /// Clears [`BUSY`] however the install ends, a dropped future included.
     struct Guard;
     impl Drop for Guard {
@@ -441,7 +526,7 @@ impl Sink for FlashSink<'_> {
     }
 }
 
-/// HTTP endpoint on port 80:
+/// HTTP endpoint on port 80, and the installs of [`request_install`]:
 /// - `GET /` answers `<product> <version>`;
 /// - `GET /ota?manifest=<url>` installs that update, answers the result, then restarts.
 #[embassy_executor::task]
@@ -450,8 +535,14 @@ pub async fn serve_task(net: Net, store: &'static SharedStore, fw: Firmware) {
     loop {
         let mut socket = TcpSocket::new(net.stack, &mut rx, &mut tx);
         socket.set_timeout(Some(Duration::from_secs(10)));
-        if socket.accept(PORT).await.is_err() {
-            continue;
+        match select(socket.accept(PORT), REQUEST.wait()).await {
+            Either::First(Ok(())) => {}
+            Either::First(Err(_)) => continue,
+            Either::Second(url) => {
+                drop(socket);
+                RESULT.signal(install(net, store, fw, &url).await);
+                continue;
+            }
         }
         let mut buf = [0u8; 512];
         let mut filled = 0;

@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "devkit"
-version = "0.8.3"
+version = "0.8.6"
 dependencies = [
  "embassy-executor",
  "embassy-futures",
@@ -2809,7 +2809,6 @@ dependencies = [
 name = "iotkit-config"
 version = "0.1.0"
 dependencies = [
- "critical-section",
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-sync 0.8.0",
@@ -2930,7 +2929,9 @@ name = "iotkit-ota"
 version = "0.1.0"
 dependencies = [
  "embassy-executor",
+ "embassy-futures",
  "embassy-net",
+ "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "esp-bootloader-esp-idf",

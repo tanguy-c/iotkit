@@ -65,8 +65,20 @@ pub struct Meta {
     pub precision: Option<u8>,
 }
 
+/// Longest entity id: it goes into topics and unique ids of fixed size.
+pub const MAX_ID_LEN: usize = 48;
+
 impl Meta {
+    /// Fails the build (entities are `static`s) on an id that is empty, longer than
+    /// [`MAX_ID_LEN`], or not `[a-z0-9_]`.
     const fn new(kind: Kind, id: &'static str, name: &'static str) -> Self {
+        let bytes = id.as_bytes();
+        assert!(!bytes.is_empty() && bytes.len() <= MAX_ID_LEN, "entity id: 1 to 48 characters");
+        let mut i = 0;
+        while i < bytes.len() {
+            assert!(matches!(bytes[i], b'a'..=b'z' | b'0'..=b'9' | b'_'), "entity id: only [a-z0-9_]");
+            i += 1;
+        }
         Self {
             kind,
             id,

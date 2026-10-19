@@ -132,11 +132,15 @@ pub fn discovery_payload<const N: usize>(device: &Device, node: &str, entity: &d
     Some(s)
 }
 
-/// The state payload; `None` for no state to publish (unknown, or a button).
+/// The state payload; `None` for no state to publish (a button). An unknown state is `None`,
+/// which Home Assistant shows as unknown (instead of the last retained value).
 pub fn state_payload(entity: &dyn Entity) -> Option<String<128>> {
     let mut s = String::new();
     match entity.state() {
-        State::Unknown | State::None => return None,
+        State::None => return None,
+        // The JSON light schema takes no bare `None`: an unknown light publishes nothing.
+        State::Unknown if entity.meta().kind == Kind::Light => return None,
+        State::Unknown => s.push_str("None").ok()?,
         State::Number(v) => match entity.meta().precision {
             Some(p) => write!(s, "{v:.*}", usize::from(p)).ok()?,
             None => write!(s, "{v}").ok()?,
@@ -262,7 +266,7 @@ mod tests {
 
     #[test]
     fn states() {
-        assert_eq!(state_payload(&TEMP), None, "unknown: nothing to publish");
+        assert_eq!(state_payload(&TEMP).unwrap(), "None", "unknown, for Home Assistant");
         TEMP.set(21.46);
         assert_eq!(state_payload(&TEMP).unwrap(), "21.5");
         RELAY.set(true);

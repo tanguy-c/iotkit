@@ -119,6 +119,13 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     iotkit_config::esp::init(peripherals.FLASH);
+    // Before anything that can fail: an update that crashes this early is still rolled back.
+    iotkit_ota::esp::early_guard();
+    // Rollback test of the early guard: a build with `DEVKIT_PANIC_EARLY=1` crashes before
+    // `iotkit_ota::esp::boot` can count its trial boots.
+    if option_env!("DEVKIT_PANIC_EARLY").is_some() {
+        panic!("DEVKIT_PANIC_EARLY is set");
+    }
     static STORE: StaticCell<SharedStore> = StaticCell::new();
     let store = match iotkit_config::esp::open().await {
         Ok(store) => &*STORE.init(Mutex::new(store)),

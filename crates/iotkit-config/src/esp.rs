@@ -1,12 +1,16 @@
 //! The chip's flash, shared by every iotkit crate, and the `config` partition.
 //!
 //! Only one `FlashStorage` can exist (esp-storage reads the flash size once), so [`init`] makes
-//! it and [`SharedFlash`] hands it out under a critical section. Each flash operation blocks
-//! the executor for its duration (a sector erase is about 50 ms).
+//! it and [`SharedFlash`] hands it out. Each flash operation blocks the executor for its
+//! duration (a sector erase is about 50 ms). Interrupts stay on between sectors: esp-storage
+//! masks them only for each ROM call, as it must while the cache is off.
 
-use core::{cell::RefCell, ops::Range};
+use core::{
+    cell::UnsafeCell,
+    ops::Range,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-use critical_section::Mutex;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embedded_storage::nor_flash::{ErrorType, MultiwriteNorFlash, NorFlash, ReadNorFlash};
 use esp_bootloader_esp_idf::partitions::{PARTITION_TABLE_MAX_LEN, read_partition_table};
@@ -18,23 +22,45 @@ use crate::{Error, Store};
 /// Label of the settings partition in `partitions.csv`.
 pub const CONFIG_LABEL: &str = "config";
 
-static FLASH_STORAGE: Mutex<RefCell<Option<FlashStorage<'static>>>> = Mutex::new(RefCell::new(None));
+/// The flash, and whether someone is using it. Not a critical section: a multi-sector erase
+/// would keep interrupts (the radio's among them) off for its whole length.
+struct Slot {
+    storage: UnsafeCell<Option<FlashStorage<'static>>>,
+    busy: AtomicBool,
+}
+
+// SAFETY: `busy` gives one user at a time. The flash is only used from tasks (never from an
+// interrupt handler), on the single core.
+unsafe impl Sync for Slot {}
+
+static FLASH_STORAGE: Slot = Slot { storage: UnsafeCell::new(None), busy: AtomicBool::new(false) };
 
 /// Sets up the shared flash. Call once, before anything else uses the flash.
 pub fn init(flash: FLASH<'static>) {
     let storage = FlashStorage::new(flash);
-    critical_section::with(|cs| {
-        let mut slot = FLASH_STORAGE.borrow_ref_mut(cs);
+    with_slot(|slot| {
         assert!(slot.is_none(), "iotkit_config::esp::init called twice");
         slot.replace(storage);
     });
 }
 
-/// Runs `f` on the flash. Panics before [`init`].
+/// Runs `f` on the flash. Panics before [`init`], or if `f` uses the flash itself.
 pub fn with<R>(f: impl FnOnce(&mut FlashStorage<'static>) -> R) -> R {
-    critical_section::with(|cs| {
-        f(FLASH_STORAGE.borrow_ref_mut(cs).as_mut().expect("iotkit_config::esp::init not called"))
-    })
+    with_slot(|slot| f(slot.as_mut().expect("iotkit_config::esp::init not called")))
+}
+
+fn with_slot<R>(f: impl FnOnce(&mut Option<FlashStorage<'static>>) -> R) -> R {
+    /// Frees the slot however `f` ends.
+    struct Release;
+    impl Drop for Release {
+        fn drop(&mut self) {
+            FLASH_STORAGE.busy.store(false, Ordering::Release);
+        }
+    }
+    assert!(!FLASH_STORAGE.busy.swap(true, Ordering::Acquire), "iotkit_config::esp::with re-entered");
+    let _release = Release;
+    // SAFETY: `busy` was false, so this is the only reference until `Release` runs.
+    f(unsafe { &mut *FLASH_STORAGE.storage.get() })
 }
 
 /// Handle to the shared flash (blocking `embedded-storage`). Copy it freely.

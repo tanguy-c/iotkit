@@ -5,7 +5,7 @@ publish      = false
 # The firmware version: bump it for each update (`cargo xtask ota push` refuses downgrades).
 edition.workspace      = true
 rust-version.workspace = true
-version      = "0.8.3"
+version      = "0.8.6"
 license.workspace      = true
 
 [features]

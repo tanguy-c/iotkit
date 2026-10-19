@@ -65,6 +65,18 @@ The path a new developer takes, and where it hurts:
 | D7 | **Errors without guidance:** a missing `keys/ota.pub` gives an `include_str!` error; `ota push --host x.local` needs mDNS in the host's resolver (nss-mdns); a monitor holding the port hangs espflash. A `cargo xtask doctor` could check keys, secrets, port, toolchain and mDNS |
 | D8 | VSCode **OTA push** depends on **Build signed**, then builds again (no `--no-build`) |
 
+## Open (found while testing)
+
+| Id | What |
+|---|---|
+| O1 | Twice the boot counter went up without a recorded crash (31 → 35 while the hotspot was off, 40 → 41 around killing two serial monitors). Not reproduced in a 6-minute soak. The reset cause is printed but not kept, so it can't be traced afterwards: keep the last few causes in `BootStats` |
+| O2 | The early guard (R3) rolls back, but the crash records of those early boots are lost (`record_boot` never runs) |
+
+## Status
+
+- Batch 1 (commit `07bbd04`): B1–B6, R4, R6, R7 done. On the C6: OTA 0.8.1 → 0.8.2 confirmed, panicking 0.8.3 rolled back, two light commands in a row merged.
+- Batch 2: R1 (no outer critical section), R2 (trial rebuilt from otadata), R3 (`early_guard`, RTC counter), R8, R9, R10 and C1 (`request_install`, one install future) done. On the C6: OTA by push (0.8.4) and from the console (0.8.5) confirmed; a 0.8.6 that panics before `ota::boot` was rolled back by the early guard on its 7th boot. **C2 deferred:** a sequential-storage cache needs a const page count equal to the partition's, and goes stale after `factory_reset`; not worth it without a measurement.
+
 ## Proposed batches
 
 1. **Correctness:** B1–B5, R4, R6, R7. Small, local changes, with host tests where the logic is host-side (B3, B4/B5 timing logic, R7).
