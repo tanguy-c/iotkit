@@ -1,13 +1,19 @@
-# Host tooling, run with `cargo xtask <command>` from the repository root.
-# Its own workspace: the firmware workspace builds for the chip by default.
+# Host tooling: `cargo xtask <command>` in this repository, `cargo iotkit <command>` once
+# installed (`cargo install --path xtask`). Its own workspace: the firmware workspace builds for
+# the chip by default.
 [workspace]
 
 [package]
-name         = "xtask"
+name         = "iotkit-cli"
+description  = "cargo iotkit: signed builds, flashing and OTA for iotkit firmware"
 publish      = false
 edition      = "2024"
 rust-version = "1.95"
 version      = "0.1.0"
+
+[[bin]]
+name = "cargo-iotkit"
+path = "src/main.rs"
 
 [dependencies]
 iotkit-image    = { path = "../crates/iotkit-image", features = ["sign"] }

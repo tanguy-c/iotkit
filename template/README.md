@@ -1,11 +1,12 @@
 # iotkit device template
 
-`cargo generate --git <repo> template --name my-device`, or from a checkout:
-`cargo generate --path v2/template --name my-device`.
+`cargo generate --path <iotkit>/template --name my-device`. It asks for the chip, and the
+absolute path of the iotkit checkout: the generated project uses `iotkit-app` and
+`iotkit-build` from there (a git dependency once the repository is published).
 
-`build.rs`, `partitions.csv` and the toolchain files are copies of the repository's
-`apps/devkit` and root files; CI fails when they drift. `src/main.rs` is a minimal app
-(LED + heartbeat) until the iotkit crates can be used from a git or crates.io dependency;
-`apps/devkit` shows them in use.
-The generated project does not have `cargo xtask` yet (signed builds, OTA): that
-comes with `iotkit-cli`.
+`src/main.rs` is a small iotkit app (the LED as a light). Signed builds and OTA use the
+`cargo iotkit` CLI (`cargo install --path <iotkit>/xtask`).
+
+`partitions*.csv`, the toolchain and format files, `.clippy.toml`, `.vscode/extensions.json`
+and `.cargo/secrets.toml.example` are copies of the repository's; CI (`check-sync.sh`) fails
+when they drift. CI also generates a project, then runs keygen, a signed build and verify.

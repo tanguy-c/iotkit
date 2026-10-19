@@ -2,20 +2,30 @@
 name         = "{{project-name}}"
 edition      = "2024"
 rust-version = "1.95"
+# The firmware version: bump it for each update (`cargo iotkit ota push` refuses downgrades).
 version      = "0.1.0"
 publish      = false
 
+[features]
+## Matter over Wi-Fi, next to MQTT (needs the 8 MB partition table).
+matter-wifi = ["iotkit-app/matter-wifi"]
+
 [dependencies]
+iotkit-app = { path = "{{iotkit_path}}/crates/iotkit-app", features = ["{{chip}}"] }
+
 esp-hal                = { version = "~1.2.2", features = ["{{chip}}", "log-04", "unstable"] }
-esp-rtos               = { version = "0.4.0", features = ["embassy", "{{chip}}", "log-04"] }
+esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "{{chip}}", "log-04"] }
+esp-alloc              = { version = "0.11.0", features = ["{{chip}}"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["{{chip}}", "log-04"] }
-esp-backtrace          = { version = "0.20.0", features = ["{{chip}}", "panic-handler", "println"] }
-esp-println            = { version = "0.18.0", features = ["{{chip}}", "log-04"] }
 esp-hal-smartled       = { version = "0.18", features = ["{{chip}}"] }
 embassy-executor       = { version = "0.10.0", features = ["log"] }
+embassy-futures        = "0.1"
 embassy-time           = { version = "0.5.1", features = ["log"] }
 smart-leds             = "0.4"
 log                    = "0.4.27"
+
+[build-dependencies]
+iotkit-build = { path = "{{iotkit_path}}/crates/iotkit-build" }
 
 # A standalone project, even when generated inside another workspace.
 [workspace]
@@ -29,3 +39,13 @@ codegen-units = 1
 debug         = 2
 lto           = 'fat'
 opt-level     = 's'
+
+# Ed25519 verification (updates) unrolls into about 1.2 MB at `s`; at `z` it is a fraction.
+[profile.release.package.ed25519-compact]
+opt-level = "z"
+
+[profile.dev.package.ed25519-compact]
+opt-level = "z"
+
+[profile.release.package.iotkit-image]
+opt-level = "z"

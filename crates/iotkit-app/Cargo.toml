@@ -1,0 +1,40 @@
+[package]
+name         = "iotkit-app"
+description  = "Starts every iotkit service in the right order: one call for a device's firmware"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[features]
+## The chip (one is required).
+esp32c6 = [
+    "esp-hal/esp32c6", "esp-println/esp32c6",
+    "iotkit-config/esp32c6", "iotkit-diag/esp32c6", "iotkit-net/esp32c6", "iotkit-ota/esp32c6",
+    "iotkit-provision/esp32c6", "iotkit-link-mqtt/esp32c6",
+    "iotkit-link-matter?/esp32c6",
+]
+## Matter over Wi-Fi, next to MQTT (8 MB flash: about 2.1 MB of firmware).
+matter-wifi = ["dep:iotkit-link-matter", "iotkit-link-matter/wifi", "iotkit-net/matter"]
+
+[dependencies]
+iotkit-config      = { workspace = true }
+iotkit-diag        = { workspace = true, features = ["panic-handler"] }
+iotkit-image       = { workspace = true }
+iotkit-link-matter = { workspace = true, optional = true }
+iotkit-link-mqtt   = { workspace = true }
+iotkit-model       = { workspace = true }
+iotkit-net         = { workspace = true }
+iotkit-ota         = { workspace = true }
+iotkit-provision   = { workspace = true }
+iotkit-runtime     = { workspace = true }
+
+embassy-executor  = { workspace = true }
+embassy-sync      = { workspace = true }
+embassy-time      = { workspace = true }
+embedded-io-async = { workspace = true }
+esp-hal           = { workspace = true }
+esp-println       = { workspace = true }
+heapless          = { workspace = true }
+log               = { workspace = true }
+static_cell       = { workspace = true }

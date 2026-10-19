@@ -77,6 +77,10 @@ The path a new developer takes, and where it hurts:
 - Batch 1 (commit `07bbd04`): B1–B6, R4, R6, R7 done. On the C6: OTA 0.8.1 → 0.8.2 confirmed, panicking 0.8.3 rolled back, two light commands in a row merged.
 - Batch 2: R1 (no outer critical section), R2 (trial rebuilt from otadata), R3 (`early_guard`, RTC counter), R8, R9, R10 and C1 (`request_install`, one install future) done. On the C6: OTA by push (0.8.4) and from the console (0.8.5) confirmed; a 0.8.6 that panics before `ota::boot` was rolled back by the early guard on its 7th boot. **C2 deferred:** a sequential-storage cache needs a const page count equal to the partition's, and goes stale after `factory_reset`; not worth it without a measurement.
 
+- Batch 3 (DX): `crates/iotkit-app` (`start`, the console with `ConsoleExtension`, `SaveLater`, `App::load/save`, health checks with `Health::require`), BOOT short press (`wait_press`), devkit's `main` from about 180 lines of wiring to about 15; `crates/iotkit-build` (`link`, `require_key` with a "run keygen" hint) replaces the three `build.rs` copies; xtask is now the `cargo iotkit` CLI (`cargo install --path xtask`), working on the project in the current directory; the template is an iotkit app (path placeholder for the checkout), checked in CI with keygen, signed build and verify, and on the C6: a generated project booted from the stored settings, joined MQTT, and updated itself to 0.1.1 with `cargo iotkit ota push`; VSCode OTA push builds once, in release. README rewritten. D7's `doctor` not done: the key hint and the troubleshooting table cover the common cases.
+- Batch 4 (docs): R5 (setup window and OTA endpoint) and C5 (`--workspace`) are in the README.
+- O3 (seen once, on 0.8.5): after about 10 minutes, MQTT reconnects timed out for minutes and the host could not resolve the device over mDNS; a restart fixed it. Not seen in a 15-minute soak of 0.8.7. Probably the hotspot link; to watch.
+
 ## Proposed batches
 
 1. **Correctness:** B1–B5, R4, R6, R7. Small, local changes, with host tests where the logic is host-side (B3, B4/B5 timing logic, R7).

@@ -1062,34 +1062,21 @@ dependencies = [
 
 [[package]]
 name = "devkit"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "embassy-executor",
  "embassy-futures",
- "embassy-sync 0.8.0",
  "embassy-time",
- "embedded-io-async 0.7.0",
  "esp-alloc",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-hal-smartled",
- "esp-println",
  "esp-rtos",
- "heapless 0.9.3",
- "iotkit-config",
- "iotkit-diag",
- "iotkit-image",
- "iotkit-link-matter",
- "iotkit-link-mqtt",
- "iotkit-model",
- "iotkit-net",
- "iotkit-ota",
- "iotkit-provision",
- "iotkit-runtime",
+ "iotkit-app",
+ "iotkit-build",
  "log",
  "serde",
  "smart-leds",
- "static_cell",
 ]
 
 [[package]]
@@ -2804,6 +2791,35 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "iotkit-app"
+version = "0.1.0"
+dependencies = [
+ "embassy-executor",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "esp-hal",
+ "esp-println",
+ "heapless 0.9.3",
+ "iotkit-config",
+ "iotkit-diag",
+ "iotkit-image",
+ "iotkit-link-matter",
+ "iotkit-link-mqtt",
+ "iotkit-model",
+ "iotkit-net",
+ "iotkit-ota",
+ "iotkit-provision",
+ "iotkit-runtime",
+ "log",
+ "static_cell",
+]
+
+[[package]]
+name = "iotkit-build"
+version = "0.1.0"
 
 [[package]]
 name = "iotkit-config"
@@ -4821,6 +4837,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "heapless 0.9.3",
+ "iotkit-build",
  "iotkit-config",
  "iotkit-diag",
  "iotkit-link-matter",

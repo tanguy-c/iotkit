@@ -1,0 +1,9 @@
+[package]
+name         = "iotkit-build"
+description  = "build.rs helpers for iotkit firmware: linker scripts, readable link errors, key check"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+
+[dependencies]

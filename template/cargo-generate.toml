@@ -9,3 +9,7 @@ type    = "string"
 prompt  = "Chip?"
 choices = ["esp32c6"]
 default = "esp32c6"
+
+[placeholders.iotkit_path]
+type    = "string"
+prompt  = "Absolute path of your iotkit checkout (the folder with crates/ and xtask/)?"

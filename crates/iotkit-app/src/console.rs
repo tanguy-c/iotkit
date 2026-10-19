@@ -1,18 +1,27 @@
-//! Line console on the USB serial port, to inspect diagnostics and test failures on purpose.
-
-use core::sync::atomic::{AtomicBool, Ordering};
+//! Line console on the USB serial port: diagnostics, setup, and failures on purpose. Improv
+//! frames share the port.
 
 use embassy_time::Instant;
 use embedded_io_async::Read;
 use esp_hal::{Async, usb::usb_serial_jtag::UsbSerialJtagRx};
 use esp_println::{print, println};
 use heapless::String;
+use iotkit_config::esp::SharedStore;
 use iotkit_diag::{BootStats, LastCrash};
 use iotkit_net::esp::Net;
 use iotkit_ota::LastUpdate;
 use iotkit_provision::esp::{Provisioner, Serial};
 
-use iotkit_config::esp::SharedStore;
+use crate::Config;
+
+/// Commands of the app, next to the kit's.
+#[derive(Clone, Copy)]
+pub struct ConsoleExtension {
+    /// Lines added to `help`, e.g. `"  blink          flash the LED"`.
+    pub help: &'static str,
+    /// Runs a command line; `false` if it is not one of the app's.
+    pub run: fn(&str) -> bool,
+}
 
 const HELP: &str = "\
 Commands:
@@ -22,28 +31,28 @@ Commands:
   provision      open a 10-minute setup window: access point + Bluetooth (Improv)
   ota URL        install the update whose manifest is at URL (http://...)
   mqtt           MQTT broker and connection state
-  matter         Matter pairing codes (with the matter-wifi feature)
+  mqtt HOST[:PORT] [USER PASS]   set the broker (then restarts)";
+
+#[cfg(feature = "matter-wifi")]
+const MATTER_HELP: &str = "
+  matter         Matter pairing codes
   matter pair    let a(nother) controller pair for 15 minutes
-  matter reset   forget every Matter pairing (restarts)
-  mqtt HOST[:PORT] [USER PASS]   set the broker (then restarts)
+  matter reset   forget every Matter pairing (restarts)";
+#[cfg(not(feature = "matter-wifi"))]
+const MATTER_HELP: &str = "";
+
+const TEST_HELP: &str = "
   panic          panic (recorded, then restart)
-  starve         stop feeding the LED task's watch (watchdog record within ~4 s)
   hang           block the executor (hardware watchdog reset after 5 s)
   reboot         software reset
   factory-reset  erase all settings and Matter pairings, restart";
 
-static STARVE_LED: AtomicBool = AtomicBool::new(false);
-
-/// `starve` was typed: the LED task must stop feeding its watch.
-pub fn starve_led() -> bool {
-    STARVE_LED.load(Ordering::Relaxed)
-}
-
 #[embassy_executor::task]
-pub async fn console_task(
+pub(crate) async fn console_task(
     mut rx: UsbSerialJtagRx<'static, Async>,
     store: &'static SharedStore,
     provisioner: Option<Provisioner>,
+    config: &'static Config,
 ) {
     let net = provisioner.map(|p| p.net);
     let mut improv = Serial::new();
@@ -65,7 +74,7 @@ pub async fn console_task(
                 b'\n' if last == b'\r' => {}
                 b'\r' | b'\n' => {
                     println!();
-                    run(line.trim(), store, net).await;
+                    run(line.trim(), store, net, config).await;
                     line.clear();
                 }
                 0x08 | 0x7f if line.pop().is_some() => print!("\x08 \x08"),
@@ -77,12 +86,18 @@ pub async fn console_task(
     }
 }
 
-async fn run(cmd: &str, store: &SharedStore, net: Option<Net>) {
+async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) {
     match cmd {
         "" => {}
-        "help" => println!("{HELP}"),
+        "help" => {
+            println!("{HELP}{MATTER_HELP}{TEST_HELP}");
+            if let Some(ext) = config.console {
+                println!("{}", ext.help);
+            }
+        }
         "info" => {
-            println!("{} {}, up {} s", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), Instant::now().as_secs());
+            let fw = config.firmware;
+            println!("{} {}, up {} s", fw.product, fw.version, Instant::now().as_secs());
             let mut store = store.lock().await;
             match store.load::<BootStats>().await {
                 Ok(Some(s)) => println!("boots {}, crashes {} ({} in a row)", s.boots, s.crashes, s.crashes_in_a_row),
@@ -148,12 +163,11 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>) {
             }
         }
         _ if cmd.starts_with("ota ") => {
-            let url = cmd["ota ".len()..].trim();
             if net.is_none() {
                 println!("Wi-Fi not started");
                 return;
             }
-            match iotkit_ota::esp::request_install(url).await {
+            match iotkit_ota::esp::request_install(cmd["ota ".len()..].trim()).await {
                 Ok(v) => {
                     println!("installed {v}, restarting");
                     iotkit_diag::esp::restart().await;
@@ -162,10 +176,6 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>) {
             }
         }
         "panic" => panic!("panic requested on the console"),
-        "starve" => {
-            println!("LED task stops feeding its watch");
-            STARVE_LED.store(true, Ordering::Relaxed);
-        }
         "hang" => {
             println!("blocking the executor");
             #[allow(clippy::empty_loop)]
@@ -179,6 +189,10 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>) {
             }
             iotkit_diag::esp::restart().await
         }
-        other => println!("unknown command `{other}`, try `help`"),
+        other => {
+            if !config.console.is_some_and(|ext| (ext.run)(other)) {
+                println!("unknown command `{other}`, try `help`");
+            }
+        }
     }
 }

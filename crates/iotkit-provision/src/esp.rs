@@ -585,6 +585,15 @@ async fn finish(socket: &mut TcpSocket<'_>) {
 /// [`FACTORY_RESET_MS`](crate::gesture::FACTORY_RESET_MS).
 pub static HELD: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
+/// A short press of the BOOT button (under [`PROVISION_MS`](crate::gesture::PROVISION_MS)),
+/// for the app.
+static PRESSED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// Waits for a short press of the BOOT button ([`button_task`] must run).
+pub async fn wait_press() {
+    PRESSED.wait().await
+}
+
 /// BOOT button (active low): hold 3 s to open provisioning, 10 s to forget every setting and
 /// Matter pairing.
 #[embassy_executor::task]
@@ -602,7 +611,7 @@ pub async fn button_task(button: esp_hal::gpio::Input<'static>, store: &'static 
         }
         HELD.store(0, Ordering::Relaxed);
         match on_release(pressed.elapsed().as_millis() as u32) {
-            Gesture::Press => {}
+            Gesture::Press => PRESSED.signal(()),
             Gesture::Provision => {
                 log::info!("provision: BOOT held, window open");
                 open_window();

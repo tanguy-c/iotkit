@@ -28,10 +28,10 @@
     {
       "label": "OTA push",
       "type": "shell",
-      "command": "cargo xtask ota push --host ${input:otaHost}",
+      "command": "cargo xtask ota push --release --host ${input:otaHost}",
+      "detail": "Build, sign, and have the device install it",
       "options": { "cwd": "${workspaceFolder}" },
-      "dependsOn": "Build signed",
-      "problemMatcher": []
+      "problemMatcher": ["$rustc"]
     },
     {
       "label": "Build debug",

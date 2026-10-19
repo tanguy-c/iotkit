@@ -29,3 +29,6 @@ smart-leds             = { workspace = true }
 static_cell            = { workspace = true }
 log                    = { workspace = true }
 heapless               = { workspace = true }
+
+[build-dependencies]
+iotkit-build = { workspace = true }

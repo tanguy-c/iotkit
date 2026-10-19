@@ -4,7 +4,7 @@ set -eu
 cd "$(dirname "$0")/.."
 status=0
 for pair in \
-    apps/devkit/build.rs:template/build.rs \
+    .cargo/secrets.toml.example:template/.cargo/secrets.toml.example \
     partitions.csv:template/partitions.csv \
     partitions-4mb.csv:template/partitions-4mb.csv \
     rust-toolchain.toml:template/rust-toolchain.toml \

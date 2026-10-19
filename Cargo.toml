@@ -24,6 +24,8 @@ iotkit-provision = { path = "crates/iotkit-provision" }
 iotkit-model  = { path = "crates/iotkit-model" }
 iotkit-link-mqtt = { path = "crates/iotkit-link-mqtt" }
 iotkit-link-matter = { path = "crates/iotkit-link-matter" }
+iotkit-app    = { path = "crates/iotkit-app" }
+iotkit-build  = { path = "crates/iotkit-build" }
 
 esp-hal                = { version = "~1.2.2", features = ["esp32c6", "log-04", "unstable"] }
 esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32c6", "log-04"] }

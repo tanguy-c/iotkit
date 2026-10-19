@@ -45,6 +45,8 @@ pub struct Firmware {
     /// Package name, also the manifest's `product` and the image's project name.
     pub product: &'static str,
     pub version: Version,
+    /// [`version`](Self::version) as written in `Cargo.toml`.
+    pub version_text: &'static str,
     /// Public key of `keys/ota.pub`.
     pub key: &'static PublicKey,
 }
@@ -60,6 +62,7 @@ macro_rules! firmware {
                 Some(v) => v,
                 None => panic!("CARGO_PKG_VERSION is not major.minor.patch"),
             },
+            version_text: env!("CARGO_PKG_VERSION"),
             key: $key,
         }
     };

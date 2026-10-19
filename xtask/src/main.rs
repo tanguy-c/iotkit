@@ -1,4 +1,8 @@
-//! `cargo xtask`: build, sign and flash iotkit firmware.
+//! `cargo iotkit` (`cargo xtask` in the iotkit repository): build, sign, flash and update iotkit
+//! firmware. Works on the project in the current directory: the nearest one with a
+//! `partitions.csv` next to its `Cargo.toml`.
+//!
+//! Install it with `cargo install --path xtask` from an iotkit checkout.
 
 use std::{
     fs,
@@ -23,7 +27,11 @@ const FLASH_SIZE: &str = "8mb";
 const DEFAULT_KEY: &str = "keys/ota";
 
 #[derive(Parser)]
-#[command(about = "iotkit host tooling")]
+#[command(
+    name = "cargo iotkit",
+    bin_name = "cargo iotkit",
+    about = "iotkit host tooling: signed builds, flashing, OTA"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -52,8 +60,11 @@ enum Cmd {
     },
     /// Check a manifest's signature and its image.
     Verify {
-        #[arg(default_value = "dist/devkit/manifest.json")]
-        manifest: PathBuf,
+        /// Default: `dist/<package>/manifest.json`.
+        manifest: Option<PathBuf>,
+        /// Firmware package (default: the project's).
+        #[arg(short, long)]
+        package: Option<String>,
         /// Public key.
         #[arg(long, default_value = "keys/ota.pub")]
         key: PathBuf,
@@ -70,9 +81,9 @@ enum Cmd {
 
 #[derive(clap::Args)]
 struct App {
-    /// Firmware package.
-    #[arg(short, long, default_value = "devkit")]
-    package: String,
+    /// Firmware package (default: the project's, or the workspace's default member).
+    #[arg(short, long)]
+    package: Option<String>,
     #[arg(long)]
     release: bool,
     /// Cargo features of the firmware, e.g. `matter-wifi`.
@@ -108,14 +119,24 @@ enum Ota {
 }
 
 fn main() -> Result<()> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().context("no repository root")?;
-    std::env::set_current_dir(root)?;
-    match Cli::parse().command {
+    // As a cargo subcommand (`cargo iotkit ...`), cargo passes the subcommand name first.
+    let args = std::env::args_os().enumerate().filter(|(i, a)| !(*i == 1 && a == "iotkit")).map(|(_, a)| a);
+    let cli = Cli::parse_from(args);
+    let root = project_root()?;
+    std::env::set_current_dir(&root)?;
+    match cli.command {
         Cmd::Keygen { out, force } => keygen(&out, force),
-        Cmd::Build { app, min_version, key } => build(&app, &min_version, &key),
-        Cmd::Verify { manifest, key } => verify(&manifest, &key),
-        Cmd::Flash { app } => run(cargo().arg("run").args(app.cargo_args())),
+        Cmd::Build { app, min_version, key } => build(&Build::new(app)?, &min_version, &key),
+        Cmd::Verify { manifest, package, key } => {
+            let manifest = match manifest {
+                Some(m) => m,
+                None => Path::new("dist").join(Metadata::read()?.package(package)?).join("manifest.json"),
+            };
+            verify(&manifest, &key)
+        }
+        Cmd::Flash { app } => run(cargo().arg("run").args(Build::new(app)?.cargo_args())),
         Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, key }) => {
+            let app = Build::new(app)?;
             if !no_build {
                 build(&app, &min_version, &key)?;
             }
@@ -125,7 +146,70 @@ fn main() -> Result<()> {
     }
 }
 
-impl App {
+/// The nearest directory, from the current one up, with a `Cargo.toml` and a `partitions.csv`.
+fn project_root() -> Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    cwd.ancestors()
+        .find(|d| d.join("Cargo.toml").is_file() && d.join("partitions.csv").is_file())
+        .map(Path::to_path_buf)
+        .with_context(|| {
+            format!("no iotkit project here: no `Cargo.toml` with a `partitions.csv` in {} or above", cwd.display())
+        })
+}
+
+/// What `cargo metadata` says about the project.
+struct Metadata(serde_json::Value);
+
+impl Metadata {
+    fn read() -> Result<Self> {
+        let out = cargo().args(["metadata", "--no-deps", "--format-version", "1"]).output()?;
+        ensure!(out.status.success(), "cargo metadata failed: {}", String::from_utf8_lossy(&out.stderr));
+        Ok(Self(serde_json::from_slice(&out.stdout)?))
+    }
+
+    /// `package`, or the only default member of the workspace.
+    fn package(&self, package: Option<String>) -> Result<String> {
+        if let Some(p) = package {
+            return Ok(p);
+        }
+        let ids = self.0["workspace_default_members"].as_array().context("cargo metadata: no default members")?;
+        let [id] = ids.as_slice() else { bail!("several packages here: choose one with `-p`") };
+        let found = self.packages()?.iter().find(|p| p["id"] == *id).context("default member not found")?;
+        Ok(found["name"].as_str().context("package without name")?.to_owned())
+    }
+
+    fn version(&self, package: &str) -> Result<String> {
+        let found =
+            self.packages()?.iter().find(|p| p["name"] == package).with_context(|| format!("no package {package}"))?;
+        Ok(found["version"].as_str().context("package without version")?.to_owned())
+    }
+
+    fn packages(&self) -> Result<&Vec<serde_json::Value>> {
+        self.0["packages"].as_array().context("cargo metadata: no packages")
+    }
+
+    fn target_dir(&self) -> PathBuf {
+        self.0["target_directory"].as_str().map_or_else(|| PathBuf::from("target"), PathBuf::from)
+    }
+}
+
+/// A firmware to build: the package resolved, and where cargo puts it.
+struct Build {
+    package: String,
+    release: bool,
+    features: Option<String>,
+    version: String,
+    target_dir: PathBuf,
+}
+
+impl Build {
+    fn new(app: App) -> Result<Self> {
+        let meta = Metadata::read()?;
+        let package = meta.package(app.package)?;
+        let version = meta.version(&package)?;
+        Ok(Self { version, target_dir: meta.target_dir(), package, release: app.release, features: app.features })
+    }
+
     fn cargo_args(&self) -> Vec<&str> {
         let mut args = vec!["-p", &self.package];
         if self.release {
@@ -139,7 +223,7 @@ impl App {
 
     fn elf(&self) -> PathBuf {
         let profile = if self.release { "release" } else { "debug" };
-        Path::new("target").join(TARGET).join(profile).join(&self.package)
+        self.target_dir.join(TARGET).join(profile).join(&self.package)
     }
 }
 
@@ -169,11 +253,11 @@ fn write_secret(path: &Path, contents: &str) -> Result<()> {
     Ok(fs::write(path, format!("{contents}\n"))?)
 }
 
-fn build(app: &App, min_version: &str, key: &Path) -> Result<()> {
-    let secret: [u8; 64] = read_hex(key).context("no signing key: run `cargo xtask keygen`")?;
-    let version_str = package_version(&app.package)?;
+fn build(app: &Build, min_version: &str, key: &Path) -> Result<()> {
+    let secret: [u8; 64] = read_hex(key).context("no signing key: run `cargo iotkit keygen`")?;
+    let version_str = &app.version;
     let version =
-        Version::parse(&version_str).map_err(|e| anyhow::anyhow!("version {version_str} of {}: {e}", app.package))?;
+        Version::parse(version_str).map_err(|e| anyhow::anyhow!("version {version_str} of {}: {e}", app.package))?;
     let min_version = Version::parse(min_version).map_err(|e| anyhow::anyhow!("--min-version: {e}"))?;
     ensure!(min_version <= version, "--min-version {min_version} is newer than the build ({version})");
 
@@ -358,16 +442,6 @@ fn serve_file(mut stream: TcpStream) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// `version` of a workspace package, from `cargo metadata`.
-fn package_version(package: &str) -> Result<String> {
-    let out = cargo().args(["metadata", "--no-deps", "--format-version", "1"]).output()?;
-    ensure!(out.status.success(), "cargo metadata failed: {}", String::from_utf8_lossy(&out.stderr));
-    let meta: serde_json::Value = serde_json::from_slice(&out.stdout)?;
-    let packages = meta["packages"].as_array().context("cargo metadata: no packages")?;
-    let found = packages.iter().find(|p| p["name"] == package).with_context(|| format!("no package {package}"))?;
-    Ok(found["version"].as_str().context("package without version")?.to_owned())
 }
 
 fn cargo() -> Command {

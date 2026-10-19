@@ -1,3 +1,6 @@
+# Wi-Fi credentials for the firmware: `secrets.toml` (git-ignored, see `secrets.toml.example`).
+include = [{ path = "secrets.toml", optional = true }]
+
 # Run cargo from the project root: the runner's partition table path is relative to it.
 # `--erase-parts otadata` makes every USB flash boot `ota_0`, even after an OTA switched slots.
 [target.riscv32imac-unknown-none-elf]

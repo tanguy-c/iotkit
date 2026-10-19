@@ -5,38 +5,27 @@ publish      = false
 # The firmware version: bump it for each update (`cargo xtask ota push` refuses downgrades).
 edition.workspace      = true
 rust-version.workspace = true
-version      = "0.8.6"
+version      = "0.8.7"
 license.workspace      = true
 
 [features]
-## Matter over Wi-Fi, next to MQTT (the LED as an On/Off light for now).
-matter-wifi = ["dep:iotkit-link-matter", "iotkit-net/matter"]
+## Matter over Wi-Fi, next to MQTT.
+matter-wifi = ["iotkit-app/matter-wifi"]
 
 [dependencies]
-iotkit-link-matter = { workspace = true, optional = true, features = ["wifi", "esp32c6"] }
-iotkit-config  = { workspace = true, features = ["esp32c6"] }
-iotkit-diag    = { workspace = true, features = ["esp32c6", "panic-handler"] }
-iotkit-image   = { workspace = true }
-iotkit-net     = { workspace = true, features = ["esp32c6"] }
-iotkit-ota     = { workspace = true, features = ["esp32c6"] }
-iotkit-provision = { workspace = true, features = ["esp32c6"] }
-iotkit-runtime = { workspace = true }
-iotkit-model   = { workspace = true }
-iotkit-link-mqtt = { workspace = true, features = ["esp32c6"] }
+iotkit-app = { workspace = true, features = ["esp32c6"] }
 
 esp-alloc              = { workspace = true }
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }
 esp-bootloader-esp-idf = { workspace = true }
-esp-println            = { workspace = true }
 esp-hal-smartled       = { workspace = true }
 embassy-executor       = { workspace = true }
 embassy-futures        = "0.1"
-embassy-sync           = { workspace = true }
 embassy-time           = { workspace = true }
-embedded-io-async      = { workspace = true }
-heapless               = { workspace = true }
 smart-leds             = { workspace = true }
-static_cell            = { workspace = true }
 log                    = { workspace = true }
 serde                  = { version = "1", default-features = false, features = ["derive"] }
+
+[build-dependencies]
+iotkit-build = { workspace = true }

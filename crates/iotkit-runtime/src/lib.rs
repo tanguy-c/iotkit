@@ -35,7 +35,7 @@ impl Check {
 
 /// The checks a firmware must pass, and those passed so far.
 pub struct Health {
-    required: u32,
+    required: AtomicU32,
     passed: AtomicU32,
     changed: Signal<CriticalSectionRawMutex, ()>,
 }
@@ -48,7 +48,13 @@ impl Health {
             mask |= required[i].bit();
             i += 1;
         }
-        Self { required: mask, passed: AtomicU32::new(0), changed: Signal::new() }
+        Self { required: AtomicU32::new(mask), passed: AtomicU32::new(0), changed: Signal::new() }
+    }
+
+    /// Adds `check` to the required ones (e.g. an app's own, next to a kit's).
+    pub fn require(&self, check: Check) {
+        self.required.fetch_or(check.bit(), Ordering::AcqRel);
+        self.changed.signal(());
     }
 
     /// Marks `check` as passed.
@@ -69,7 +75,7 @@ impl Health {
 
     /// Bits of the required checks not passed yet.
     pub fn missing(&self) -> u32 {
-        self.required & !self.passed.load(Ordering::Acquire)
+        self.required.load(Ordering::Acquire) & !self.passed.load(Ordering::Acquire)
     }
 
     /// Waits until every required check has passed. One waiter at a time.
@@ -100,6 +106,11 @@ mod tests {
         assert_eq!(h.missing(), 1 << 5);
         h.pass(B);
         assert!(h.is_healthy() && h.has_passed(EXTRA));
+        let late = Check(9);
+        h.require(late);
+        assert!(!h.is_healthy());
+        h.pass(late);
+        assert!(h.is_healthy());
     }
 
     #[test]

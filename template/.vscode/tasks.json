@@ -24,6 +24,31 @@
       "problemMatcher": []
     },
     {
+      "label": "Build signed",
+      "detail": "Release build, app image and signed manifest in dist/",
+      "type": "shell",
+      "command": "cargo iotkit build --release",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$rustc"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "OTA push",
+      "detail": "Build, sign, and have the device install it",
+      "type": "shell",
+      "command": "cargo iotkit ota push --release --host ${input:otaHost}",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$rustc"
+      ]
+    },
+    {
       "label": "Build debug",
       "type": "shell",
       "command": "cargo build",
@@ -35,5 +60,8 @@
       ],
       "group": "build"
     }
+  ],
+  "inputs": [
+    { "id": "otaHost", "type": "promptString", "description": "Device host name", "default": "iotkit-XXXX.local" }
   ]
 }
