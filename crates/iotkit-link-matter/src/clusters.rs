@@ -106,7 +106,7 @@ impl on_off::ClusterHandler for OnOffH<'_> {
     }
 
     fn handle_toggle(&self, _ctx: impl InvokeContext) -> Result<(), Error> {
-        self.0.set_on(!self.0.on());
+        self.0.set_on(!self.0.target_on());
         Ok(())
     }
 
@@ -139,8 +139,9 @@ impl LevelH<'_> {
     }
 
     fn step(&self, up: bool, size: u8, with_on_off: bool) {
-        let level =
-            if up { self.level().saturating_add(size).min(254) } else { self.level().saturating_sub(size).max(1) };
+        // From the commanded level: steps in a row add up before the app applies them.
+        let from = crate::level_from_brightness(self.0.target_light().brightness);
+        let level = if up { from.saturating_add(size).min(254) } else { from.saturating_sub(size).max(1) };
         // "WithOnOff": going up switches on, reaching MinLevel going down switches off.
         self.0.set_level(level, with_on_off.then_some(up || level > 1));
     }
@@ -276,7 +277,11 @@ impl ColorControlHooks for ColorHooks {
     fn set_device_color(&self, target: SetDeviceColor) -> Result<(), ()> {
         // Linear: the LED mixes light additively. A colour command must not switch the light on.
         let (r, g, b) = target.to_rgb(RgbGamma::Linear);
-        self.ep.entity.command(Command::Light { on: Some(self.ep.on()), brightness: None, rgb: Some([r, g, b]) });
+        self.ep.entity.command(Command::Light {
+            on: Some(self.ep.target_on()),
+            brightness: None,
+            rgb: Some([r, g, b]),
+        });
         Ok(())
     }
 

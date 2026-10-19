@@ -91,7 +91,10 @@ impl Provisioner {
 
     /// Tries the network; stores it and closes the window when it works.
     async fn provision(&self, ssid: &str, password: &str) -> bool {
-        let Some(credentials) = WifiCredentials::new(ssid, password) else { return false };
+        let Some(credentials) = WifiCredentials::new(ssid, password) else {
+            log::warn!("provision: refused Wi-Fi '{ssid}': the password must be empty or 8 to 63 characters");
+            return false;
+        };
         log::info!("provision: received Wi-Fi '{ssid}'");
         if !iotkit_net::esp::join(credentials.clone()).await {
             return false;
@@ -582,7 +585,8 @@ async fn finish(socket: &mut TcpSocket<'_>) {
 /// [`FACTORY_RESET_MS`](crate::gesture::FACTORY_RESET_MS).
 pub static HELD: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
-/// BOOT button (active low): hold 3 s to open provisioning, 10 s to forget every setting.
+/// BOOT button (active low): hold 3 s to open provisioning, 10 s to forget every setting and
+/// Matter pairing.
 #[embassy_executor::task]
 pub async fn button_task(button: esp_hal::gpio::Input<'static>, store: &'static SharedStore) {
     use crate::gesture::{FACTORY_RESET_MS, Gesture, PROVISION_MS, on_release};
@@ -605,7 +609,7 @@ pub async fn button_task(button: esp_hal::gpio::Input<'static>, store: &'static 
             }
             Gesture::FactoryReset => {
                 log::warn!("provision: BOOT held 10 s, erasing all settings");
-                if let Err(e) = store.lock().await.factory_reset().await {
+                if let Err(e) = iotkit_config::esp::factory_reset(store).await {
                     log::error!("provision: factory reset failed: {e}");
                 }
                 iotkit_diag::esp::restart().await;

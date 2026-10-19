@@ -73,7 +73,7 @@ pub async fn mqtt_task(net: Net, device: &'static Device, broker: Broker) {
     let mut party = iotkit_runtime::shutdown::register();
     let mut backoff = Backoff::new();
     loop {
-        net.stack.wait_config_up().await;
+        net.wait_online().await;
         let result = session(net, device, &broker, party.as_mut()).await;
         if let Some(p) = party.as_mut()
             && p.is_requested()
@@ -82,16 +82,15 @@ pub async fn mqtt_task(net: Net, device: &'static Device, broker: Broker) {
             p.done();
             core::future::pending::<()>().await;
         }
-        CONNECTED.store(false, Ordering::Relaxed);
+        // A session that got connected restarts the backoff: the next attempt comes at once.
+        if CONNECTED.swap(false, Ordering::Relaxed) {
+            backoff.succeeded();
+        }
         let delay = backoff.failed();
         match &result {
             Err(Error::Refused(code)) => log::error!("mqtt: broker refused the connection (code {code})"),
             Err(e) => log::warn!("mqtt: {e:?}, reconnecting in {delay} s"),
             Ok(()) => {}
-        }
-        // A session that worked for a while restarts the backoff.
-        if result.is_ok() {
-            backoff.succeeded();
         }
         Timer::after_secs(delay.into()).await;
     }
@@ -145,7 +144,10 @@ async fn session(
     CONNECTED.store(true, Ordering::Relaxed);
     UP.signal(());
 
+    let ping_every = Duration::from_secs(u64::from(KEEP_ALIVE_S) / 2);
     let mut last_rx = Instant::now();
+    // A fixed deadline: state changes wake the loop often, and must not keep postponing it.
+    let mut next_ping = last_rx + ping_every;
     loop {
         // States first: the changes that came while the last packet was handled.
         for entity in device.entities {
@@ -155,7 +157,7 @@ async fn session(
                 publish(&mut socket, &mut out, &ha::state_topic(node, entity.meta().id), state.as_bytes()).await?;
             }
         }
-        let ping = Timer::after_secs(u64::from(KEEP_ALIVE_S) / 2);
+        let ping = Timer::at(next_ping);
         let restart = async {
             match party.as_mut() {
                 Some(p) => p.requested().await,
@@ -202,6 +204,7 @@ async fn session(
                     return Err(Error::Timeout);
                 }
                 socket.write_all(&codec::PINGREQ).await.map_err(|_| Error::Io)?;
+                next_ping = Instant::now() + ping_every;
             }
         }
     }

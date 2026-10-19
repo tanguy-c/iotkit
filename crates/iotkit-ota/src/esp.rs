@@ -218,12 +218,18 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 /// Downloads and installs the update described by the manifest at `manifest_url`. On success
 /// the new firmware is selected: restart to boot it (on trial).
 pub async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
+    /// Clears [`BUSY`] however the install ends, a dropped future included.
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            BUSY.store(false, Ordering::Release);
+        }
+    }
     if BUSY.swap(true, Ordering::Acquire) {
         return Err(OtaError::Busy);
     }
-    let result = install_inner(net, store, fw, manifest_url).await;
-    BUSY.store(false, Ordering::Release);
-    result
+    let _guard = Guard;
+    install_inner(net, store, fw, manifest_url).await
 }
 
 async fn install_inner(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
@@ -282,7 +288,12 @@ async fn install_inner(net: Net, store: &SharedStore, fw: Firmware, manifest_url
         return Err(e);
     }
 
-    with(|flash| {
+    // `Pending` first, then the switch: a power cut in between boots the old slot, which forgets
+    // the update (`Abandoned`). The other order could boot the update with no trial count.
+    let mut store = store.lock().await;
+    let version = triple(manifest.version);
+    store.save(&Pending { slot: layout.target, previous, version, boots: 0 }).await.map_err(|_| OtaError::Flash)?;
+    let switched = with(|flash| {
         let mut ota = layout.ota(flash)?;
         // Blank OTA data (just flashed over USB) selects no slot: record the running one first,
         // so the switch counts from it.
@@ -291,10 +302,11 @@ async fn install_inner(net: Net, store: &SharedStore, fw: Firmware, manifest_url
         }
         ota.set_current_app_partition(subtype(layout.target)?).map_err(|_| OtaError::Flash)?;
         ota.set_current_ota_state(OtaImageState::New).map_err(|_| OtaError::Flash)
-    })?;
-    let mut store = store.lock().await;
-    let version = triple(manifest.version);
-    store.save(&Pending { slot: layout.target, previous, version, boots: 0 }).await.map_err(|_| OtaError::Flash)?;
+    });
+    if let Err(e) = switched {
+        let _ = store.remove::<Pending>().await;
+        return Err(e);
+    }
     let _ = store.save(&LastUpdate { outcome: Outcome::Installed, version }).await;
     log::info!("ota: {} installed, restart to run it", manifest.version);
     Ok(manifest.version)

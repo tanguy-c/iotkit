@@ -8,7 +8,7 @@ use core::pin::pin;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_futures::select::{Either, select};
 use esp_hal::peripherals::{ADC1, BT, IEEE802154, RNG};
-use iotkit_config::esp::{SharedFlash, SharedStore, find_partition};
+use iotkit_config::esp::{NVS_LABEL, SharedFlash, SharedStore, find_partition};
 use iotkit_model::Device;
 use rs_matter_embassy::{
     matter::{
@@ -97,7 +97,7 @@ async fn run(
         .chain(|e, c| e != ROOT_ENDPOINT_ID && c == COLOR.id, Colors::new(eps, &mut rand))
         .chain(|e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id, Async(Entities { eps }));
 
-    let range = find_partition("nvs").ok_or(Error::from(ErrorCode::NoSpace))?;
+    let range = find_partition(NVS_LABEL).ok_or(Error::from(ErrorCode::NoSpace))?;
     let mut kv_store = SeqMapKvBlobStore::new(BlockingAsync::new(SharedFlash), range.clone());
     if let Err(e) = stack.startup(&crypto, &mut kv_store).await {
         log::warn!("matter: stored state unreadable ({e:?}), erasing `nvs`");

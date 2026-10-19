@@ -32,12 +32,19 @@ impl Setting for WifiCredentials {
 }
 
 impl WifiCredentials {
-    /// `None` if the SSID is empty or a field is too long.
+    /// `None` if the SSID is empty or too long, or the password is not a valid one (see
+    /// [`password_valid`](Self::password_valid)).
     pub fn new(ssid: &str, password: &str) -> Option<Self> {
-        if ssid.is_empty() {
+        if ssid.is_empty() || !Self::password_valid(password) {
             return None;
         }
         Some(Self { ssid: ssid.try_into().ok()?, password: password.try_into().ok()? })
+    }
+
+    /// Empty (an open network), a WPA passphrase of 8 to 63 bytes, or a key of 64 hex digits.
+    pub fn password_valid(password: &str) -> bool {
+        let n = password.len();
+        n == 0 || (8..=63).contains(&n) || (n == 64 && password.bytes().all(|b| b.is_ascii_hexdigit()))
     }
 }
 
@@ -83,7 +90,13 @@ mod tests {
         assert!(WifiCredentials::new("", "x").is_none());
         assert!(WifiCredentials::new(&"s".repeat(33), "").is_none());
         assert!(WifiCredentials::new("s", &"p".repeat(65)).is_none());
-        let c = WifiCredentials::new("Pixel", "secret").unwrap();
-        assert_eq!((c.ssid.as_str(), c.password.as_str()), ("Pixel", "secret"));
+        let c = WifiCredentials::new("Pixel", "secret12").unwrap();
+        assert_eq!((c.ssid.as_str(), c.password.as_str()), ("Pixel", "secret12"));
+        assert!(WifiCredentials::new("Open", "").is_some());
+        // WPA2 needs 8 to 63 characters, or 64 hex digits.
+        assert!(WifiCredentials::new("s", "short").is_none());
+        assert!(WifiCredentials::new("s", &"p".repeat(63)).is_some());
+        assert!(WifiCredentials::new("s", &"p".repeat(64)).is_none());
+        assert!(WifiCredentials::new("s", &"a1".repeat(32)).is_some());
     }
 }

@@ -147,6 +147,8 @@ impl Entity for BinarySensor {
 pub struct Switch {
     meta: Meta,
     value: AtomicU8,
+    /// The last command until the app reports a state: [`UNKNOWN`] for none.
+    pending: AtomicU8,
     dirty: Dirty,
     commands: Signal<CriticalSectionRawMutex, bool>,
 }
@@ -158,12 +160,14 @@ impl Switch {
         Self {
             meta: Meta::new(Kind::Switch, id, name),
             value: AtomicU8::new(UNKNOWN),
+            pending: AtomicU8::new(UNKNOWN),
             dirty: Dirty::new(),
             commands: Signal::new(),
         }
     }
     /// Reports the state.
     pub fn set(&self, on: bool) {
+        self.pending.store(UNKNOWN, Ordering::Release);
         if self.value.swap(u8::from(on), Ordering::AcqRel) != u8::from(on) {
             self.dirty.mark();
         }
@@ -187,9 +191,16 @@ impl Entity for Switch {
     fn state(&self) -> State {
         self.get().map_or(State::Unknown, State::Bool)
     }
+    fn target(&self) -> State {
+        match self.pending.load(Ordering::Acquire) {
+            UNKNOWN => self.state(),
+            v => State::Bool(v == 1),
+        }
+    }
     fn command(&self, command: Command) -> bool {
         match command {
             Command::Set(on) => {
+                self.pending.store(u8::from(on), Ordering::Release);
                 self.commands.signal(on);
                 true
             }
@@ -240,6 +251,8 @@ impl LightState {
 pub struct Light {
     meta: Meta,
     state: Mutex<CriticalSectionRawMutex, Cell<Option<LightState>>>,
+    /// What the last command asked for, until the app reports a state.
+    pending: Mutex<CriticalSectionRawMutex, Cell<Option<LightState>>>,
     dirty: Dirty,
     commands: Signal<CriticalSectionRawMutex, LightState>,
 }
@@ -251,17 +264,23 @@ impl Light {
         Self {
             meta: Meta::new(Kind::Light, id, name),
             state: Mutex::new(Cell::new(None)),
+            pending: Mutex::new(Cell::new(None)),
             dirty: Dirty::new(),
             commands: Signal::new(),
         }
     }
     pub fn set(&self, state: LightState) {
+        self.pending.lock(|p| p.set(None));
         if self.state.lock(|s| s.replace(Some(state))) != Some(state) {
             self.dirty.mark();
         }
     }
     pub fn get(&self) -> Option<LightState> {
         self.state.lock(Cell::get)
+    }
+    /// What the next command builds on (see [`Entity::target`]).
+    fn target_state(&self) -> LightState {
+        self.pending.lock(Cell::get).or_else(|| self.get()).unwrap_or_default()
     }
     /// The state a command asks for (the current one with the command's changes).
     pub async fn wait_command(&self) -> LightState {
@@ -276,11 +295,18 @@ impl Entity for Light {
     fn state(&self) -> State {
         self.get().map_or(State::Unknown, State::Light)
     }
+    fn target(&self) -> State {
+        match self.pending.lock(Cell::get) {
+            Some(pending) => State::Light(pending),
+            None => self.state(),
+        }
+    }
     fn command(&self, command: Command) -> bool {
         match command {
             Command::Light { on, brightness, rgb } => {
-                let current = self.get().unwrap_or_default();
-                self.commands.signal(current.apply(on, brightness, rgb));
+                let next = self.target_state().apply(on, brightness, rgb);
+                self.pending.lock(|p| p.set(Some(next)));
+                self.commands.signal(next);
                 true
             }
             Command::Set(on) => self.command(Command::Light { on: Some(on), brightness: None, rgb: None }),

@@ -52,9 +52,27 @@ pub struct Net {
 pub const AP_ADDRESS: [u8; 4] = [192, 168, 4, 1];
 
 impl Net {
-    /// Joined, with an address.
+    /// Joined, with an IPv4 address.
     pub fn is_online(&self) -> bool {
-        self.stack.is_config_up()
+        online(self.stack)
+    }
+
+    /// Waits until [`is_online`](Self::is_online). Use it rather than `stack.wait_config_up()`:
+    /// with Matter the IPv6 link-local address is static, so the stack's config is "up" at
+    /// boot, before any Wi-Fi.
+    pub async fn wait_online(&self) {
+        wait_online(self.stack).await
+    }
+}
+
+fn online(stack: Stack<'_>) -> bool {
+    stack.is_link_up() && stack.config_v4().is_some()
+}
+
+async fn wait_online(stack: Stack<'_>) {
+    // Polled: the stack's own waits cannot tell IPv4 from the static IPv6.
+    while !online(stack) {
+        Timer::after_millis(250).await;
     }
 }
 
@@ -83,7 +101,7 @@ pub async fn credentials(store: &SharedStore) -> Option<WifiCredentials> {
 }
 
 /// Starts Wi-Fi and the network stack; returns at once. Wait for an address with
-/// `net.stack.wait_config_up().await`. Without `credentials` it waits for [`join`].
+/// `net.wait_online().await`. Without `credentials` it waits for [`join`].
 pub fn start(spawner: Spawner, wifi: WIFI<'static>, credentials: Option<WifiCredentials>) -> Result<Net, StartError> {
     // Power saving while disconnected starves Bluetooth (provisioning shares the radio).
     let config = ControllerConfig::default().with_sta_disconnected_pm(false);
@@ -143,6 +161,8 @@ enum Command {
 
 static COMMANDS: Channel<CriticalSectionRawMutex, Command, 2> = Channel::new();
 static JOINED: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+/// One [`join`] at a time (portal, Bluetooth and serial can each start one): they share [`JOINED`].
+static JOINING: embassy_sync::mutex::Mutex<CriticalSectionRawMutex, ()> = embassy_sync::mutex::Mutex::new(());
 
 /// Signal strength of the station link in dBm; 0 while disconnected.
 static RSSI: AtomicI32 = AtomicI32::new(0);
@@ -158,6 +178,7 @@ pub fn rssi() -> Option<i32> {
 /// Tries `credentials` (join, then an address within 20 s). On success they replace the current
 /// network (store them yourself); on failure the previous network is joined again.
 pub async fn join(credentials: WifiCredentials) -> bool {
+    let _one = JOINING.lock().await;
     JOINED.reset();
     COMMANDS.send(Command::Join(credentials)).await;
     JOINED.wait().await
@@ -313,7 +334,7 @@ async fn try_join(w: &mut Wifi, new: &WifiCredentials) -> bool {
     let stack = w.stack;
     let joined = with_timeout(JOIN_TIMEOUT, async {
         let info = w.controller.connect_async().await.map_err(|e| log::warn!("net: join failed: {e:?}")).ok()?;
-        stack.wait_config_up().await;
+        wait_online(stack).await;
         Some(info.channel)
     })
     .await;
@@ -349,7 +370,7 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
     let group = IpEndpoint::new(Ipv4Addr::from(mdns::GROUP).into(), mdns::PORT);
     let mut buf = [0u8; 512];
     loop {
-        stack.wait_config_up().await;
+        wait_online(stack).await;
         let Some(ip) = stack.config_v4().map(|c| c.address.address().octets()) else { continue };
         if let Err(e) = stack.join_multicast_group(Ipv4Addr::from(mdns::GROUP)) {
             log::warn!("net: mDNS group join failed: {e:?}");

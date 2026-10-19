@@ -88,6 +88,19 @@ pub type EspStore = Store<BlockingAsync<SharedFlash>>;
 /// The store shared by the tasks that need it.
 pub type SharedStore = embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, EspStore>;
 
+/// Label of the partition where other stacks keep their state (Matter pairings).
+pub const NVS_LABEL: &str = "nvs";
+
+/// Forgets everything: every setting, and the [`NVS_LABEL`] partition (Matter pairings). Restart
+/// afterwards.
+pub async fn factory_reset(store: &SharedStore) -> Result<(), Error> {
+    store.lock().await.factory_reset().await?;
+    if let Some(nvs) = find_partition(NVS_LABEL) {
+        with(|flash| flash.erase(nvs.start, nvs.end)).map_err(|_| Error::Flash)?;
+    }
+    Ok(())
+}
+
 /// Opens the store on the [`CONFIG_LABEL`] partition, erasing it first if it holds something
 /// else. Call [`init`] first.
 pub async fn open() -> Result<EspStore, Error> {

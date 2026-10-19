@@ -152,6 +152,23 @@ impl Ep {
         }
     }
 
+    /// On/off and light state for building a command: the entity's [`Entity::target`], so
+    /// commands that follow each other before the app applies them add up.
+    pub(crate) fn target_on(&self) -> bool {
+        match self.entity.target() {
+            State::Bool(on) => on,
+            State::Light(l) => l.on,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn target_light(&self) -> LightState {
+        match self.entity.target() {
+            State::Light(l) => l,
+            _ => LightState::default(),
+        }
+    }
+
     pub(crate) fn number(&self) -> Option<f32> {
         match self.entity.state() {
             State::Number(v) => Some(v),
@@ -166,7 +183,7 @@ impl Ep {
     /// Sets the level (clamped to MinLevel 1, so a later On never lights at 0). `on: None`
     /// keeps the on/off state.
     pub(crate) fn set_level(&self, level: u8, on: Option<bool>) {
-        let on = on.unwrap_or(self.light().on);
+        let on = on.unwrap_or(self.target_light().on);
         self.entity.command(Command::Light { on: Some(on), brightness: Some(brightness_from_level(level)), rgb: None });
     }
 }

@@ -62,6 +62,36 @@ fn light_commands_merge_with_the_state() {
 }
 
 #[test]
+fn commands_before_the_app_applies_them_add_up() {
+    // Matter sends level and colour as separate commands; the app sees only the latest signal.
+    static L: Light = Light::new("l", "L");
+    L.set(LightState { on: false, brightness: 100, rgb: [255, 0, 0] });
+    L.command(Command::Light { on: Some(true), brightness: Some(40), rgb: None });
+    L.command(Command::Light { on: None, brightness: None, rgb: Some([0, 0, 255]) });
+    let wanted = LightState { on: true, brightness: 40, rgb: [0, 0, 255] };
+    assert_eq!(L.target(), State::Light(wanted));
+    assert_eq!(L.state(), State::Light(LightState { on: false, brightness: 100, rgb: [255, 0, 0] }));
+    assert_eq!(block_on(L.wait_command()), wanted);
+    // Taken but not applied yet: the next command still builds on it.
+    L.command(Command::Set(false));
+    assert_eq!(block_on(L.wait_command()), LightState { on: false, ..wanted });
+    // Reported: the state is the base again.
+    L.set(LightState { on: true, brightness: 7, rgb: [1, 1, 1] });
+    assert_eq!(L.target(), L.state());
+
+    static S: Switch = Switch::new("s", "S");
+    S.set(false);
+    for _ in 0..2 {
+        // A toggle: the opposite of the target.
+        let on = S.target() != State::Bool(true);
+        S.command(Command::Set(on));
+    }
+    assert_eq!(S.target(), State::Bool(false), "two toggles in a row cancel out");
+    S.set(true);
+    assert_eq!(S.target(), State::Bool(true));
+}
+
+#[test]
 fn light_state_rules() {
     let off = LightState { on: false, brightness: 0, rgb: [1, 2, 3] };
     assert_eq!(off.apply(Some(true), None, None).brightness, 255, "on at 0 means full");

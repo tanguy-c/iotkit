@@ -249,7 +249,7 @@ async fn restart_task() {
 
 #[embassy_executor::task]
 async fn network_check_task(net: Net) {
-    net.stack.wait_config_up().await;
+    net.wait_online().await;
     HEALTH.pass(NETWORK);
 }
 

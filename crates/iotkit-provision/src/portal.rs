@@ -140,12 +140,12 @@ pub fn page<const N: usize>(name: &str, notice: Notice) -> String<N> {
             Notice::Failed { ssid } => {
                 s.write_str("<p class=err>Could not join <b>")?;
                 escaped(&mut s, ssid)?;
-                s.write_str("</b>: check the password (2.4 GHz networks only).</p>")?;
+                s.write_str("</b>: check the password (8 to 63 characters; 2.4 GHz networks only).</p>")?;
             }
         }
         s.write_str(
             "<form method=post action=/connect><label>Wi-Fi network<input name=ssid maxlength=32 required></label>\
-             <label>Password<input name=password type=password maxlength=64></label>\
+             <label>Password<input name=password type=password maxlength=64 pattern=\".{8,64}\" title=\"8 to 63 characters, or empty for an open network\"></label>\
              <button>Connect</button></form></body></html>",
         )
     })();

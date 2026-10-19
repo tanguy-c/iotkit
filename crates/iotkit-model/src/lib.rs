@@ -108,6 +108,12 @@ pub enum Command {
 pub trait Entity: Sync {
     fn meta(&self) -> &Meta;
     fn state(&self) -> State;
+    /// The state the next command builds on: what the last command asked for until the app
+    /// reports a state, else the state. A toggle or a partial light command must start from it,
+    /// so commands that come before the app has applied the previous ones are not lost.
+    fn target(&self) -> State {
+        self.state()
+    }
     /// Hands a command to the app. `false` if the entity takes no such command.
     fn command(&self, command: Command) -> bool;
     /// Whether the state changed for `binding` since its last call (and clears it).

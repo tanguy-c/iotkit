@@ -30,7 +30,7 @@ Commands:
   starve         stop feeding the LED task's watch (watchdog record within ~4 s)
   hang           block the executor (hardware watchdog reset after 5 s)
   reboot         software reset
-  factory-reset  erase all settings and restart";
+  factory-reset  erase all settings and Matter pairings, restart";
 
 static STARVE_LED: AtomicBool = AtomicBool::new(false);
 
@@ -173,8 +173,8 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>) {
         }
         "reboot" => iotkit_diag::esp::restart().await,
         "factory-reset" => {
-            match store.lock().await.factory_reset().await {
-                Ok(()) => println!("settings erased, restarting"),
+            match iotkit_config::esp::factory_reset(store).await {
+                Ok(()) => println!("settings and Matter pairings erased, restarting"),
                 Err(e) => println!("factory reset failed: {e}"),
             }
             iotkit_diag::esp::restart().await

@@ -10,7 +10,7 @@ use core::{
 
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_futures::select::{Either, select};
-use iotkit_config::esp::{SharedFlash, SharedStore, find_partition};
+use iotkit_config::esp::{NVS_LABEL, SharedFlash, SharedStore, find_partition};
 use iotkit_model::Device;
 use iotkit_net::esp::Net;
 
@@ -140,7 +140,7 @@ async fn run<C: Crypto>(
 
     // Pairings and the rest of rs-matter's state, in the `nvs` partition. If it does not load
     // (another firmware's data, say), it is erased and Matter starts unpaired.
-    let range = find_partition("nvs").ok_or(Error::from(ErrorCode::NoSpace))?;
+    let range = find_partition(NVS_LABEL).ok_or(Error::from(ErrorCode::NoSpace))?;
     let mut kv_store = SeqMapKvBlobStore::new(BlockingAsync::new(SharedFlash), range.clone());
     if let Err(e) = stack.startup(crypto, &mut kv_store).await {
         log::warn!("matter: stored state unreadable ({e:?}), erasing `nvs`");

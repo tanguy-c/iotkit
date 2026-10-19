@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "devkit"
-version = "0.8.0"
+version = "0.8.3"
 dependencies = [
  "embassy-executor",
  "embassy-futures",
