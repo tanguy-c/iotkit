@@ -72,6 +72,16 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: tools/size-check.sh ${{ github.event.pull_request.base.sha }}
 
+  links:
+    name: Unused code is not linked
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: links
+      - run: tools/link-check.sh
+
   # The other chips: build-tested only (the C6 job above is the one tested on hardware).
   chips-riscv:
     name: Firmware (${{ matrix.chip }})

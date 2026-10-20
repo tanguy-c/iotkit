@@ -13,3 +13,5 @@ description: Compare the ESP32-C6 firmware sizes (devkit, devkit + matter-wifi, 
 4. Growth that is the point of the change (a C6 feature, a fix): say so in the commit message;
    `ALLOW_GROWTH=1` locally, the `size-ok` label on the PR.
 5. `.rodata` changes alone (panic line numbers, strings) are reported but do not fail.
+6. Then `tools/link-check.sh`: unused code must not be linked. A new opt-in feature or component
+   adds a rule (pattern, a build without it, a control build with it).
