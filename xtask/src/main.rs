@@ -523,6 +523,8 @@ const INSTALL_PAGE: &str = r#"<!doctype html>
 <p>Plug the device in over USB, then install. Chrome or Edge on a computer; the device asks for
 your Wi-Fi at the end.</p>
 <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+<p><small>If it cannot start: hold BOOT, tap RESET, release BOOT, then connect again. After the
+install, tap RESET, then connect again to set the Wi-Fi.</small></p>
 </body>
 </html>
 "#;

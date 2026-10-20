@@ -15,6 +15,14 @@ Open the page, plug the device in, press *Connect*. The new install erases the f
 Matter pairings included), so it suits new devices; existing ones update [over the
 network](updates.md).
 
+Boards on the chip's own USB port (the ESP32-C6, C3, C5, S3 and H2 DevKits' USB connector):
+
+- If the page cannot start (*Failed to initialize*), put the board in download mode first: hold
+  BOOT, tap RESET, release BOOT, then *Connect*. On Linux, ModemManager opening the port is the
+  usual cause ([troubleshooting](troubleshooting.md)).
+- After *Installation complete*, tap RESET: the page's own reset leaves these boards in download
+  mode. Then *Connect* again: the page finds the firmware over Improv and offers its Wi-Fi.
+
 ## Publish it
 
 Copy `dist/<package>/web/` to any HTTPS site (Web Serial needs a secure page): GitHub Pages, a

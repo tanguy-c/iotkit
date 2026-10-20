@@ -13,3 +13,5 @@
 | Setup page cannot join | Wrong password or a 5 GHz-only network; some phone hotspots refuse for a minute after a wrong password |
 | MQTT keeps reconnecting | Broker address (`mqtt` on the console), login, or a weak Wi-Fi signal |
 | Browser install finds no port | Chrome or Edge on a computer, over HTTPS or localhost; a data USB cable |
+| Browser install: *Failed to initialize* | Hold BOOT, tap RESET, release BOOT, then *Connect*. On Linux, keep ModemManager off the board: a udev rule `ATTRS{idVendor}=="303a", ENV{ID_MM_DEVICE_IGNORE}="1"` |
+| Browser install done, no Wi-Fi step | Tap RESET (the board stayed in download mode), then *Connect* again |
