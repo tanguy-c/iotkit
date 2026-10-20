@@ -12,6 +12,9 @@ edition      = "2024"
 rust-version = "1.95"
 version      = "0.1.0"
 license      = "Apache-2.0"
+repository   = "https://github.com/tanguy-c/iotkit"
+# Not on crates.io (yet): projects use the git repository.
+publish      = false
 
 [workspace.dependencies]
 iotkit-image  = { path = "crates/iotkit-image" }

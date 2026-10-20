@@ -123,6 +123,7 @@ pub struct Project {
     pub flash: String,
     pub parts: Vec<Part>,
     pub matter_setup: Option<matter::Setup>,
+    /// A local checkout; empty for the git repository.
     pub iotkit_path: String,
     pub warnings: Vec<String>,
 }
@@ -234,11 +235,8 @@ impl Project {
     }
 }
 
-/// The checkout this CLI was built from (it has the crates the project uses).
-fn default_iotkit_path() -> PathBuf {
-    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    here.parent().unwrap_or(here).to_path_buf()
-}
+/// Where projects get iotkit from, unless `--iotkit-path` names a local checkout.
+pub const IOTKIT_GIT: &str = "https://github.com/tanguy-c/iotkit";
 
 pub struct NewArgs {
     pub dir: Option<PathBuf>,
@@ -248,13 +246,18 @@ pub struct NewArgs {
 }
 
 pub fn run(args: NewArgs) -> Result<()> {
-    let iotkit = args.iotkit_path.unwrap_or_else(default_iotkit_path);
-    ensure!(
-        iotkit.join("crates/iotkit-app").is_dir(),
-        "no iotkit checkout at {} (`--iotkit-path DIR`: the folder with crates/)",
-        iotkit.display()
-    );
-    let iotkit = iotkit.canonicalize()?.to_string_lossy().into_owned();
+    // "": the git repository.
+    let iotkit = match args.iotkit_path {
+        Some(dir) => {
+            ensure!(
+                dir.join("crates/iotkit-app").is_dir(),
+                "no iotkit checkout at {} (`--iotkit-path DIR`: the folder with crates/)",
+                dir.display()
+            );
+            dir.canonicalize()?.to_string_lossy().into_owned()
+        }
+        None => String::new(),
+    };
     let mut answers = match &args.answers {
         Some(path) => toml::from_str(&fs::read_to_string(path).with_context(|| path.display().to_string())?)
             .with_context(|| format!("answers file {}", path.display()))?,

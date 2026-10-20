@@ -16,7 +16,8 @@ flash-size = "{% if chip == "esp32c3" %}4mb{% else %}8mb{% endif %}"
 matter-wifi = ["iotkit-app/matter-wifi"]
 {% endif %}
 [dependencies]
-iotkit-app = { path = "{{iotkit_path}}/crates/iotkit-app", features = ["{{chip}}", "ha-update"] }
+# From GitHub. A local checkout instead: `iotkit_path` (cargo generate), `--iotkit-path` (cargo iotkit new).
+{% if iotkit_path == "" %}iotkit-app = { git = "https://github.com/tanguy-c/iotkit", features = ["{{chip}}", "ha-update"] }{% else %}iotkit-app = { path = "{{iotkit_path}}/crates/iotkit-app", features = ["{{chip}}", "ha-update"] }{% endif %}
 
 esp-hal                = { version = "~1.2.2", features = ["{{chip}}", "log-04", "unstable"] }
 esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "{{chip}}", "log-04"] }
@@ -31,7 +32,7 @@ smart-leds             = "0.4"
 log                    = { version = "0.4.27", features = ["release_max_level_info"] }
 
 [build-dependencies]
-iotkit-build = { path = "{{iotkit_path}}/crates/iotkit-build" }
+{% if iotkit_path == "" %}iotkit-build = { git = "https://github.com/tanguy-c/iotkit" }{% else %}iotkit-build = { path = "{{iotkit_path}}/crates/iotkit-build" }{% endif %}
 
 # A standalone project, even when generated inside another workspace.
 [workspace]

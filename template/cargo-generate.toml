@@ -12,4 +12,5 @@ default = "esp32c6"
 
 [placeholders.iotkit_path]
 type    = "string"
-prompt  = "Absolute path of your iotkit checkout (the folder with crates/ and xtask/)?"
+prompt  = "Absolute path of a local iotkit checkout, to develop iotkit itself (empty: from GitHub)?"
+default = ""

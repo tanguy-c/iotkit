@@ -4,6 +4,19 @@ A `no_std` firmware kit for the ESP32-C6 (esp-hal + Embassy): Wi-Fi setup, signe
 with automatic rollback, crash records and watchdogs, and Home Assistant over MQTT and Matter.
 A device's `main` describes its entities and hardware, and calls `iotkit_app::start` for the rest.
 
+## Status
+
+Early, not released yet: APIs and the flash layout of the settings may still change.
+
+- Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and
+  serial), signed OTA with rollback, MQTT with a real Home Assistant, Matter over Wi-Fi with
+  Home Assistant's Matter server, deep sleep, updates from Home Assistant.
+- Built but not tested on hardware: the other chips, the BOOT button gestures, the entity kinds
+  beyond sensor, switch and light over Matter, Matter over Thread end to end (no border router
+  tried yet).
+- Matter uses the test attestation credentials: for development, not for a product.
+- Known issues and plans are in the [issues](https://github.com/tanguy-c/iotkit/issues).
+
 ## Chips
 
 | Chip | Wi-Fi, MQTT, OTA, setup | Matter | Tested on hardware |
@@ -26,8 +39,9 @@ cargo install espflash
 # ESP32-S3 only (Xtensa): Espressif's toolchain, then `. ~/export-esp.sh` in each shell.
 # Use 1.98.1.0: 1.99 fails to link esp-hal 1.2.2.
 cargo install espup && espup install --toolchain-version 1.98.1.0
-# The iotkit CLI (signed builds, flashing, OTA), from this checkout:
-cargo install --path xtask
+# The iotkit CLI (new projects, signed builds, flashing, OTA):
+cargo install --locked --git https://github.com/tanguy-c/iotkit iotkit-cli
+# or, from a checkout of this repository: cargo install --locked --path xtask
 ```
 
 Linux: add yourself to the serial group (`sudo usermod -aG dialout $USER`), then log out and in.
@@ -57,8 +71,12 @@ with a `TODO` for its driver, a README with the wiring table, `.cargo/secrets.to
 you gave, and its signing keys. Scripts and CI: `cargo iotkit new DIR --answers FILE` (see
 `xtask/answers/`).
 
-Without the questions: `cargo generate --path /path/to/iotkit/template --name my-device` (asks
-the chip and the checkout's path; then `cargo iotkit keygen`). Its `src/main.rs`, and the one a
+A project depends on iotkit from this GitHub repository (`Cargo.lock` pins the commit; `cargo
+update` moves it on). To work on iotkit itself, `--iotkit-path DIR` makes the project use a
+local checkout instead.
+
+Without the questions: `cargo generate --git https://github.com/tanguy-c/iotkit template --name
+my-device` (asks the chip, and optionally a local checkout's path; then `cargo iotkit keygen`). Its `src/main.rs`, and the one a
 wizard project with no parts gets, shows the RGB LED as a light, toggled by a short press of BOOT:
 
 ```rust
@@ -142,7 +160,8 @@ What happens on the device:
    too, after 6 boots, by a counter in RTC memory.
 
 The OTA endpoint (port 80) answers anyone on the network, but installs only images signed with
-your key, and never an older version.
+your key, and never an older version. [SECURITY.md](SECURITY.md) lists what iotkit protects and
+what it does not.
 
 The repository's devkit has two test switches: `DEVKIT_PANIC_AT_BOOT=1 cargo xtask ota push ...`
 pushes a build that never gets healthy, and `IOTKIT_PANIC_EARLY=1` one that crashes before the
@@ -197,6 +216,10 @@ docker compose -f test-server/compose.yaml up -d mosquitto
 mosquitto_sub -h localhost -v -t 'iotkit/#' -t 'homeassistant/#'
 mosquitto_pub -h localhost -t iotkit/iotkit-XXXX/led/set -m '{"state":"ON","color":{"r":255,"g":0,"b":0}}'
 ```
+
+The Matter controller needs the PC's network interface towards the device:
+`MATTER_INTERFACE=<interface> docker compose -f test-server/compose.yaml up -d matter-server`
+(`ip link` lists them; the default is `wlan0`).
 
 ### Battery devices (deep sleep)
 
@@ -263,7 +286,8 @@ probe-rs over the built-in USB-JTAG.
 | `xtask/` | the `cargo iotkit` CLI |
 | `test-server/` | broker, Home Assistant and Matter controller for tests |
 
-Host tests: `cargo test-host --features iotkit-image/sign`. Build apps one at a time
+Before building the apps here, create a signing key: `cargo xtask keygen` (`keys/` is git-ignored:
+each developer signs with their own). Host tests: `cargo test-host --features iotkit-image/sign`. Build apps one at a time
 (`cargo build -p devkit`): `cargo build --workspace` fails, because devkit (Wi-Fi) and
 thread-light (802.15.4) would share one esp-radio build.
 
@@ -273,9 +297,13 @@ thread-light (802.15.4) would share one esp-radio build.
 | --- | --- |
 | `Permission denied` on `/dev/ttyACM0` | Add yourself to `dialout`, log in again |
 | `espflash` hangs on "Connecting" | Another program holds the serial port (a monitor); close it |
-| Build fails: "No OTA key" | `cargo iotkit keygen` |
+| Build fails: "No OTA key" | `cargo iotkit keygen` (in this repository too: `keys/` is not committed) |
 | `ota push`: name not resolved | Use the device's IP address (`net` on the console) |
 | `ota push`: connection timed out | Device not on Wi-Fi yet, or on another network |
 | OTA refused | Key mismatch, version not newer, or image too big for the slot |
 | Device keeps rolling back | The health check never passes: read the log over USB |
 | Setup page cannot join | Wrong password, a 5 GHz-only network; some phone hotspots refuse for a minute after a wrong password |
+
+## License
+
+[Apache License, Version 2.0](LICENSE).

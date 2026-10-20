@@ -1,7 +1,9 @@
 target/
 dist/
-# OTA signing key (`cargo xtask keygen`); the public half is committed.
-keys/*.key
+# OTA signing keys (`cargo xtask keygen`): each developer signs with their own.
+keys/
+# Private working notes (reviews, plans).
+notes/
 .cargo/secrets.toml
 **/*.rs.bk
 .DS_Store

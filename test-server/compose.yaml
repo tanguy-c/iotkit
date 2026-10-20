@@ -30,7 +30,8 @@ services:
   matter-server:
     image: ghcr.io/home-assistant-libs/python-matter-server:stable
     network_mode: host
-    # The device may only have an IPv6 link-local address: name the interface towards it.
-    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlp114s0}"]
+    # The device may only have an IPv6 link-local address: name the interface towards it
+    # (`MATTER_INTERFACE=wlp2s0 docker compose ... up -d matter-server`; `ip link` lists them).
+    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlan0}"]
     volumes:
       - ./matter-data:/data:Z

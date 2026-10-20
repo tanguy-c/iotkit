@@ -81,7 +81,7 @@ enum Cmd {
         /// Ask nothing: the defaults (a plugged-in ESP32-C6 with its LED).
         #[arg(long, conflicts_with = "answers")]
         defaults: bool,
-        /// The iotkit checkout the project uses (default: the one this CLI was installed from).
+        /// A local iotkit checkout for the project to use (default: the GitHub repository).
         #[arg(long)]
         iotkit_path: Option<PathBuf>,
     },

@@ -5,6 +5,8 @@ edition.workspace      = true
 rust-version.workspace = true
 version.workspace      = true
 license.workspace      = true
+repository.workspace   = true
+publish.workspace      = true
 
 [features]
 ## Release checks (`request_check`) and download progress, for Home Assistant's update entity.

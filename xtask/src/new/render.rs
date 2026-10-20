@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 /// The files `cargo generate` copies (`template/cargo-generate.toml` ignores the rest).
 pub const FILES: &[(&str, &str)] = &[
     ("build.rs", include_str!("../../../template/build.rs")),
-    ("Cargo.toml", include_str!("../../../template/Cargo.toml")),
+    ("Cargo.toml", include_str!("../../../template/Cargo.toml.liquid")),
     (".cargo/config.toml", include_str!("../../../template/.cargo/config.toml")),
     (".cargo/secrets.toml.example", include_str!("../../../template/.cargo/secrets.toml.example")),
     (".clippy.toml", include_str!("../../../template/.clippy.toml")),
@@ -48,5 +48,10 @@ mod tests {
         }
         let cargo = render("Cargo.toml", FILES[1].1, "my-device", "esp32c3", "/opt/iotkit").unwrap();
         assert!(cargo.contains("name         = \"my-device\"") && cargo.contains("flash-size = \"4mb\""));
+        assert!(cargo.contains("iotkit-app = { path = \"/opt/iotkit/crates/iotkit-app\""));
+        // No checkout: the git repository.
+        let cargo = render("Cargo.toml", FILES[1].1, "my-device", "esp32c6", "").unwrap();
+        let git = format!("git = \"{}\"", crate::new::IOTKIT_GIT);
+        assert!(cargo.matches(&git).count() == 2 && !cargo.contains("path ="), "{cargo}");
     }
 }

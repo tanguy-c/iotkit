@@ -503,9 +503,12 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     if p.battery() {
         app_features.push("deep-sleep");
     }
+    let source = match p.iotkit_path.as_str() {
+        "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
+        path => format!("path = {:?}", format!("{path}/crates/iotkit-app")),
+    };
     let line = format!(
-        "iotkit-app = {{ path = {:?}, features = [{}] }}",
-        format!("{}/crates/iotkit-app", p.iotkit_path),
+        "iotkit-app = {{ {source}, features = [{}] }}",
         app_features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
     );
     let mut out = String::new();
