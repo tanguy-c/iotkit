@@ -29,6 +29,7 @@ iotkit-link-mqtt = { path = "crates/iotkit-link-mqtt" }
 iotkit-link-matter = { path = "crates/iotkit-link-matter" }
 iotkit-app    = { path = "crates/iotkit-app" }
 iotkit-build  = { path = "crates/iotkit-build" }
+iotkit-components = { path = "crates/iotkit-components" }
 
 # No chip feature here: each app picks its chip (`esp32c6` by default) and forwards it.
 esp-hal                = { version = "~1.2.2", features = ["log-04", "unstable"] }

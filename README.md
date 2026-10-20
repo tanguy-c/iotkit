@@ -101,6 +101,12 @@ result with `set`. Device classes and units are typed (`.device_class(DeviceClas
 `.unit(Unit::PERCENT)`; `custom("...")` for others), and common sensors have shortcuts
 (`Sensor::humidity`, `pressure`, `illuminance`, `carbon_dioxide`, `pm25`, `battery`, `voltage`,
 `power`). `iotkit_app::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
+
+Ready-made parts in `iotkit_app::components` drive an entity from any embedded-hal pin, PWM
+channel or driver: `relay`, `binary_input`, `button` (press, double, triple, long), `dimmer`,
+`fan`, `rgb_light` (WS2812, feature `smartled`), and `poll` for sensors, with filters
+(`Linear` calibration, `Clamp`, `MovingAverage`, `Delta`, ...). The app awaits one in its own
+task, so unused parts cost nothing; `cargo iotkit new` uses them where it can.
 `apps/devkit` is a fuller example: watched tasks, its own health check, an extra console command.
 
 ## 3. First flash (USB)

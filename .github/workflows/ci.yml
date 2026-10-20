@@ -20,7 +20,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo fmt --all --check --manifest-path xtask/Cargo.toml
       - run: cargo test-host --features iotkit-image/sign
-      - run: cargo clippy -p iotkit-image -p iotkit-config -p iotkit-diag -p iotkit-runtime -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-model -p iotkit-link-mqtt -p iotkit-link-matter -p iotkit-build --target host-tuple --all-targets --features iotkit-image/sign -- -D warnings
+      - run: cargo clippy -p iotkit-image -p iotkit-config -p iotkit-diag -p iotkit-runtime -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-model -p iotkit-link-mqtt -p iotkit-link-matter -p iotkit-build -p iotkit-components --target host-tuple --all-targets --features iotkit-image/sign,iotkit-components/smartled -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --target host-tuple --all-targets -- -D warnings
       - run: cargo test --manifest-path xtask/Cargo.toml --target host-tuple
 

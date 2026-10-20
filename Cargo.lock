@@ -1475,6 +1475,7 @@ dependencies = [
  "critical-section",
  "document-features",
  "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -2896,6 +2897,7 @@ dependencies = [
  "esp-println",
  "esp-rtos",
  "heapless 0.9.3",
+ "iotkit-components",
  "iotkit-config",
  "iotkit-diag",
  "iotkit-image",
@@ -2913,6 +2915,21 @@ dependencies = [
 [[package]]
 name = "iotkit-build"
 version = "0.1.0"
+
+[[package]]
+name = "iotkit-components"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "iotkit-model",
+ "log",
+ "smart-leds",
+]
 
 [[package]]
 name = "iotkit-config"
@@ -4615,10 +4632,12 @@ dependencies = [
  "embassy-futures",
  "embassy-time",
  "esp-hal",
+ "esp-hal-smartled",
  "esp-rtos",
  "iotkit-app",
  "iotkit-build",
  "log",
+ "smart-leds",
 ]
 
 [[package]]

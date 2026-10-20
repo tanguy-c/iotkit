@@ -3,7 +3,8 @@
 //!
 //! The blind and the valve move 10 % a second, the thermostat heats or cools the room by
 //! 0.1 °C a second, the lock takes a second, and a short press of BOOT triggers the button event
-//! (`press`; three in a row: `triple_press`).
+//! (`press`; three in a row: `triple_press`). The board's RGB LED is a real light, driven by
+//! `components::rgb_light`.
 
 #![no_std]
 #![no_main]
@@ -11,12 +12,15 @@
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Ticker, Timer};
+use esp_hal::{Async, rmt::Rmt, time::Rate};
+use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
 use iotkit_app::{
     BinarySensor, Board, Climate, ClimateState, Config, Cover, CoverCommand, CoverState, DeviceClass, Entity, Event,
-    Fan, FanState, HvacAction, HvacMode, Lock, LockCommand, LockState, Number, PublicKey, Select, Sensor, TextSensor,
-    Unit, Valve,
+    Fan, FanState, HvacAction, HvacMode, Light, Lock, LockCommand, LockState, Number, PublicKey, Select, Sensor,
+    TextSensor, Unit, Valve,
 };
 use log::info;
+use smart_leds::RGB8;
 
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
 
@@ -40,7 +44,10 @@ static MOTION: BinarySensor = BinarySensor::new("motion", "Motion").device_class
 static LEAK: BinarySensor = BinarySensor::new("leak", "Leak").device_class(DeviceClass::MOISTURE);
 static SMOKE: BinarySensor = BinarySensor::new("smoke", "Smoke").device_class(DeviceClass::SMOKE);
 
+static LIGHT: Light = Light::new("light", "Light");
+
 static ENTITIES: &[&dyn Entity] = &[
+    &LIGHT,
     &BLIND,
     &VALVE,
     &DOOR,
@@ -63,6 +70,14 @@ static ENTITIES: &[&dyn Entity] = &[
 static CONFIG: Config =
     Config::new(iotkit_app::firmware!(&OTA_KEY)).model("Showcase").product_name("iotkit showcase").entities(ENTITIES);
 
+/// The board's WS2812 LED on GPIO8.
+type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
+
+#[embassy_executor::task]
+async fn light_task(led: Led) {
+    iotkit_app::components::rgb_light(&LIGHT, led, 1).await
+}
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     iotkit_app::init!(p);
@@ -76,6 +91,10 @@ async fn main(spawner: Spawner) -> ! {
         boot_button: Some(p.GPIO9.into()),
     };
     iotkit_app::start(spawner, board, &CONFIG).await;
+
+    let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
+    let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
+    spawner.spawn(light_task(led).unwrap());
 
     STATUS.set("starting");
     spawner.spawn(motion_task().unwrap());

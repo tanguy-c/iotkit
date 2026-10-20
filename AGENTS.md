@@ -8,7 +8,8 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
   - `config`, `runtime`, `image`, `model`: no iotkit dependencies (`build` is the apps' build.rs helper);
   - `diag`, `net` (on `config`, `runtime`), `ota`, `provision`;
   - `link-mqtt` (Home Assistant discovery, `ha.rs`), `link-matter`: both map `model` entities;
-  - `app`: `iotkit_app::start` wires everything for an app.
+  - `components`: ready-made parts (async fns over embedded-hal traits), host-tested;
+  - `app`: `iotkit_app::start` wires everything for an app; re-exports `components`.
 - `apps/`: `devkit` (reference firmware, the default member), `showcase` (one entity of each kind),
   `sleepy` (deep sleep), `thread-light` (Matter over Thread, uses the crates directly).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
@@ -61,4 +62,4 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
 - Concise comments: say why, not what. DRY: link to code or CI rather than copying it.
 - Match the surrounding code (naming, module layout, error handling); `cargo fmt` uses
   [rustfmt.toml](rustfmt.toml).
-- Skills in `.claude/skills/`: `size-check`, `add-entity-kind`, `add-chip`.
+- Skills in `.claude/skills/`: `size-check`, `add-entity-kind`, `add-chip`, `add-component`.

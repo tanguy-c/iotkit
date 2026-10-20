@@ -86,6 +86,21 @@ impl Bus {
     }
 }
 
+/// A ready-made part from `iotkit_app::components`, used on plugged-in devices with a pin
+/// chosen (else the TODO stays).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Component {
+    /// `components::relay`.
+    Relay,
+    /// `components::binary_input`: whether the pin needs a pull-up, and whether low means
+    /// detected.
+    Input { pull_up: bool, active_low: bool },
+    /// `components::button`: pull-up, pressed low.
+    Button,
+    /// `components::poll` on an ADC1 pin, calibrated to 0-100 %.
+    Analog,
+}
+
 pub struct Kind {
     /// In answers files: `kind = "temperature"`.
     pub id: &'static str,
@@ -111,6 +126,8 @@ pub struct Kind {
     /// Driver crates (no_std, embedded-hal 1.0), checked on crates.io.
     pub drivers: &'static str,
     pub stub: Stub,
+    /// The ready-made part, if there is one.
+    pub component: Option<Component>,
     /// The Matter device type it shows as, if any.
     pub matter: Option<&'static str>,
 }
@@ -132,6 +149,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::I2c, Bus::OneWire],
         drivers: "`sht4x`, `embedded-sht3x`, `bme280-rs`; DS18B20: `onewire` (blocking)",
         stub: Stub::Reading,
+        component: None,
         matter: Some("Temperature sensor"),
     },
     Kind {
@@ -149,6 +167,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::I2c],
         drivers: "`sht4x`, `embedded-sht3x`, `bme280-rs`, `aht20-async`",
         stub: Stub::Reading,
+        component: None,
         matter: Some("Humidity sensor"),
     },
     Kind {
@@ -166,6 +185,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::I2c],
         drivers: "`bme280-rs`; BMP280: `bme280` (blocking)",
         stub: Stub::Reading,
+        component: None,
         matter: Some("Pressure sensor"),
     },
     Kind {
@@ -183,6 +203,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::I2c],
         drivers: "`bh1750` (blocking), `veml7700`",
         stub: Stub::Reading,
+        component: None,
         matter: Some("Light sensor"),
     },
     Kind {
@@ -200,6 +221,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::I2c, Bus::Uart],
         drivers: "SCD4x: `scd4x`; MH-Z19: `mh-z19` (frames only; add `.with_tx`)",
         stub: Stub::Reading,
+        component: None,
         matter: Some("Air quality sensor"),
     },
     Kind {
@@ -217,6 +239,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::Uart],
         drivers: "PMS5003: `pmsx003` (blocking `embedded-io`)",
         stub: Stub::Reading,
+        component: None,
         matter: Some("Air quality sensor"),
     },
     Kind {
@@ -234,6 +257,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::Adc],
         drivers: "",
         stub: Stub::Reading,
+        component: Some(Component::Analog),
         matter: None,
     },
     Kind {
@@ -251,6 +275,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[],
         drivers: "",
         stub: Stub::Reading,
+        component: None,
         matter: None,
     },
     // Detects
@@ -269,6 +294,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioIn],
         drivers: "",
         stub: Stub::Detect,
+        component: Some(Component::Input { pull_up: false, active_low: false }),
         matter: Some("Occupancy sensor"),
     },
     Kind {
@@ -286,6 +312,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioIn],
         drivers: "",
         stub: Stub::Detect,
+        component: Some(Component::Input { pull_up: true, active_low: false }),
         matter: Some("Contact sensor"),
     },
     Kind {
@@ -303,6 +330,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioIn],
         drivers: "",
         stub: Stub::Detect,
+        component: Some(Component::Input { pull_up: true, active_low: true }),
         matter: Some("Water leak detector"),
     },
     Kind {
@@ -320,6 +348,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioIn],
         drivers: "",
         stub: Stub::Detect,
+        component: Some(Component::Input { pull_up: false, active_low: false }),
         matter: Some("Smoke alarm"),
     },
     // Controls
@@ -338,6 +367,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioOut],
         drivers: "",
         stub: Stub::Switch,
+        component: Some(Component::Relay),
         matter: Some("On/off plug"),
     },
     Kind {
@@ -353,8 +383,9 @@ pub const KINDS: &[Kind] = &[
         wiring: "DIN of a WS2812 strip, or the gate of a MOSFET for a single-colour strip",
         todo: "drive the light from `state.on`, `state.brightness`, `state.rgb`",
         buses: &[Bus::Rmt, Bus::Ledc],
-        drivers: "WS2812: `esp-hal-smartled` (as the status LED)",
+        drivers: "WS2812: `esp-hal-smartled` + `components::rgb_light` (feature `smartled`); dimmer: `components::dimmer`",
         stub: Stub::Light,
+        component: None,
         matter: Some("Extended colour light"),
     },
     Kind {
@@ -372,6 +403,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioOut],
         drivers: "",
         stub: Stub::Cover,
+        component: None,
         matter: Some("Window covering"),
     },
     Kind {
@@ -389,6 +421,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioOut],
         drivers: "",
         stub: Stub::Cover,
+        component: None,
         matter: Some("Water valve"),
     },
     Kind {
@@ -406,6 +439,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioOut],
         drivers: "",
         stub: Stub::Lock,
+        component: None,
         matter: Some("Door lock"),
     },
     Kind {
@@ -421,8 +455,9 @@ pub const KINDS: &[Kind] = &[
         wiring: "the fan's PWM input or its MOSFET gate",
         todo: "run the fan at `wanted` (on, speed in %; PWM at 25 kHz)",
         buses: &[Bus::Ledc],
-        drivers: "",
+        drivers: "`components::fan` on the LEDC channel",
         stub: Stub::Fan,
+        component: None,
         matter: Some("Fan"),
     },
     Kind {
@@ -440,6 +475,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioOut],
         drivers: "",
         stub: Stub::Climate,
+        component: None,
         matter: Some("Thermostat"),
     },
     Kind {
@@ -457,6 +493,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[],
         drivers: "",
         stub: Stub::Number,
+        component: None,
         matter: None,
     },
     Kind {
@@ -474,6 +511,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[],
         drivers: "",
         stub: Stub::Select,
+        component: None,
         matter: Some("Mode select"),
     },
     // Inputs
@@ -492,6 +530,7 @@ pub const KINDS: &[Kind] = &[
         buses: &[Bus::GpioIn],
         drivers: "",
         stub: Stub::Presses,
+        component: Some(Component::Button),
         matter: Some("Generic switch"),
     },
 ];

@@ -676,8 +676,16 @@ mod tests {
         let p = project(include_str!("../../answers/c6.toml"));
         let main = codegen::main_rs(&p);
         assert!(main.contains("static PUMP: Switch = Switch::new(\"pump\", \"Pump\");"), "{main}");
-        assert!(main.contains("spawner.spawn(pump_task(p.GPIO4.into()).unwrap());"));
-        assert!(main.contains("async fn pump_task(_pin: AnyPin<'static>)"));
+        // Ready-made parts where there is one, a TODO elsewhere.
+        assert!(
+            main.contains(
+                "spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default())).unwrap());"
+            )
+        );
+        assert!(main.contains("components::relay(&PUMP, pin, Active::High).await"), "{main}");
+        assert!(main.contains("components::button(&BUTTON, pin, Active::Low"), "{main}");
+        assert!(main.contains("components::poll(&SOIL_MOISTURE"), "{main}");
+        assert!(main.contains("TODO(temperature):"));
         assert!(main.contains("iotkit_app::start(spawner, board, &CONFIG).await;"));
         assert!(main.contains("led_task"));
         let secrets = codegen::secrets(&p).unwrap();
@@ -718,11 +726,12 @@ mod tests {
         {
             let p = project(answers);
             let main = codegen::main_rs(&p);
+            // One TODO per part, but none for a ready-made part (the soil probe keeps one: calibrate).
             for part in &p.parts {
-                assert_eq!(main.matches(&format!("TODO({}):", part.id)).count(), 1, "{}", part.id);
+                let ready = !battery && part.pin.is_some() && part.kind.component.is_some();
+                let want = usize::from(!ready || part.kind.analog);
+                assert_eq!(main.matches(&format!("TODO({}):", part.id)).count(), want, "{}", part.id);
             }
-            // Plus the header's `TODO(<entity id>)` and, on battery, `TODO(battery)` (the divider).
-            assert_eq!(main.matches("TODO(").count(), p.parts.len() + 1 + usize::from(battery), "{main}");
             assert!(!main.contains("TODO:"), "{main}");
             for line in main.lines().filter(|l| l.trim_start().starts_with("//")) {
                 assert!(line.chars().count() <= codegen::MAX_WIDTH, "{line}");

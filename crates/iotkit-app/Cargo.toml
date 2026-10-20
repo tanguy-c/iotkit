@@ -40,10 +40,13 @@ esp32s3 = [
 ha-update = ["iotkit-ota/check", "dep:embassy-futures"]
 ## Deep-sleeping devices over MQTT (`start_sleepy`): fast reconnect, retained commands, sleep.
 deep-sleep = ["iotkit-net/fast-connect", "iotkit-link-mqtt/sleepy", "dep:embassy-futures", "dep:embassy-net"]
+## Addressable LEDs (WS2812) as a light: `components::rgb_light`.
+smartled = ["iotkit-components/smartled"]
 ## Matter over Wi-Fi, next to MQTT (8 MB flash: about 2.1 MB of firmware).
 matter-wifi = ["dep:iotkit-link-matter", "iotkit-link-matter/wifi", "iotkit-net/matter"]
 
 [dependencies]
+iotkit-components  = { workspace = true }
 iotkit-config      = { workspace = true }
 iotkit-diag        = { workspace = true, features = ["panic-handler"] }
 iotkit-image       = { workspace = true }

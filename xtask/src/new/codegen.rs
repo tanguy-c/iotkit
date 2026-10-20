@@ -1,11 +1,14 @@
 //! The files `cargo iotkit new` writes from the answers: `src/main.rs`, `README.md`,
 //! `.cargo/secrets.toml`, and the features in `Cargo.toml`.
 
-use std::{collections::BTreeSet, fmt::Write as _};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+};
 
 use super::{
     MatterMode, Part, Project,
-    parts::{Bus, Stub},
+    parts::{Bus, Component, Stub},
 };
 
 /// `src/main.rs`. Each part gets an entity and, in its task (or, on a battery device, in
@@ -21,6 +24,10 @@ pub fn main_rs(p: &Project) -> String {
     let mut spawns = String::new();
     let mut readings = String::new();
     let mut any_pin = false;
+    let mut hal: BTreeSet<&str> = BTreeSet::new();
+    // Lines in `main` before the spawns (an ADC set up for a part).
+    let mut setup = String::new();
+    let mut adc_taken = false;
 
     for part in &p.parts {
         let k = part.kind;
@@ -49,6 +56,18 @@ pub fn main_rs(p: &Project) -> String {
             continue;
         }
 
+        let doc_extra = if battery { " Commands sent while the device sleeps arrive at its next wake-up." } else { "" };
+        let task = format!("{}_task", part.id);
+        if let (false, Some(comp), Some(pin)) = (battery, k.component, part.pin)
+            && !(comp == Component::Analog && adc_taken)
+        {
+            adc_taken |= comp == Component::Analog;
+            let (param, arg, body) = component(comp, part, pin, &mut iotkit, &mut hal, &mut time, &mut setup);
+            let _ = writeln!(spawns, "    spawner.spawn({task}({arg}).unwrap());");
+            task_fn(&mut tasks, part, &on_pin, doc_extra, &task, &param, &body);
+            continue;
+        }
+
         let (param, arg) = match part.pin {
             Some(n) => {
                 any_pin = true;
@@ -56,7 +75,6 @@ pub fn main_rs(p: &Project) -> String {
             }
             None => (String::new(), String::new()),
         };
-        let task = format!("{}_task", part.id);
         let _ = writeln!(spawns, "    spawner.spawn({task}({arg}).unwrap());");
         // Commands: the TODO sits between the command and the state it reports.
         let t = todo(8, part, k.todo, false);
@@ -169,18 +187,7 @@ pub fn main_rs(p: &Project) -> String {
         if k.ty == "Climate" {
             iotkit.insert("HvacMode");
         }
-        let doc_extra = if battery { " Commands sent while the device sleeps arrive at its next wake-up." } else { "" };
-        let _ = write!(
-            tasks,
-            "
-/// {}{on_pin}.{doc_extra}
-#[embassy_executor::task]
-async fn {task}({param}) {{
-{body}
-}}
-",
-            part.name
-        );
+        task_fn(&mut tasks, part, &on_pin, doc_extra, &task, &param, &body);
     }
 
     if led {
@@ -230,7 +237,6 @@ async fn {task}({param}) {{
     if !time.is_empty() {
         let _ = writeln!(s, "use embassy_time::{};", group(&time));
     }
-    let mut hal: BTreeSet<&str> = BTreeSet::new();
     if any_pin {
         hal.insert("gpio::AnyPin");
     }
@@ -247,6 +253,7 @@ async fn {task}({param}) {{
         s.push_str("use iotkit_app::battery::{Battery, BatteryCurve};\n");
     }
     let _ = writeln!(s, "use iotkit_app::{};", group(&iotkit));
+
     if led {
         s.push_str("use log::warn;\nuse smart_leds::{RGB8, SmartLedsWriteAsync, brightness};\n");
     }
@@ -347,6 +354,7 @@ async fn main(spawner: Spawner) -> ! {{
     }
     if !spawns.is_empty() {
         s.push('\n');
+        s.push_str(&setup);
         s.push_str(&spawns);
     }
     if battery {
@@ -465,12 +473,25 @@ fn wrap_comments(source: &str) -> String {
 /// The generated project's `rustfmt.toml` `max_width`.
 pub const MAX_WIDTH: usize = 120;
 
+/// The `use` tree of `items` (paths such as `gpio::Input`), shared prefixes merged.
 fn group(items: &BTreeSet<&str>) -> String {
-    if items.len() == 1 {
-        items.iter().next().expect("one").to_string()
-    } else {
-        format!("{{{}}}", items.iter().copied().collect::<Vec<_>>().join(", "))
+    let mut nested: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for item in items {
+        if let Some((head, rest)) = item.split_once("::") {
+            nested.entry(head).or_default().insert(rest);
+        }
     }
+    let mut out = Vec::new();
+    for item in items.iter().filter(|i| !i.contains("::")) {
+        match nested.get_mut(item) {
+            Some(rest) => {
+                rest.insert("self");
+            }
+            None => out.push(item.to_string()),
+        }
+    }
+    out.extend(nested.iter().map(|(head, rest)| format!("{head}::{}", group(rest))));
+    if out.len() == 1 { out.remove(0) } else { format!("{{{}}}", out.join(", ")) }
 }
 
 /// `.cargo/secrets.toml` (git-ignored): what the builder gave now, read at build time.
@@ -506,6 +527,100 @@ pub fn secrets(p: &Project) -> Option<String> {
 }
 
 /// The template's `Cargo.toml` with the features the answers need.
+/// A part's task.
+fn task_fn(tasks: &mut String, part: &Part, on_pin: &str, doc_extra: &str, task: &str, param: &str, body: &str) {
+    let _ = write!(
+        tasks,
+        "
+/// {}{on_pin}.{doc_extra}
+#[embassy_executor::task]
+async fn {task}({param}) {{
+{body}
+}}
+",
+        part.name
+    );
+}
+
+/// A ready-made part on GPIO`pin`: the task's parameters, the spawn argument and the task's
+/// body. Adds the imports it needs, and its ADC set-up to `setup`.
+fn component<'a>(
+    comp: Component,
+    part: &Part,
+    pin: u8,
+    iotkit: &mut BTreeSet<&'a str>,
+    hal: &mut BTreeSet<&'a str>,
+    time: &mut BTreeSet<&'a str>,
+    setup: &mut String,
+) -> (String, String, String) {
+    let (c, id) = (&part.konst, &part.id);
+    iotkit.insert("components");
+    match comp {
+        Component::Relay => {
+            iotkit.insert("Active");
+            hal.extend(["gpio::Level", "gpio::Output", "gpio::OutputConfig"]);
+            (
+                "pin: Output<'static>".into(),
+                format!("Output::new(p.GPIO{pin}, Level::Low, OutputConfig::default())"),
+                format!(
+                    "    // `Active::Low` for a relay board switched by a low input.\n    components::relay(&{c}, pin, Active::High).await"
+                ),
+            )
+        }
+        Component::Input { .. } | Component::Button => {
+            let (pull_up, active_low) = match comp {
+                Component::Input { pull_up, active_low } => (pull_up, active_low),
+                _ => (true, true),
+            };
+            iotkit.insert("Active");
+            hal.extend(["gpio::Input", "gpio::InputConfig"]);
+            let config = if pull_up {
+                hal.insert("gpio::Pull");
+                "InputConfig::default().with_pull(Pull::Up)"
+            } else {
+                "InputConfig::default()"
+            };
+            let active = if active_low { "Low" } else { "High" };
+            let call = if comp == Component::Button {
+                format!("components::button(&{c}, pin, Active::{active}, components::PressTiming::DEFAULT)")
+            } else {
+                time.insert("Duration");
+                format!("components::binary_input(&{c}, pin, Active::{active}, Duration::from_millis(50))")
+            };
+            ("pin: Input<'static>".into(), format!("Input::new(p.GPIO{pin}, {config})"), format!("    {call}.await"))
+        }
+        Component::Analog => {
+            iotkit.extend(["components::filter::Clamp", "components::filter::Filter", "components::filter::Linear"]);
+            hal.extend([
+                "Async",
+                "analog::adc::Adc",
+                "analog::adc::AdcConfig",
+                "analog::adc::AdcPin",
+                "analog::adc::Attenuation",
+            ]);
+            time.insert("Duration");
+            let _ = writeln!(
+                setup,
+                "    let mut adc_config = AdcConfig::new();\n    let {id}_pin = adc_config.enable_pin(p.GPIO{pin}, Attenuation::_11dB);"
+            );
+            (
+                format!(
+                    "\n    mut adc: Adc<'static, esp_hal::peripherals::ADC1<'static>, Async>,\n    mut pin: AdcPin<esp_hal::peripherals::GPIO{pin}<'static>, esp_hal::peripherals::ADC1<'static>>,\n"
+                ),
+                format!("Adc::new(p.ADC1, adc_config).into_async(), {id}_pin"),
+                format!(
+                    "    // TODO({id}): calibrate: the raw readings dry (0 %) and in water (100 %).
+    let percent = Linear::new((3000.0, 0.0), (1200.0, 100.0)).then(Clamp::new(0.0, 100.0));
+    components::poll(&{c}, Duration::from_secs(30), percent, async || {{
+        Some(f32::from(adc.read_oneshot(&mut pin).await))
+    }})
+    .await"
+                ),
+            )
+        }
+    }
+}
+
 pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     let mut app_features = vec![p.board.chip, "ha-update"];
     if p.battery() {
@@ -724,6 +839,8 @@ Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>
 - The heap is fixed (for Wi-Fi and Bluetooth): avoid `alloc`.
 - One task per part, never stalled: await a `Timer` or a pin edge. Short blocking bus reads are fine; no busy loops.
 - Report states with `.set(..)`; take commands with `.wait_command().await`.
+- Prefer the ready-made parts in `iotkit_app::components` (relay, binary_input, button, poll,
+  dimmer, fan, rgb_light); `poll` takes any driver in its read closure.
 - Versions are pinned (esp-hal ~1.2.2): check APIs in the docs or source below, not from memory.
 - Leave `partitions*.csv`, `[profile.*]` and `keys/` alone.
 - Bump `version` in `Cargo.toml` for each OTA update.

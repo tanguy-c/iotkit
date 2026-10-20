@@ -73,6 +73,7 @@ use log::{error, info, warn};
 use static_cell::StaticCell;
 
 pub use console::ConsoleExtension;
+pub use iotkit_components::{self as components, Active};
 pub use iotkit_config::{self as config, Setting, esp::SharedStore};
 pub use iotkit_diag::{self as diag, Boot, BootStats, TaskWatch};
 pub use iotkit_image::{self as image, PublicKey, public_key};

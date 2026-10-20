@@ -286,6 +286,18 @@ impl Event {
             self.dirty.mark();
         }
     }
+    /// Triggers the event type called `name`; `false` if it has none.
+    pub fn trigger_named(&self, name: &str) -> bool {
+        let index = self.types.iter().position(|t| *t == name);
+        if let Some(i) = index {
+            self.trigger(i as u8);
+        }
+        index.is_some()
+    }
+    /// The event types given to `new`.
+    pub fn types(&self) -> &'static [&'static str] {
+        self.types
+    }
 }
 
 impl Entity for Event {
