@@ -1,11 +1,17 @@
 //! Cooperative shutdown before a planned restart: links say goodbye (MQTT `offline`) instead of
 //! vanishing.
 //!
-//! ```ignore
-//! let mut party = shutdown::register().unwrap();   // in the MQTT task
-//! party.requested().await;  /* publish offline, disconnect */  party.done();
+//! ```
+//! use iotkit_runtime::shutdown;
 //!
-//! with_timeout(Duration::from_secs(2), shutdown::shutdown()).await;   // before software_reset
+//! let mut party = shutdown::register().unwrap();   // in the MQTT task
+//! let mqtt = async {
+//!     party.requested().await;  // then publish offline, disconnect
+//!     party.done();
+//! };
+//! // Before `software_reset`, bounded with `embassy_time::with_timeout`:
+//! let restart = shutdown::shutdown();
+//! # embassy_futures::block_on(embassy_futures::join::join(mqtt, restart));
 //! ```
 
 use crate::atomic::{AtomicU8, Ordering};

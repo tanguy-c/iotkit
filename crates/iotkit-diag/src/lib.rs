@@ -5,6 +5,7 @@
 //! [`record_boot`] keeps it in flash as [`LastCrash`] and counts boots and crashes in [`BootStats`].
 
 #![no_std]
+#![warn(missing_docs)]
 
 /// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
 #[cfg(all(feature = "_esp", feature = "panic-handler", not(feature = "portable-atomic")))]
@@ -32,6 +33,7 @@ pub const BACKTRACE_LEN: usize = 8;
 /// What crashed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CrashKind {
+    /// A panic.
     Panic,
     /// A [`TaskWatch`] was not fed in time.
     Watchdog,
@@ -40,6 +42,7 @@ pub enum CrashKind {
 /// A crash, recorded before the restart.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Crash {
+    /// What crashed.
     pub kind: CrashKind,
     /// Panic message and location, or the starving task; truncated to [`MESSAGE_LEN`].
     pub message: String<MESSAGE_LEN>,
@@ -50,6 +53,7 @@ pub struct Crash {
 }
 
 impl Crash {
+    /// An empty crash record (no message, no backtrace).
     pub fn new(kind: CrashKind, uptime_s: u32) -> Self {
         Self { kind, message: String::new(), backtrace: Vec::new(), uptime_s }
     }
@@ -84,15 +88,19 @@ impl fmt::Display for Crash {
 /// Why the chip restarted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResetCause {
+    /// Power applied.
     PowerOn,
     /// `software_reset()`: a requested reboot, or the restart after a recorded crash.
     Software,
     /// A hardware watchdog fired: something blocked the executor.
     Watchdog,
+    /// The supply voltage dropped too low.
     BrownOut,
+    /// Woke from deep sleep.
     DeepSleep,
     /// Reset over USB or JTAG (e.g. by espflash).
     Debugger,
+    /// Another cause: the chip's raw reset reason (0 if unknown).
     Other(u8),
 }
 
@@ -108,6 +116,7 @@ impl Setting for LastCrash {
 /// Kept in flash: boot and crash counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootStats {
+    /// Every boot.
     pub boots: u32,
     /// Panics and watchdog resets, hardware ones included.
     pub crashes: u32,
@@ -124,6 +133,7 @@ impl Setting for BootStats {
 /// What is known about this boot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Boot {
+    /// Why the chip restarted.
     pub cause: ResetCause,
     /// The crash that caused this restart, if one was recorded.
     pub crash: Option<Crash>,
@@ -174,12 +184,14 @@ impl BootStats {
 pub mod rtc {
     use super::*;
 
+    /// Length of the record, in 32-bit words.
     pub const WORDS: usize = 64;
     const MAGIC: u32 = 0x10c4_c4a5;
     const HEADER: usize = 4;
     const TEXT: usize = HEADER + BACKTRACE_LEN;
     const _: () = assert!((WORDS - TEXT) * 4 >= MESSAGE_LEN);
 
+    /// The record, as kept in RTC memory.
     pub type Record = [u32; WORDS];
 
     fn checksum(words: &[u32]) -> u32 {

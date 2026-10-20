@@ -14,10 +14,12 @@ use crate::{Binding, Command, Dirty, Entity, Kind, Meta, State};
 macro_rules! builders {
     ($ty:ty) => {
         impl $ty {
+            /// Home Assistant device class (`temperature`, `motion`, `restart`, ...).
             pub const fn device_class(mut self, class: &'static str) -> Self {
                 self.meta.device_class = Some(class);
                 self
             }
+            /// Material Design icon (`mdi:...`).
             pub const fn icon(mut self, icon: &'static str) -> Self {
                 self.meta.icon = Some(icon);
                 self
@@ -49,9 +51,11 @@ pub struct Sensor {
 builders!(Sensor);
 
 impl Sensor {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self { meta: Meta::new(Kind::Sensor, id, name), value: AtomicU32::new(f32::NAN.to_bits()), dirty: Dirty::new() }
     }
+    /// Unit of the value (`°C`, `%`, ...).
     pub const fn unit(mut self, unit: &'static str) -> Self {
         self.meta.unit = Some(unit);
         self
@@ -61,6 +65,7 @@ impl Sensor {
         self.meta.measurement = true;
         self
     }
+    /// Decimals to show.
     pub const fn precision(mut self, decimals: u8) -> Self {
         self.meta.precision = Some(decimals);
         self
@@ -73,6 +78,7 @@ impl Sensor {
         }
     }
 
+    /// The last value, `None` until set.
     pub fn get(&self) -> Option<f32> {
         let v = f32::from_bits(self.value.load(Ordering::Acquire));
         (!v.is_nan()).then_some(v)
@@ -110,14 +116,17 @@ pub struct BinarySensor {
 builders!(BinarySensor);
 
 impl BinarySensor {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self { meta: Meta::new(Kind::BinarySensor, id, name), value: AtomicU8::new(UNKNOWN), dirty: Dirty::new() }
     }
+    /// Sets the value; publishes it when it differs.
     pub fn set(&self, on: bool) {
         if self.value.swap(u8::from(on), Ordering::AcqRel) != u8::from(on) {
             self.dirty.mark();
         }
     }
+    /// The last value, `None` until set.
     pub fn get(&self) -> Option<bool> {
         match self.value.load(Ordering::Acquire) {
             UNKNOWN => None,
@@ -157,6 +166,7 @@ pub struct Switch {
 builders!(Switch);
 
 impl Switch {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self {
             meta: Meta::new(Kind::Switch, id, name),
@@ -173,6 +183,7 @@ impl Switch {
             self.dirty.mark();
         }
     }
+    /// The last reported state, `None` until set.
     pub fn get(&self) -> Option<bool> {
         match self.value.load(Ordering::Acquire) {
             UNKNOWN => None,
@@ -219,9 +230,11 @@ impl Entity for Switch {
 /// State of a [`Light`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LightState {
+    /// On or off.
     pub on: bool,
     /// 0-255.
     pub brightness: u8,
+    /// Red, green, blue.
     pub rgb: [u8; 3],
 }
 
@@ -261,6 +274,7 @@ pub struct Light {
 builders!(Light);
 
 impl Light {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self {
             meta: Meta::new(Kind::Light, id, name),
@@ -270,12 +284,14 @@ impl Light {
             commands: Signal::new(),
         }
     }
+    /// Reports the state.
     pub fn set(&self, state: LightState) {
         self.pending.lock(|p| p.set(None));
         if self.state.lock(|s| s.replace(Some(state))) != Some(state) {
             self.dirty.mark();
         }
     }
+    /// The last reported state, `None` until set.
     pub fn get(&self) -> Option<LightState> {
         self.state.lock(Cell::get)
     }
@@ -332,9 +348,11 @@ pub struct Button {
 builders!(Button);
 
 impl Button {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self { meta: Meta::new(Kind::Button, id, name), presses: Signal::new(), dirty: Dirty::new() }
     }
+    /// The next press.
     pub async fn wait_press(&self) {
         self.presses.wait().await
     }

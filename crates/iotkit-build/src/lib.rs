@@ -1,11 +1,11 @@
-//! `build.rs` helpers for iotkit firmware (a build dependency):
+//! `build.rs` helpers for iotkit firmware (a build dependency). In `build.rs`'s `main`:
 //!
-//! ```ignore
-//! fn main() {
-//!     iotkit_build::link();
-//!     iotkit_build::require_key("keys/ota.pub");
-//! }
+//! ```no_run
+//! iotkit_build::link();
+//! iotkit_build::require_key("keys/ota.pub");
 //! ```
+
+#![warn(missing_docs)]
 
 use std::path::Path;
 

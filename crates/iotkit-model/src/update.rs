@@ -14,11 +14,15 @@ use crate::{Binding, Command, Dirty, Entity, Kind, Meta, State, entities::builde
 /// What an update entity shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UpdateState {
+    /// The running version.
     pub installed: String<16>,
     /// Empty while unknown (never checked).
     pub latest: String<16>,
+    /// What the latest release changes (empty: none).
     pub summary: String<64>,
+    /// Where its release notes are (empty: none).
     pub release_url: String<96>,
+    /// Installing now.
     pub in_progress: bool,
     /// While installing, if known.
     pub percentage: Option<u8>,
@@ -45,6 +49,7 @@ fn cut<const N: usize>(s: &str) -> String<N> {
 }
 
 impl Update {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self {
             meta: Meta::new(Kind::Update, id, name),
@@ -73,6 +78,7 @@ impl Update {
         }
     }
 
+    /// Reports the running version.
     pub fn set_installed(&self, version: &str) {
         self.change(|s| s.installed = cut(version));
     }

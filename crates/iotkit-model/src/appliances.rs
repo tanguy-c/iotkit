@@ -13,15 +13,20 @@ use crate::{Binding, Command, Dirty, Entity, Kind, Meta, Spec, State, entities::
 /// Where a cover or valve is, or where it is going.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoverState {
+    /// Fully open.
     Open,
+    /// Fully closed.
     Closed,
+    /// Moving towards open.
     Opening,
+    /// Moving towards closed.
     Closing,
     /// Stopped between open and closed.
     Stopped,
 }
 
 impl CoverState {
+    /// The Home Assistant name (`open`, `closing`, ...).
     pub fn as_str(self) -> &'static str {
         // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM.
         static NAMES: [&str; 5] = ["open", "closed", "opening", "closing", "stopped"];
@@ -32,8 +37,11 @@ impl CoverState {
 /// What a controller asks a cover or valve to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoverCommand {
+    /// Open fully.
     Open,
+    /// Close fully.
     Close,
+    /// Stop moving.
     Stop,
     /// Go to this position: 0 closed, 100 open (only with `position()`).
     Position(u8),
@@ -101,6 +109,7 @@ macro_rules! motion {
         builders!($ty);
 
         impl $ty {
+            /// A new entity (`id`: see [`Meta::id`]).
             pub const fn new(id: &'static str, name: &'static str) -> Self {
                 Self { meta: Meta::new($kind, id, name), motion: Motion::new() }
             }
@@ -113,6 +122,7 @@ macro_rules! motion {
             pub fn set(&self, state: Option<CoverState>, position: Option<u8>) {
                 self.motion.set(state, position)
             }
+            /// The last reported state and position.
             pub fn get(&self) -> (Option<CoverState>, Option<u8>) {
                 self.motion.get()
             }
@@ -151,27 +161,37 @@ motion!(Valve, Kind::Valve, "A water or gas valve (device class `water`, `gas`).
 /// A lock's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LockState {
+    /// Locked.
     Locked,
+    /// Unlocked.
     Unlocked,
+    /// Locking in progress.
     Locking,
+    /// Unlocking in progress.
     Unlocking,
+    /// Stuck: neither locked nor unlocked.
     Jammed,
     /// Unlatched (only with `open()`).
     Open,
+    /// Unlatching in progress.
     Opening,
 }
 
 impl LockState {
+    /// The Home Assistant name (`LOCKED`, `JAMMED`, ...).
     pub fn as_str(self) -> &'static str {
-        // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM.
+        // A table in flash, as in `CoverState::as_str`.
         static NAMES: [&str; 7] = ["LOCKED", "UNLOCKED", "LOCKING", "UNLOCKING", "JAMMED", "OPEN", "OPENING"];
         NAMES[self as usize]
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What a controller asks a lock to do.
 pub enum LockCommand {
+    /// Lock it.
     Lock,
+    /// Unlock it.
     Unlock,
     /// Unlatch (only with `open()`).
     Open,
@@ -189,6 +209,7 @@ pub struct Lock {
 builders!(Lock);
 
 impl Lock {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self {
             meta: Meta::new(Kind::Lock, id, name),
@@ -203,14 +224,17 @@ impl Lock {
         self.open = true;
         self
     }
+    /// Reports the state.
     pub fn set(&self, state: LockState) {
         if self.state.lock(|s| s.replace(Some(state))) != Some(state) {
             self.dirty.mark();
         }
     }
+    /// The last reported state.
     pub fn get(&self) -> Option<LockState> {
         self.state.lock(Cell::get)
     }
+    /// The next command.
     pub async fn wait_command(&self) -> LockCommand {
         self.commands.wait().await
     }
@@ -245,14 +269,18 @@ impl Entity for Lock {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Which way a fan turns.
 pub enum FanDirection {
+    /// The normal way.
     Forward,
+    /// The other way.
     Reverse,
 }
 
 impl FanDirection {
+    /// The Home Assistant name (`forward`, `reverse`).
     pub fn as_str(self) -> &'static str {
-        // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM.
+        // A table in flash, as in `CoverState::as_str`.
         static NAMES: [&str; 2] = ["forward", "reverse"];
         NAMES[self as usize]
     }
@@ -261,16 +289,20 @@ impl FanDirection {
 /// A fan's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FanState {
+    /// Running.
     pub on: bool,
     /// 1-100 (with `speed()`).
     pub percentage: u8,
     /// Index into the presets, if one is active.
     pub preset: Option<u8>,
+    /// Oscillating (with `oscillation()`).
     pub oscillating: bool,
+    /// Which way it turns (with `direction()`).
     pub direction: FanDirection,
 }
 
 impl FanState {
+    /// Off, full speed, forward: what a command builds on before the first `set`.
     pub const OFF: Self =
         Self { on: false, percentage: 100, preset: None, oscillating: false, direction: FanDirection::Forward };
 
@@ -299,12 +331,15 @@ impl FanState {
 /// One fan setting to change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FanCommand {
+    /// Turn on or off.
     On(bool),
     /// 0 turns it off.
     Percentage(u8),
     /// Index into the presets.
     Preset(u8),
+    /// Oscillate or not.
     Oscillate(bool),
+    /// Turn this way.
     Direction(FanDirection),
 }
 
@@ -324,6 +359,7 @@ pub struct Fan {
 builders!(Fan);
 
 impl Fan {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self {
             meta: Meta::new(Kind::Fan, id, name),
@@ -342,6 +378,7 @@ impl Fan {
         self.speed = true;
         self
     }
+    /// Preset modes (`auto`, `sleep`, ...): up to 254, each up to 24 bytes (checked at build time).
     pub const fn presets(mut self, presets: &'static [&'static str]) -> Self {
         assert!(presets.len() < u8::MAX as usize, "Fan: at most 254 presets");
         // Room for the longest one in the state published over MQTT.
@@ -353,20 +390,24 @@ impl Fan {
         self.presets = presets;
         self
     }
+    /// Can oscillate.
     pub const fn oscillation(mut self) -> Self {
         self.oscillation = true;
         self
     }
+    /// Can change direction.
     pub const fn direction(mut self) -> Self {
         self.direction = true;
         self
     }
+    /// Reports the state.
     pub fn set(&self, state: FanState) {
         self.pending.lock(|p| p.set(None));
         if self.state.lock(|s| s.replace(Some(state))) != Some(state) {
             self.dirty.mark();
         }
     }
+    /// The last reported state.
     pub fn get(&self) -> Option<FanState> {
         self.state.lock(Cell::get)
     }
@@ -422,22 +463,30 @@ impl Entity for Fan {
 /// A thermostat's operating mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HvacMode {
+    /// Off.
     Off,
+    /// Heats to the target.
     Heat,
+    /// Cools to the target.
     Cool,
     /// Heat or cool to stay at the target.
     HeatCool,
+    /// Decides itself.
     Auto,
+    /// Dehumidifies.
     Dry,
+    /// Only runs the fan.
     FanOnly,
 }
 
 impl HvacMode {
+    /// Every mode, in order.
     pub const ALL: [HvacMode; 7] =
         [Self::Off, Self::Heat, Self::Cool, Self::HeatCool, Self::Auto, Self::Dry, Self::FanOnly];
 
+    /// The Home Assistant name (`heat_cool`, `fan_only`, ...).
     pub fn as_str(self) -> &'static str {
-        // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM.
+        // A table in flash, as in `CoverState::as_str`.
         static NAMES: [&str; 7] = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
         NAMES[self as usize]
     }
@@ -446,17 +495,24 @@ impl HvacMode {
 /// What a thermostat is doing right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HvacAction {
+    /// Off.
     Off,
+    /// Heating.
     Heating,
+    /// Cooling.
     Cooling,
+    /// Dehumidifying.
     Drying,
+    /// On, but not running.
     Idle,
+    /// Only the fan is running.
     Fan,
 }
 
 impl HvacAction {
+    /// The Home Assistant name (`heating`, `idle`, ...).
     pub fn as_str(self) -> &'static str {
-        // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM.
+        // A table in flash, as in `CoverState::as_str`.
         static NAMES: [&str; 6] = ["off", "heating", "cooling", "drying", "idle", "fan"];
         NAMES[self as usize]
     }
@@ -465,10 +521,13 @@ impl HvacAction {
 /// A thermostat's state (temperatures in °C).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClimateState {
+    /// The mode it is in.
     pub mode: HvacMode,
+    /// The target temperature.
     pub target: f32,
     /// The measured temperature.
     pub current: Option<f32>,
+    /// What it is doing, if known.
     pub action: Option<HvacAction>,
 }
 
@@ -522,12 +581,14 @@ impl Climate {
         self.step = step;
         self
     }
+    /// Reports the state.
     pub fn set(&self, state: ClimateState) {
         self.pending.lock(|p| p.set(None));
         if self.state.lock(|s| s.replace(Some(state))) != Some(state) {
             self.dirty.mark();
         }
     }
+    /// The last reported state.
     pub fn get(&self) -> Option<ClimateState> {
         self.state.lock(Cell::get)
     }

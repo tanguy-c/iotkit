@@ -14,16 +14,17 @@
 //! | `Event` with button types (`press`, `long_press`, `double_press`, ...) | Generic Switch | Switch (events) |
 //! | `Cover`, `Valve`, `Lock`, `Fan`, `Climate`, `Select` | Window Covering, Water Valve, Door Lock, Fan, Thermostat, Mode Select | the matching cluster |
 //!
-//! Every endpoint also has Identify ([`wait_identify`]) and a Fixed Label with the entity's name
+//! Every endpoint also has Identify (`wait_identify`) and a Fixed Label with the entity's name
 //! (Home Assistant names the entity after it). Buttons, numbers and text sensors are MQTT-only,
 //! like sensors in a unit Matter does not take.
 //!
 //! `wifi`: Matter runs on `iotkit-net`'s network (joined with iotkit's provisioning), next to
 //! MQTT and OTA, and is commissioned on that network.
 //!
-//! `thread`: Matter over Thread, commissioned over BLE ([`thread`]).
+//! `thread`: Matter over Thread, commissioned over BLE (the `thread` module).
 
 #![no_std]
+#![warn(missing_docs)]
 // The Thread stack's nested futures go deeper than the default limit.
 #![recursion_limit = "256"]
 
@@ -59,41 +60,66 @@ use iotkit_model::{Entity, Kind, Spec};
 /// The Matter device an entity becomes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MatterKind {
+    /// A light: on/off, level, color.
     ExtendedColorLight,
+    /// A switch.
     OnOffPlug,
+    /// Temperature.
     TemperatureSensor,
+    /// Relative humidity.
     HumiditySensor,
     /// Illuminance.
     LightSensor,
+    /// Pressure.
     PressureSensor,
+    /// An open/closed reading (the default for binary sensors).
     ContactSensor,
+    /// Motion or occupancy.
     OccupancySensor,
+    /// Moisture.
     WaterLeakDetector,
+    /// Smoke.
     SmokeAlarm,
+    /// Carbon monoxide.
     CoAlarm,
+    /// An air quality reading.
     AirQualitySensor(Pollutant),
     /// A battery level: the node's power source.
     Battery,
     /// A button's events.
     GenericSwitch,
+    /// A cover.
     WindowCovering,
+    /// A valve.
     WaterValve,
+    /// A lock.
     DoorLock,
+    /// A fan.
     Fan,
+    /// A climate entity.
     Thermostat,
+    /// A select.
     ModeSelect,
 }
 
 /// What an air quality sensor measures (its Concentration Measurement cluster).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pollutant {
+    /// Carbon dioxide.
     Co2,
+    /// Carbon monoxide.
     Co,
+    /// Nitrogen dioxide.
     No2,
+    /// Ozone.
     O3,
+    /// PM1 particles.
     Pm1,
+    /// PM2.5 particles.
     Pm25,
+    /// PM10 particles.
     Pm10,
+    /// Volatile organic compounds.
     Tvoc,
 }
 
@@ -196,6 +222,7 @@ impl Setting for MatterSetup {
 pub const INVALID_PASSCODES: [u32; 12] =
     [0, 11111111, 22222222, 33333333, 44444444, 55555555, 66666666, 77777777, 88888888, 99999999, 12345678, 87654321];
 
+/// A passcode Matter accepts: 1 to 99999998, not in [`INVALID_PASSCODES`].
 pub fn valid_passcode(passcode: u32) -> bool {
     (1..=99_999_998).contains(&passcode) && !INVALID_PASSCODES.contains(&passcode)
 }

@@ -4,11 +4,13 @@
 pub const MAX_DELAY_S: u32 = 30;
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Retry delays for one thing (Wi-Fi, the broker, ...).
 pub struct Backoff {
     failures: u32,
 }
 
 impl Backoff {
+    /// No failure yet: the first delay is 1 s.
     pub const fn new() -> Self {
         Self { failures: 0 }
     }
@@ -20,6 +22,7 @@ impl Backoff {
         delay
     }
 
+    /// An attempt worked: the next failure waits 1 s again.
     pub fn succeeded(&mut self) {
         self.failures = 0;
     }

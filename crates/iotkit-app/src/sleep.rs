@@ -7,6 +7,8 @@
 //! app.sleep().await // sends the states, disconnects, sleeps `interval`
 //! ```
 //!
+//! The full, compiled version: `apps/sleepy/src/main.rs`.
+//!
 //! What a wake-up does differently from [`start`](crate::start): the access point and the
 //! address of the last wake-up are reused (no scan, no DHCP; kept in RTC memory, lost on power
 //! loss); boots are not written to flash; MQTT has no last will (asleep is not offline),
@@ -59,6 +61,7 @@ pub enum WakeReason {
     Timer,
     /// A wake-up pin.
     Pin,
+    /// Anything else.
     Other,
 }
 
@@ -235,7 +238,9 @@ static CONNECTED_AT: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex
 /// A started deep-sleeping device.
 #[derive(Clone, Copy)]
 pub struct SleepyApp {
+    /// The running kit.
     pub app: App,
+    /// Why the chip is running.
     pub wake_reason: WakeReason,
     /// Boots and wake-ups since the last power loss.
     pub boots: u32,

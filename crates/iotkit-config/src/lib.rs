@@ -5,18 +5,26 @@
 //! [`sequential-storage`](sequential_storage) map: writes are wear-levelled and survive power loss.
 //! When the stored version differs from the type's, [`Setting::migrate`] converts it.
 //!
-//! ```ignore
+//! ```
+//! # use embedded_storage_async::nor_flash::MultiwriteNorFlash;
+//! use iotkit_config::{Setting, Store};
+//! use serde::{Deserialize, Serialize};
+//!
 //! #[derive(Serialize, Deserialize)]
 //! struct Boots(u32);
 //! impl Setting for Boots { const KEY: u16 = 0x1000; const VERSION: u8 = 1; }
 //!
+//! # async fn count<F: MultiwriteNorFlash>(store: &mut Store<F>) -> Result<(), iotkit_config::Error> {
 //! let boots = store.load::<Boots>().await?.unwrap_or(Boots(0));
 //! store.save(&Boots(boots.0 + 1)).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Keys below [`APP_KEYS`] are reserved for the iotkit crates.
 
 #![no_std]
+#![warn(missing_docs)]
 
 /// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
 #[cfg(all(feature = "_esp", not(feature = "portable-atomic")))]

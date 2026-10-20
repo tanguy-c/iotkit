@@ -45,16 +45,22 @@ const CAPABILITIES: u8 = capability::IDENTIFY | capability::DEVICE_INFO;
 /// What the device tells clients about itself.
 #[derive(Clone, Copy)]
 pub struct DeviceInfo {
+    /// The firmware name (package name).
     pub firmware: &'static str,
+    /// The firmware version.
     pub version: &'static str,
+    /// The chip (`ESP32-C6`, ...).
     pub chip: &'static str,
 }
 
 /// Everything provisioning needs.
 #[derive(Clone, Copy)]
 pub struct Provisioner {
+    /// The network to configure.
     pub net: Net,
+    /// Where the network is stored once it works.
     pub store: &'static SharedStore,
+    /// What Improv clients are told.
     pub info: DeviceInfo,
 }
 
@@ -69,6 +75,7 @@ pub fn open_window() {
     CHANGED.signal(());
 }
 
+/// Whether a provisioning window is open.
 pub fn window_open() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
@@ -115,6 +122,7 @@ pub struct Serial {
 }
 
 impl Serial {
+    /// A decoder with nothing received yet.
     pub const fn new() -> Self {
         Self { decoder: SerialDecoder::new() }
     }
@@ -594,8 +602,8 @@ pub async fn wait_press() {
     PRESSED.wait().await
 }
 
-/// BOOT button (active low): hold 3 s to open provisioning, 10 s to forget every setting and
-/// Matter pairing.
+/// BOOT button (active low): runs the [gestures](crate::gesture); a factory reset forgets every
+/// setting and Matter pairing.
 #[embassy_executor::task]
 pub async fn button_task(button: esp_hal::gpio::Input<'static>, store: &'static SharedStore) {
     use crate::gesture::{FACTORY_RESET_MS, Gesture, PROVISION_MS, on_release};

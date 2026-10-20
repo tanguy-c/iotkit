@@ -4,6 +4,7 @@
 //! module (chip feature) runs the client.
 
 #![no_std]
+#![warn(missing_docs)]
 
 /// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
 #[cfg(all(feature = "_esp", not(feature = "portable-atomic")))]
@@ -25,8 +26,11 @@ use serde::{Deserialize, Serialize};
 pub struct Broker {
     /// Host name or IPv4 address.
     pub host: String<64>,
+    /// TCP port (MQTT's default is 1883).
     pub port: u16,
+    /// Empty for none.
     pub user: String<32>,
+    /// Empty for none.
     pub password: String<64>,
 }
 

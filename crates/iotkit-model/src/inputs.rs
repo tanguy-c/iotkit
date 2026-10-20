@@ -55,6 +55,7 @@ impl Number {
             commands: Signal::new(),
         }
     }
+    /// Unit of the value (`°C`, `%`, ...).
     pub const fn unit(mut self, unit: &'static str) -> Self {
         self.meta.unit = Some(unit);
         self
@@ -71,6 +72,7 @@ impl Number {
             self.dirty.mark();
         }
     }
+    /// The last reported value, `None` until set.
     pub fn get(&self) -> Option<f32> {
         let v = f32::from_bits(self.value.load(Ordering::Acquire));
         (!v.is_nan()).then_some(v)
@@ -135,6 +137,7 @@ pub struct Select {
 builders!(Select);
 
 impl Select {
+    /// A new entity (`id`: see [`Meta::id`]) with 1 to 254 `options` (checked at build time).
     pub const fn new(id: &'static str, name: &'static str, options: &'static [&'static str]) -> Self {
         assert!(!options.is_empty() && options.len() < NONE as usize, "Select: 1 to 254 options");
         Self {
@@ -154,6 +157,7 @@ impl Select {
             self.dirty.mark();
         }
     }
+    /// The last reported option, `None` until set.
     pub fn get(&self) -> Option<u8> {
         match self.value.load(Ordering::Acquire) {
             NONE => None,
@@ -214,6 +218,7 @@ pub struct TextSensor {
 builders!(TextSensor);
 
 impl TextSensor {
+    /// A new entity (`id`: see [`Meta::id`]).
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self { meta: Meta::new(Kind::TextSensor, id, name), value: Mutex::new(RefCell::new(None)), dirty: Dirty::new() }
     }

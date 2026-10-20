@@ -85,7 +85,9 @@ pub fn pollutant(device_class: &str) -> Option<Pollutant> {
 /// Concentration Measurement's `MeasurementUnit`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConcentrationUnit {
+    /// Parts per million.
     Ppm,
+    /// Micrograms per cubic metre.
     Ugm3,
 }
 
@@ -157,7 +159,9 @@ pub fn state_value(kind: MatterKind, on: bool) -> bool {
 /// What a button event type means for a Matter Generic Switch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gesture {
+    /// One press.
     Press,
+    /// A long press.
     LongPress,
     /// `n` presses in a row (2..=8).
     MultiPress(u8),
@@ -182,12 +186,14 @@ pub fn gesture(event_type: &str) -> Option<Gesture> {
 /// The Switch cluster's features for a button's event types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SwitchFeatures {
+    /// Has a long press.
     pub long_press: bool,
     /// Below 2: no multi-press.
     pub multi_press_max: u8,
 }
 
 impl SwitchFeatures {
+    /// The features the event types need.
     pub fn of(types: &[&str]) -> Self {
         let mut f = Self { long_press: false, multi_press_max: 1 };
         for g in types.iter().filter_map(|t| gesture(t)) {
@@ -200,6 +206,7 @@ impl SwitchFeatures {
         f
     }
 
+    /// Has a multi-press.
     pub fn multi_press(self) -> bool {
         self.multi_press_max >= 2
     }
@@ -217,11 +224,17 @@ impl SwitchFeatures {
 /// A Switch cluster event (position 1 pressed, 0 released).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwitchEvent {
+    /// Pressed.
     InitialPress,
+    /// Still pressed: a long press.
     LongPress,
+    /// Released after a short press.
     ShortRelease,
+    /// Released after a long press.
     LongRelease,
+    /// The `n`th press of a series.
     MultiPressOngoing(u8),
+    /// A series of `n` presses ended.
     MultiPressComplete(u8),
 }
 
@@ -252,6 +265,7 @@ pub fn cover_percent100ths(position: u8) -> u16 {
     (100 - u16::from(position.min(100))) * 100
 }
 
+/// The position (0 closed, 100 open) from Window Covering's lift position (0 open, 10000 closed).
 pub fn cover_position(percent100ths: u16) -> u8 {
     (100 - (percent100ths.min(10000) + 50) / 100) as u8
 }
@@ -296,6 +310,7 @@ pub fn valve_state(state: Option<CoverState>, position: Option<u8>) -> Option<u8
     })
 }
 
+/// A valve's `TargetState` while moving: 0 closed, 1 open.
 pub fn valve_target(state: Option<CoverState>) -> Option<u8> {
     match state {
         Some(CoverState::Opening) => Some(1),
@@ -322,21 +337,32 @@ pub fn unlock_door_command(unbolt: bool) -> LockCommand {
 
 /// Fan Control's `FanMode` values.
 pub mod fan_mode {
+    /// Off.
     pub const OFF: u8 = 0;
+    /// Low.
     pub const LOW: u8 = 1;
+    /// Medium.
     pub const MEDIUM: u8 = 2;
+    /// High.
     pub const HIGH: u8 = 3;
+    /// On.
     pub const ON: u8 = 4;
+    /// Auto.
     pub const AUTO: u8 = 5;
+    /// Smart (taken as Auto).
     pub const SMART: u8 = 6;
 }
 
 /// A fan's options, from its spec.
 #[derive(Clone, Copy, Debug)]
 pub struct FanSpec {
+    /// Takes a speed (percentage).
     pub speed: bool,
+    /// Preset modes.
     pub presets: &'static [&'static str],
+    /// Can oscillate.
     pub oscillation: bool,
+    /// Can change direction.
     pub direction: bool,
 }
 
@@ -361,6 +387,7 @@ impl FanSpec {
         if self.auto().is_some() { 2 } else { 0 }
     }
 
+    /// `FanMode` of a state: the speed in thirds, or Auto with the `auto` preset.
     pub fn mode_of(&self, state: &FanState) -> u8 {
         match state {
             FanState { on: false, .. } => fan_mode::OFF,
@@ -372,6 +399,7 @@ impl FanSpec {
         }
     }
 
+    /// `PercentCurrent` of a state (100 without a speed).
     pub fn percent(&self, state: &FanState) -> u8 {
         match state {
             FanState { on: false, .. } => 0,
@@ -380,6 +408,7 @@ impl FanSpec {
         }
     }
 
+    /// The command for a `FanMode` write; `None` for a mode it does not take.
     pub fn command_for_mode(&self, mode: u8) -> Option<FanCommand> {
         let speed = |p| if self.speed { FanCommand::Percentage(p) } else { FanCommand::On(true) };
         Some(match mode {
@@ -393,6 +422,7 @@ impl FanSpec {
         })
     }
 
+    /// The command for a `PercentSetting` write (0 turns it off).
     pub fn command_for_percent(&self, percent: u8) -> FanCommand {
         match percent {
             0 => FanCommand::On(false),
@@ -412,16 +442,25 @@ pub fn airflow_direction(d: FanDirection) -> u8 {
 
 /// Thermostat's `SystemMode` values.
 pub mod system_mode {
+    /// Off.
     pub const OFF: u8 = 0;
+    /// Auto.
     pub const AUTO: u8 = 1;
+    /// Cool.
     pub const COOL: u8 = 3;
+    /// Heat.
     pub const HEAT: u8 = 4;
+    /// Emergency heat.
     pub const EMERGENCY_HEAT: u8 = 5;
+    /// Precooling.
     pub const PRECOOLING: u8 = 6;
+    /// Fan only.
     pub const FAN_ONLY: u8 = 7;
+    /// Dry.
     pub const DRY: u8 = 8;
 }
 
+/// `SystemMode` of a mode.
 pub fn system_mode_of(mode: HvacMode) -> u8 {
     match mode {
         HvacMode::Off => system_mode::OFF,

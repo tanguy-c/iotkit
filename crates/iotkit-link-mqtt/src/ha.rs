@@ -17,10 +17,12 @@ use iotkit_model::{
 };
 use serde::Deserialize;
 
+/// Home Assistant's default discovery prefix.
 pub const PREFIX: &str = "homeassistant";
 /// Home Assistant publishes `online` here when it (re)starts: send discovery again.
 pub const HA_STATUS: &str = "homeassistant/status";
 
+/// An MQTT topic.
 pub type Topic = String<128>;
 
 fn component(kind: Kind) -> &'static str {
@@ -61,14 +63,17 @@ fn topic(args: core::fmt::Arguments) -> Topic {
     t
 }
 
+/// Where the device publishes `online`, and its will `offline`.
 pub fn availability_topic(node: &str) -> Topic {
     topic(format_args!("iotkit/{node}/status"))
 }
 
+/// Where an entity's state goes.
 pub fn state_topic(node: &str, id: &str) -> Topic {
     topic(format_args!("iotkit/{node}/{id}/state"))
 }
 
+/// Where an entity's commands come from.
 pub fn command_topic(node: &str, id: &str) -> Topic {
     topic(format_args!("iotkit/{node}/{id}/set"))
 }
@@ -88,6 +93,7 @@ pub fn feature_commands_filter(node: &str) -> Topic {
     topic(format_args!("iotkit/{node}/+/+/set"))
 }
 
+/// Where an entity's discovery config goes.
 pub fn discovery_topic(node: &str, entity: &dyn Entity) -> Topic {
     let m = entity.meta();
     topic(format_args!("{PREFIX}/{}/{node}/{}/config", component(m.kind), m.id))

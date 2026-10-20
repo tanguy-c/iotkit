@@ -3,10 +3,12 @@
 
 /// The device's address on its access point, and the pool after it.
 pub const SERVER: [u8; 4] = [192, 168, 4, 1];
+/// Last byte of the first leased address.
 pub const POOL_START: u8 = 2;
+/// Addresses in the pool.
 pub const POOL_SIZE: usize = 8;
 const LEASE_S: u32 = 600;
-/// `http://192.168.4.1/`
+/// The captive portal (RFC 8910 option), on [`SERVER`].
 pub const PORTAL_URL: &str = "http://192.168.4.1/";
 
 const MAGIC: [u8; 4] = [99, 130, 83, 99];
@@ -27,6 +29,7 @@ pub struct Leases {
 }
 
 impl Leases {
+    /// No lease yet.
     pub const fn new() -> Self {
         Self { macs: [None; POOL_SIZE], next: 0 }
     }

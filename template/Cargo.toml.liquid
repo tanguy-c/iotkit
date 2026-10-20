@@ -47,7 +47,8 @@ debug         = 2
 lto           = 'fat'
 opt-level     = 's'
 
-# Ed25519 verification (updates) unrolls into about 1.2 MB at `s`; at `z` it is a fraction.
+# Ed25519 verification (updates) unrolls into about 1.2 MB at `s`; at `z` it is a fraction of
+# that. Also for `iotkit-image`, as LTO inlines the verification into it.
 [profile.release.package.ed25519-compact]
 opt-level = "z"
 

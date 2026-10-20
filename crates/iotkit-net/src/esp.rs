@@ -39,6 +39,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 /// The running network.
 #[derive(Clone, Copy)]
 pub struct Net {
+    /// The embassy-net stack: sockets, DNS.
     pub stack: Stack<'static>,
     /// `iotkit-xxxx`, answered over mDNS as `iotkit-xxxx.local`.
     pub hostname: &'static str,
@@ -77,6 +78,7 @@ async fn wait_online(stack: Stack<'_>) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why the network could not start.
 pub enum StartError {
     /// No Wi-Fi network stored, and none built in (`WIFI_SSID` at build time).
     NoCredentials,
@@ -454,18 +456,23 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
 /// Why a GET failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GetError<E> {
+    /// Not a valid `http://` URL.
     Url(http::Error),
     /// The host name did not resolve.
     Dns,
+    /// The TCP connection failed.
     Connect,
     /// Read/write failure or timeout.
     Io,
+    /// Not a valid HTTP response.
     BadResponse(http::Error),
     /// Not `200` (`206` for a range).
     Status(u16),
     /// The body ended after `received` of `expected` bytes.
     Truncated {
+        /// Bytes received.
         received: u32,
+        /// Bytes announced.
         expected: u32,
     },
     /// The sink refused the data.
@@ -476,6 +483,7 @@ pub enum GetError<E> {
 // The executor is single-threaded: the futures need not be `Send`.
 #[allow(async_fn_in_trait)]
 pub trait Sink {
+    /// Why the sink refused data.
     type Error;
     /// The head arrived; the body length, if announced.
     fn begin(&mut self, content_length: Option<u32>) -> Result<(), Self::Error>;

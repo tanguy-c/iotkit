@@ -14,6 +14,8 @@
 //! let app = iotkit_app::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
 //! ```
 //!
+//! The full, compiled version: `apps/devkit/src/main.rs`.
+//!
 //! What [`start`] does, in order: takes the crash record and counts the boot; guards and handles
 //! a pending update (trial boots, rollback); starts the watchdog; joins Wi-Fi (or opens the setup
 //! window: access point, Improv over Bluetooth and serial); answers `<host>.local`; starts MQTT
@@ -22,6 +24,7 @@
 //! passes (the kit's and [`Config::checks`]), the boot is stable and an update is confirmed.
 
 #![no_std]
+#![warn(missing_docs)]
 
 #[cfg(not(any(feature = "esp32c6", feature = "esp32c3", feature = "esp32c5", feature = "esp32s3")))]
 compile_error!("iotkit-app: enable one chip feature: esp32c6, esp32c3, esp32c5 or esp32s3");
@@ -96,15 +99,18 @@ pub static HEALTH: Health = Health::new(&[RECORDED, NETWORK, BROKER]);
 
 /// The peripherals the kit takes; the app keeps the rest.
 pub struct Board {
+    /// Holds the settings, the update slots and the crash record.
     pub flash: FLASH<'static>,
+    /// The Wi-Fi radio.
     pub wifi: WIFI<'static>,
+    /// Bluetooth LE, for Improv.
     pub bt: BT<'static>,
     /// Its watchdog backs the task watchdog.
     pub timg1: TIMG1<'static>,
     /// The USB serial port: console and Improv.
     pub usb: USB_DEVICE<'static>,
-    /// The BOOT button (active low; GPIO9 on the ESP32-C6-DevKitC-1): hold 3 s to open the
-    /// setup window, 10 s to factory-reset; a short press goes to the app
+    /// The BOOT button (active low; GPIO9 on the ESP32-C6-DevKitC-1): the setup window and
+    /// factory reset ([`provision::gesture`]); a short press goes to the app
     /// ([`provision::esp::wait_press`]).
     pub boot_button: Option<AnyPin<'static>>,
 }
@@ -115,11 +121,13 @@ pub struct Config {
     pub firmware: Firmware,
     /// Shown in Home Assistant.
     pub manufacturer: &'static str,
+    /// Shown in Home Assistant.
     pub model: &'static str,
     /// Told to Improv clients.
     pub chip: &'static str,
     /// The product name over Matter.
     pub product_name: &'static str,
+    /// The device model: every entity, in order (Matter endpoints follow it).
     pub entities: &'static [&'static dyn Entity],
     /// The app's task watches: a task that stops feeding its watch restarts the device.
     pub watches: &'static [&'static TaskWatch],
@@ -132,6 +140,7 @@ pub struct Config {
 /// The running kit.
 #[derive(Clone, Copy)]
 pub struct App {
+    /// The settings in flash, shared with the kit (load and save the app's own).
     pub store: &'static SharedStore,
     /// `None` if the radio did not start.
     pub net: Option<Net>,
@@ -336,12 +345,15 @@ async fn supervisor_task(store: &'static SharedStore) {
 /// // now and then (e.g. on a ticker):
 /// if later.due() { app.save(&state).await }
 /// ```
+///
+/// In use: `apps/devkit/src/main.rs`.
 pub struct SaveLater {
     delay: Duration,
     at: Option<Instant>,
 }
 
 impl SaveLater {
+    /// Saves `delay` after the last change.
     pub const fn new(delay: Duration) -> Self {
         Self { delay, at: None }
     }

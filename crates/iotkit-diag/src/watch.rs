@@ -12,10 +12,12 @@ pub struct TaskWatch {
 }
 
 impl TaskWatch {
+    /// A watch for the task `name` (named in the crash record), fed at least every `period_ms`.
     pub const fn new(name: &'static str, period_ms: u32) -> Self {
         Self { name, period_ms, last_ms: AtomicU32::new(0) }
     }
 
+    /// The task name.
     pub fn name(&self) -> &'static str {
         self.name
     }
@@ -33,6 +35,7 @@ impl TaskWatch {
     }
 
     #[cfg(feature = "_esp")]
+    /// Records a feed now.
     pub fn feed(&self) {
         self.feed_at(embassy_time::Instant::now().as_millis() as u32);
     }

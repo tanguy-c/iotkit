@@ -5,6 +5,7 @@
 //! received network to `iotkit-net`, which tries it, and stores it once it works.
 
 #![no_std]
+#![warn(missing_docs)]
 
 pub mod dhcp;
 pub mod dns;

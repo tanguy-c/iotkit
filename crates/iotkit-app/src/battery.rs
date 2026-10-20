@@ -28,6 +28,7 @@ impl<'d, P: AdcChannel + AnalogPin + 'd> Battery<'d, P> {
         Self { adc: Adc::new(adc, config), pin, ratio: divider_ratio, curve: BatteryCurve::LIPO }
     }
 
+    /// The battery chemistry: voltage to charge level.
     pub fn curve(mut self, curve: BatteryCurve) -> Self {
         self.curve = curve;
         self

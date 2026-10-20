@@ -3,21 +3,30 @@
 //!
 //! Entities are `static`s; any task updates them or waits for their commands:
 //!
-//! ```ignore
+//! ```
+//! use iotkit_model::{Entity, Sensor, Switch};
+//!
 //! static TEMPERATURE: Sensor = Sensor::new("temperature", "Chip temperature")
 //!     .unit("°C").device_class("temperature").measurement();
 //! static RELAY: Switch = Switch::new("relay", "Relay");
 //! static ENTITIES: [&dyn Entity; 2] = [&TEMPERATURE, &RELAY];
 //!
+//! # RELAY.command(iotkit_model::Command::Set(true)); // what a binding does
+//! # embassy_futures::block_on(async {
 //! TEMPERATURE.set(21.5);
 //! let on = RELAY.wait_command().await;   // from Home Assistant
 //! RELAY.set(on);                         // report the new state
+//! # });
 //! ```
 //!
 //! A change marks the entity dirty for every [`Binding`] and wakes them ([`changed`]); each
 //! reads [`Entity::state`] and publishes it, independently of the others.
+//!
+//! Every `wait_command` (and [`Button::wait_press`]) is cancel-safe: a command waits in the
+//! entity until taken, and a newer one replaces it.
 
 #![no_std]
+#![warn(missing_docs)]
 
 /// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
 #[cfg(not(feature = "portable-atomic"))]
@@ -44,10 +53,15 @@ pub use update::{Update, UpdateState};
 /// What kind of entity: decides the state, the commands, and how a binding shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// A numeric reading.
     Sensor,
+    /// An on/off reading.
     BinarySensor,
+    /// An on/off output.
     Switch,
+    /// A light: on/off, brightness, color.
     Light,
+    /// A momentary action.
     Button,
     /// A value set from Home Assistant (a setpoint, a duration).
     Number,
@@ -57,9 +71,13 @@ pub enum Kind {
     TextSensor,
     /// Something that happened (a button press): not a state.
     Event,
+    /// An opening: blinds, garage door.
     Cover,
+    /// A water or gas valve.
     Valve,
+    /// A lock.
     Lock,
+    /// A fan.
     Fan,
     /// A thermostat.
     Climate,
@@ -81,16 +99,21 @@ pub enum Category {
 /// Static description of an entity.
 #[derive(Clone, Copy, Debug)]
 pub struct Meta {
+    /// What it is.
     pub kind: Kind,
     /// Unique within the device: `[a-z0-9_]`.
     pub id: &'static str,
+    /// Shown in Home Assistant.
     pub name: &'static str,
     /// Home Assistant device class (`temperature`, `restart`, ...), if any.
     pub device_class: Option<&'static str>,
+    /// Unit of the value (`°C`, `%`, ...), if any.
     pub unit: Option<&'static str>,
     /// Sensors: a measurement, so Home Assistant keeps statistics.
     pub measurement: bool,
+    /// Material Design icon (`mdi:...`), if any.
     pub icon: Option<&'static str>,
+    /// Where Home Assistant files it.
     pub category: Category,
     /// Sensors: decimals to show.
     pub precision: Option<u8>,
@@ -129,8 +152,11 @@ impl Meta {
 pub enum State {
     /// Never set (shown as unknown).
     Unknown,
+    /// Sensor or number.
     Number(f32),
+    /// Binary sensor or switch.
     Bool(bool),
+    /// Light.
     Light(LightState),
     /// Buttons have no state.
     None,
@@ -142,11 +168,16 @@ pub enum State {
     Event(u8),
     /// Cover or valve.
     Cover {
+        /// Moving or at rest, if known.
         state: Option<CoverState>,
+        /// 0 closed, 100 open, if known.
         position: Option<u8>,
     },
+    /// Lock.
     Lock(LockState),
+    /// Fan.
     Fan(FanState),
+    /// Climate.
     Climate(ClimateState),
     /// Update: read it with [`Entity::update`].
     Update,
@@ -159,8 +190,11 @@ pub enum Command {
     Set(bool),
     /// Light: the fields to change.
     Light {
+        /// Turn on or off.
         on: Option<bool>,
+        /// 0 to 255.
         brightness: Option<u8>,
+        /// Red, green, blue.
         rgb: Option<[u8; 3]>,
     },
     /// Button.
@@ -169,9 +203,13 @@ pub enum Command {
     Number(f32),
     /// Select: the index of the option.
     Option(u8),
+    /// Cover or valve.
     Cover(CoverCommand),
+    /// Lock.
     Lock(LockCommand),
+    /// Fan.
     Fan(FanCommand),
+    /// Climate.
     Climate(ClimateCommand),
     /// Update: install the latest version.
     Install,
@@ -182,43 +220,66 @@ pub enum Command {
 pub enum Spec {
     /// Nothing more (sensors, switches, lights, buttons, text sensors).
     None,
+    /// Number: its range.
     Number {
+        /// Lowest value.
         min: f32,
+        /// Highest value.
         max: f32,
+        /// Step between values.
         step: f32,
+        /// A slider rather than a box.
         slider: bool,
     },
+    /// Select: its options.
     Select {
+        /// The options, in order: a state or command carries the index.
         options: &'static [&'static str],
     },
+    /// Event: its types.
     Event {
+        /// The event types (`press`, `double_press`, ...): a state carries the index.
         types: &'static [&'static str],
     },
     /// Cover or valve: whether it takes a position (0 closed, 100 open).
     Cover {
+        /// Takes a position.
         position: bool,
     },
     /// Whether it can also open (unlatch).
     Lock {
+        /// Can open.
         open: bool,
     },
+    /// Fan: its features.
     Fan {
+        /// Takes a speed (percentage).
         speed: bool,
+        /// Preset modes, if any.
         presets: &'static [&'static str],
+        /// Can oscillate.
         oscillation: bool,
+        /// Can change direction.
         direction: bool,
     },
+    /// Climate: its modes and target range.
     Climate {
+        /// The modes it takes.
         modes: &'static [HvacMode],
+        /// Lowest target, °C.
         min: f32,
+        /// Highest target, °C.
         max: f32,
+        /// Step between targets.
         step: f32,
     },
 }
 
 /// An entity, as the bindings see it.
 pub trait Entity: Sync {
+    /// The static description.
     fn meta(&self) -> &Meta;
+    /// The current state.
     fn state(&self) -> State;
     /// The state the next command builds on: what the last command asked for until the app
     /// reports a state, else the state. A toggle or a partial light command must start from it,
@@ -251,13 +312,18 @@ pub trait Entity: Sync {
 pub struct Device {
     /// Shown in Home Assistant.
     pub name: &'static str,
+    /// Shown in Home Assistant.
     pub manufacturer: &'static str,
+    /// Shown in Home Assistant.
     pub model: &'static str,
+    /// The firmware version, shown in Home Assistant.
     pub sw_version: &'static str,
+    /// Every entity of the device, in order.
     pub entities: &'static [&'static dyn Entity],
 }
 
 impl Device {
+    /// The entity with this id.
     pub fn entity(&self, id: &str) -> Option<&'static dyn Entity> {
         self.entities.iter().copied().find(|e| e.meta().id == id)
     }
@@ -268,7 +334,9 @@ impl Device {
 pub struct Binding(u8);
 
 impl Binding {
+    /// Home Assistant over MQTT.
     pub const MQTT: Binding = Binding(0);
+    /// Matter.
     pub const MATTER: Binding = Binding(1);
 
     const fn bit(self) -> u8 {

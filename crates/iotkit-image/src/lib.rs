@@ -14,6 +14,7 @@
 //! A manifest without them is signed exactly as before they existed.
 
 #![no_std]
+#![warn(missing_docs)]
 
 use core::{fmt, str};
 
@@ -99,12 +100,16 @@ impl core::error::Error for Error {}
 /// A `major.minor.patch` version. Pre-release suffixes are not supported.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Version {
+    /// Incompatible changes.
     pub major: u16,
+    /// New features.
     pub minor: u16,
+    /// Fixes.
     pub patch: u16,
 }
 
 impl Version {
+    /// `major.minor.patch`.
     pub const fn new(major: u16, minor: u16, patch: u16) -> Self {
         Self { major, minor, patch }
     }
@@ -144,11 +149,13 @@ impl fmt::Display for Version {
 pub struct Manifest<'a> {
     /// Which firmware this is (the app's package name).
     pub product: &'a str,
+    /// The version this update installs.
     pub version: Version,
     /// Oldest running version allowed to install this update (e.g. after a config format change).
     pub min_version: Version,
     /// Image size in bytes.
     pub size: u32,
+    /// SHA-256 of the image.
     pub sha256: [u8; 32],
     /// Where to download the image, relative to the manifest or absolute.
     pub url: &'a str,
@@ -156,6 +163,7 @@ pub struct Manifest<'a> {
     pub summary: &'a str,
     /// Where the release notes are (empty: none).
     pub release_url: &'a str,
+    /// Ed25519 signature of [`Manifest::signed_message`].
     pub signature: [u8; 64],
 }
 
@@ -320,22 +328,31 @@ pub mod app {
     const IMAGE_MAGIC: u8 = 0xe9;
     /// `ESP_APP_DESC_MAGIC_WORD`, first in the first segment (`esp_app_desc!`).
     const DESC_MAGIC: u32 = 0xabcd_5432;
-    /// Chip ids in the image header (espflash's `Chip::id`).
+    // Chip ids in the image header (espflash's `Chip::id`).
+    /// ESP32-C3.
     pub const ESP32C3: u16 = 5;
+    /// ESP32-S3.
     pub const ESP32S3: u16 = 9;
+    /// ESP32-C6.
     pub const ESP32C6: u16 = 13;
+    /// ESP32-H2.
     pub const ESP32H2: u16 = 16;
+    /// ESP32-C5.
     pub const ESP32C5: u16 = 23;
 
     /// What an app image says about itself.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct AppInfo<'a> {
+        /// Which chip it is built for (one of the ids above).
         pub chip_id: u16,
+        /// The app version (`CARGO_PKG_VERSION`).
         pub version: &'a str,
+        /// The project name (the package name).
         pub project: &'a str,
     }
 
     impl<'a> AppInfo<'a> {
+        /// Reads the start of an image (at least [`HEAD_LEN`] bytes).
         pub fn parse(head: &'a [u8]) -> Result<Self, Error> {
             let head = head.get(..HEAD_LEN).ok_or(Error::NotAnImage)?;
             let word = |at: usize| u32::from_le_bytes([head[at], head[at + 1], head[at + 2], head[at + 3]]);

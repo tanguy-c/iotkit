@@ -5,16 +5,22 @@
 //! image valid. If the checks never all pass, the image is not confirmed and the bootloader can
 //! roll it back.
 //!
-//! ```ignore
+//! ```
+//! use iotkit_runtime::{Check, Health};
+//!
 //! const BOOTED: Check = Check(0);
 //! const WIFI: Check = Check(1);
 //! static HEALTH: Health = Health::new(&[BOOTED, WIFI]);
 //!
+//! # HEALTH.pass(BOOTED);
+//! # embassy_futures::block_on(async {
 //! HEALTH.pass(WIFI);             // in the Wi-Fi task
 //! HEALTH.healthy().await;        // in the supervisor
+//! # });
 //! ```
 
 #![no_std]
+#![warn(missing_docs)]
 
 /// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
 #[cfg(not(feature = "portable-atomic"))]
@@ -48,6 +54,7 @@ pub struct Health {
 }
 
 impl Health {
+    /// Health that requires `required` (more with [`require`](Self::require)).
     pub const fn new(required: &[Check]) -> Self {
         let mut mask = 0;
         let mut i = 0;
@@ -72,10 +79,12 @@ impl Health {
         }
     }
 
+    /// Whether `check` passed.
     pub fn has_passed(&self, check: Check) -> bool {
         self.passed.load(Ordering::Acquire) & check.bit() != 0
     }
 
+    /// Whether every required check passed.
     pub fn is_healthy(&self) -> bool {
         self.missing() == 0
     }

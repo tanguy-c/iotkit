@@ -58,6 +58,7 @@ pub const PORT: u16 = 80;
 pub struct Firmware {
     /// Package name, also the manifest's `product` and the image's project name.
     pub product: &'static str,
+    /// `major.minor.patch` from `Cargo.toml`.
     pub version: Version,
     /// [`version`](Self::version) as written in `Cargo.toml`.
     pub version_text: &'static str,
@@ -83,17 +84,21 @@ macro_rules! firmware {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why an update failed.
 pub enum OtaError {
     /// Another update is running.
     Busy,
     /// No `otadata` and two OTA app partitions, or the running app is not in one.
     NoSlots,
+    /// The manifest or image could not be downloaded.
     Download(GetError<()>),
     /// The manifest is invalid, badly signed, or not an update for this firmware.
     Manifest(iotkit_image::Error),
     /// The image does not match the manifest.
     Image(iotkit_image::Error),
+    /// The image is larger than the OTA slot.
     TooLarge,
+    /// Writing to flash failed.
     Flash,
 }
 
@@ -327,8 +332,11 @@ pub async fn request_install(manifest_url: &str) -> Result<Version, OtaError> {
 #[cfg(feature = "check")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Release {
+    /// Its version.
     pub version: Version,
+    /// What it changes (empty: none).
     pub summary: String<{ iotkit_image::MAX_SUMMARY_LEN }>,
+    /// Where its notes are (empty: none).
     pub release_url: String<{ iotkit_image::MAX_RELEASE_URL_LEN }>,
 }
 

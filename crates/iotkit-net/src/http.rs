@@ -11,6 +11,7 @@ use heapless::String;
 pub const MAX_URL: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why a URL or a response was refused.
 pub enum Error {
     /// Not `http://host[:port]/path`.
     Url,
@@ -23,13 +24,16 @@ pub enum Error {
 /// A parsed `http://` URL, borrowing from the string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Url<'a> {
+    /// Host name or IPv4 address.
     pub host: &'a str,
+    /// 80 if the URL has none.
     pub port: u16,
     /// Starts with `/`.
     pub path: &'a str,
 }
 
 impl<'a> Url<'a> {
+    /// Parses `http://host[:port]/path` (no `https`, no control characters).
     pub fn parse(url: &'a str) -> Result<Self, Error> {
         // Control characters would end up in the request head (CR/LF: an injected header).
         if url.bytes().any(|b| b < 0x20 || b == 0x7f) {
@@ -74,6 +78,7 @@ impl<'a> Url<'a> {
 /// A response's status line and framing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseHead {
+    /// The status code (200, 404, ...).
     pub status: u16,
     /// `None`: the body ends when the connection closes.
     pub content_length: Option<u32>,

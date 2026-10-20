@@ -1,13 +1,18 @@
 //! BOOT button gestures: hold 3 s to open provisioning, 10 s to factory-reset.
 
+/// Hold at least this long (ms) to open provisioning.
 pub const PROVISION_MS: u32 = 3_000;
+/// Hold at least this long (ms) to factory-reset.
 pub const FACTORY_RESET_MS: u32 = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What a press of the BOOT button asks for.
 pub enum Gesture {
     /// Shorter than [`PROVISION_MS`]: left to the app.
     Press,
+    /// Open provisioning (held [`PROVISION_MS`]).
     Provision,
+    /// Erase the settings and restart (held [`FACTORY_RESET_MS`]).
     FactoryReset,
 }
 

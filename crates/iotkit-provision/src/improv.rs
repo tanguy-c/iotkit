@@ -6,17 +6,24 @@
 
 /// GATT service and characteristics.
 pub const SERVICE_UUID: u128 = 0x00467768_6228_2272_4663_277478268000;
+/// The current [`State`] (read, notify).
 pub const STATE_UUID: u128 = SERVICE_UUID | 0x01;
+/// The last [`Error`] (read, notify).
 pub const ERROR_UUID: u128 = SERVICE_UUID | 0x02;
+/// Where the client writes RPC commands.
 pub const RPC_COMMAND_UUID: u128 = SERVICE_UUID | 0x03;
+/// Where RPC results are notified.
 pub const RPC_RESULT_UUID: u128 = SERVICE_UUID | 0x04;
+/// The [`capability`] bits (read).
 pub const CAPABILITIES_UUID: u128 = SERVICE_UUID | 0x05;
 /// 16-bit UUID of the advertised service data.
 pub const SERVICE_DATA_UUID: u16 = 0x4677;
 
 /// Capability bits (BLE).
 pub mod capability {
+    /// Can show where it is ([`Rpc::Identify`](super::Rpc::Identify)).
     pub const IDENTIFY: u8 = 0x01;
+    /// Answers [`Rpc::DeviceInfo`](super::Rpc::DeviceInfo).
     pub const DEVICE_INFO: u8 = 0x02;
 }
 
@@ -25,6 +32,7 @@ pub const RPC_MAX: usize = 258;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+/// Where provisioning is.
 pub enum State {
     /// BLE: waiting for a button press before accepting credentials.
     AuthorizationRequired = 0x01,
@@ -38,37 +46,51 @@ pub enum State {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+/// What went wrong.
 pub enum Error {
+    /// No error.
     None = 0x00,
     /// Malformed packet or bad checksum.
     InvalidRpc = 0x01,
+    /// A command it does not know.
     UnknownRpc = 0x02,
+    /// The network could not be joined.
     UnableToConnect = 0x03,
+    /// Credentials before authorization (BLE).
     NotAuthorized = 0x04,
+    /// Anything else.
     Unknown = 0xff,
 }
 
 /// Command ids.
 pub mod command {
+    /// Join a network ([`Rpc::WifiSettings`](super::Rpc::WifiSettings)).
     pub const WIFI_SETTINGS: u8 = 0x01;
     /// BLE: identify. Serial: current state.
     pub const IDENTIFY_OR_STATE: u8 = 0x02;
+    /// Firmware name and version, chip, device name.
     pub const DEVICE_INFO: u8 = 0x03;
+    /// List the visible networks.
     pub const SCAN_NETWORKS: u8 = 0x04;
 }
 
 /// BLE commands carry their own checksum; serial frames carry one for the whole frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transport {
+    /// Bluetooth LE.
     Ble,
+    /// A serial port.
     Serial,
 }
 
 /// A command from the client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rpc<'a> {
+    /// Join this network.
     WifiSettings {
+        /// Network name.
         ssid: &'a str,
+        /// Empty for an open network.
         password: &'a str,
     },
     /// BLE: show where the device is.
@@ -158,6 +180,7 @@ pub struct BleCommand {
 }
 
 impl BleCommand {
+    /// Nothing received yet.
     pub const fn new() -> Self {
         Self { buf: heapless::Vec::new() }
     }
@@ -190,13 +213,19 @@ pub const fn service_data(state: State, capabilities: u8) -> [u8; 6] {
 
 /// Serial frame types.
 pub mod frame {
+    /// The current [`State`](super::State).
     pub const STATE: u8 = 0x01;
+    /// An [`Error`](super::Error).
     pub const ERROR: u8 = 0x02;
+    /// A command.
     pub const RPC: u8 = 0x03;
+    /// A command's result.
     pub const RPC_RESULT: u8 = 0x04;
 }
 
+/// Start of every serial frame.
 pub const SERIAL_HEADER: &[u8; 6] = b"IMPROV";
+/// Protocol version of the serial frames.
 pub const SERIAL_VERSION: u8 = 1;
 /// Largest serial frame: header, version, type, length, 255 bytes, checksum, newline.
 pub const FRAME_MAX: usize = 6 + 3 + 255 + 2;
@@ -222,6 +251,7 @@ pub struct SerialDecoder {
 }
 
 impl SerialDecoder {
+    /// Nothing received yet.
     pub const fn new() -> Self {
         Self { buf: heapless::Vec::new(), complete: false }
     }

@@ -44,9 +44,13 @@ type Stack = EmbassyThreadMatterStack<'static, BUMP_SIZE, ()>;
 
 /// The radios, and the TRNG's entropy source (without Wi-Fi, it needs the ADC).
 pub struct Peripherals {
+    /// The 802.15.4 radio, for Thread.
     pub radio: IEEE802154<'static>,
+    /// Bluetooth LE, for commissioning.
     pub bt: BT<'static>,
+    /// The random number generator.
     pub rng: RNG<'static>,
+    /// The TRNG's entropy source.
     pub adc1: ADC1<'static>,
 }
 

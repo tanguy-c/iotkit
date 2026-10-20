@@ -3,6 +3,7 @@
 
 /// mDNS multicast group and port.
 pub const GROUP: [u8; 4] = [224, 0, 0, 251];
+/// The mDNS port.
 pub const PORT: u16 = 5353;
 /// Seconds a resolver may cache the answer.
 const TTL_S: u32 = 120;

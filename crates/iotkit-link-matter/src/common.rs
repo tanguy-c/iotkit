@@ -21,7 +21,9 @@ use crate::MatterSetup;
 /// What the device is, for the Basic Information cluster.
 #[derive(Clone, Copy)]
 pub struct Product {
+    /// The product name.
     pub name: &'static str,
+    /// The version, as shown.
     pub version: &'static str,
     /// The version as a number (e.g. `0x00_07_00` for 0.7.0), increasing with updates.
     pub version_number: u32,

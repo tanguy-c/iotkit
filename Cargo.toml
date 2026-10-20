@@ -52,14 +52,14 @@ log                    = { version = "0.4.27", features = ["release_max_level_in
 # The default debug profile is too slow and too big for the chip.
 opt-level = "s"
 
-# Ed25519 verification unrolls into about 1.2 MB at `s`; at `z` it is a fraction of that.
+# Ed25519 verification unrolls into about 1.2 MB at `s`; at `z` it is a fraction of that. Also
+# for `iotkit-image`, as LTO inlines the verification into it.
 [profile.release.package.ed25519-compact]
 opt-level = "z"
 
 [profile.dev.package.ed25519-compact]
 opt-level = "z"
 
-# Same reason: LTO inlines the Ed25519 verification into it.
 [profile.release.package.iotkit-image]
 opt-level = "z"
 

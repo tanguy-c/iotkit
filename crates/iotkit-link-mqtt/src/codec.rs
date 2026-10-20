@@ -2,6 +2,7 @@
 //! PING, DISCONNECT, and decoding what the broker sends.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why a packet could not be written or read.
 pub enum Error {
     /// The output buffer is too small.
     Full,
@@ -11,7 +12,9 @@ pub enum Error {
     Malformed,
 }
 
+/// A ping, to keep the connection alive.
 pub const PINGREQ: [u8; 2] = [0xc0, 0];
+/// A clean disconnect (the broker drops the will).
 pub const DISCONNECT: [u8; 2] = [0xe0, 0];
 
 struct Writer<'a> {
@@ -66,12 +69,17 @@ fn body(out: &mut [u8]) -> Result<Writer<'_>, Error> {
     Ok(Writer { out, len: 0 })
 }
 
+/// What the broker publishes when the connection drops (MQTT's last will).
 pub struct Will<'a> {
+    /// Where.
     pub topic: &'a str,
+    /// What.
     pub payload: &'a [u8],
+    /// Kept by the broker for later subscribers.
     pub retain: bool,
 }
 
+/// A CONNECT with a clean session into `out`; returns the packet length.
 pub fn connect(
     out: &mut [u8],
     client_id: &str,
@@ -164,14 +172,21 @@ pub fn subscribe(out: &mut [u8], packet_id: u16, filters: &[&str]) -> Result<usi
 /// A packet from the broker.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Packet<'a> {
+    /// The broker's answer to CONNECT.
     ConnAck {
+        /// 0 accepted, else the refusal reason.
         code: u8,
     },
+    /// A message on a subscribed topic.
     Publish {
+        /// Its topic.
         topic: &'a str,
+        /// Its payload.
         payload: &'a [u8],
     },
+    /// The broker took a SUBSCRIBE.
     SubAck,
+    /// The answer to [`PINGREQ`].
     PingResp,
     /// Anything else (ignored).
     Other(u8),

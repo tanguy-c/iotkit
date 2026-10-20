@@ -16,6 +16,7 @@ pub enum Route {
     Redirect,
 }
 
+/// What to answer to a request.
 pub fn route(method: &str, path: &str) -> Route {
     match (method, path) {
         ("GET", "/") => Route::Page,
@@ -82,18 +83,24 @@ fn escaped(out: &mut impl Write, s: &str) -> core::fmt::Result {
 
 /// The outcome shown above the form.
 pub enum Notice<'a> {
+    /// Nothing to show.
     None,
     /// Joining: the page reloads itself until there is an outcome. (Joining restarts the access
     /// point, so the answer cannot wait for it.)
     Trying {
+        /// The network being joined.
         ssid: &'a str,
     },
     /// Joined: the device's address there.
     Joined {
+        /// The network joined.
         ssid: &'a str,
+        /// The device's URL there.
         url: &'a str,
     },
+    /// Joining failed: the form is shown again.
     Failed {
+        /// The network that failed.
         ssid: &'a str,
     },
 }

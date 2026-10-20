@@ -5,6 +5,7 @@
 //! feature) runs it on esp-radio and embassy-net.
 
 #![no_std]
+#![warn(missing_docs)]
 
 pub mod backoff;
 #[cfg(feature = "_esp")]
@@ -21,6 +22,7 @@ use serde::{Deserialize, Serialize};
 /// The Wi-Fi network to join, kept in flash.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WifiCredentials {
+    /// Network name.
     pub ssid: String<32>,
     /// Empty for an open network.
     pub password: String<64>,

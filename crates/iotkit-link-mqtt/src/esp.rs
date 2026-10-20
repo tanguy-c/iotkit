@@ -81,15 +81,15 @@ enum Error {
 pub struct Sleepy {
     /// How long a reading stays valid in Home Assistant (about twice the sleep).
     pub expire_after_s: u32,
-    /// The discovery hash sent at the last wake-up ([`discovery_hash`] then): unchanged, the
+    /// The discovery hash sent at the last wake-up (`discovery_hash()` then): unchanged, the
     /// discovery is not sent again.
     pub discovery_hash: u32,
 }
 
-/// The hash of the discovery sent (or found unchanged), to keep for the next wake-up.
 #[cfg(feature = "sleepy")]
 static DISCOVERY_HASH: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
+/// The hash of the discovery sent (or found unchanged), to keep for the next wake-up.
 #[cfg(feature = "sleepy")]
 pub fn discovery_hash() -> u32 {
     DISCOVERY_HASH.load(Ordering::Relaxed)

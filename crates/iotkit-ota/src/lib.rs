@@ -11,6 +11,7 @@
 //! built with rollback works too.
 
 #![no_std]
+#![warn(missing_docs)]
 
 /// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
 #[cfg(all(feature = "_esp", not(feature = "portable-atomic")))]
@@ -35,6 +36,7 @@ pub struct Pending {
     pub slot: u8,
     /// Slot to go back to.
     pub previous: u8,
+    /// Version of the update.
     pub version: (u16, u16, u16),
     /// Trial boots so far.
     pub boots: u8,
@@ -46,6 +48,7 @@ impl Setting for Pending {
 }
 
 impl Pending {
+    /// Version of the update.
     pub fn version(&self) -> Version {
         Version::new(self.version.0, self.version.1, self.version.2)
     }
@@ -54,11 +57,14 @@ impl Pending {
 /// What the last update did (in flash, for diagnostics).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LastUpdate {
+    /// What happened.
     pub outcome: Outcome,
+    /// Version of the update.
     pub version: (u16, u16, u16),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What became of an update.
 pub enum Outcome {
     /// Written and selected; not booted yet.
     Installed,
@@ -76,6 +82,7 @@ impl Setting for LastUpdate {
 /// Where to check for updates: a manifest URL (`cargo iotkit ota publish`), kept in flash.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateSource {
+    /// `http://` URL of the manifest.
     pub manifest_url: heapless::String<200>,
 }
 
@@ -89,10 +96,16 @@ impl Setting for UpdateSource {
 pub enum BootAction {
     /// No update in progress.
     Normal,
-    /// Trial boot number `boot` (from 1) of the pending update: record it, then run.
-    Trial { boot: u8 },
+    /// A trial boot of the pending update: record it, then run.
+    Trial {
+        /// Trial boot number, from 1.
+        boot: u8,
+    },
     /// The update had its trial boots without being confirmed: select slot `to` and restart.
-    RollBack { to: u8 },
+    RollBack {
+        /// The slot to go back to.
+        to: u8,
+    },
     /// Not running the pending update (the bootloader went back by itself): forget it.
     Abandoned,
 }
