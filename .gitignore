@@ -14,3 +14,5 @@ test-server/matter-data/
 published/
 # Agent worktrees (Claude Code).
 .claude/worktrees/
+# The built guide (mdbook build docs).
+docs/book/

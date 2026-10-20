@@ -1,6 +1,7 @@
 # iotkit: notes for coding agents
 
-no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [README.md](README.md).
+no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [README.md](README.md),
+then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 
 ## Layout
 
@@ -12,6 +13,8 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
   module's chip code is in its `esp.rs`, behind `feature = "_esp"` or, on the Wi-Fi side,
   `cfg(esp_wifi)` (a chip and `wifi`, set by `build.rs`); the rest builds on the host.
 - `crates/iotkit-build`: the apps' build.rs helper.
+- `docs/`: the user guide. User-facing explanations live there, once; the README stays a short
+  landing page.
 - `apps/`: `devkit` (reference firmware, the default member), `showcase` (one entity of each kind),
   `sleepy` (deep sleep), `lean` (opt-out features), `thread-light` (Matter over Thread, uses the crates directly).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
@@ -51,7 +54,7 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
 - Never run espflash while a monitor holds `/dev/ttyACM0`: it hangs on "Connecting".
 - `partitions.csv` is 8 MB: flash with `--flash-size 8mb`. 4 MB boards use `partitions-4mb.csv`,
   without Matter.
-- `ed25519-compact` and `iotkit-core` build at opt-level `z` ([Cargo.toml](Cargo.toml)); at `s`
+- `ed25519-compact` and `iotkit-image` build at opt-level `z` ([Cargo.toml](Cargo.toml)); at `s`
   the Ed25519 verification grows to about 1.2 MB.
 - esp-radio's `sta_disconnected_pm` starves BLE: keep it off (Improv setup over BLE,
   `crates/iotkit/src/net/esp.rs`).

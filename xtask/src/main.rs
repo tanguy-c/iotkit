@@ -20,13 +20,14 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use iotkit_core::image::{Manifest, Version, app, hex_decode, hex_encode, sha256};
 
-/// The chips iotkit builds for: name (cargo feature and `espflash --chip`), target, image id.
+/// The chips iotkit builds for: name (cargo feature and `espflash --chip`), ESP Web Tools' chip
+/// family, target, image id.
 const CHIPS: &[Chip] = &[
-    Chip { name: "esp32c6", target: "riscv32imac-unknown-none-elf", id: app::ESP32C6 },
-    Chip { name: "esp32c3", target: "riscv32imc-unknown-none-elf", id: app::ESP32C3 },
-    Chip { name: "esp32c5", target: "riscv32imac-unknown-none-elf", id: app::ESP32C5 },
-    Chip { name: "esp32h2", target: "riscv32imac-unknown-none-elf", id: app::ESP32H2 },
-    Chip { name: "esp32s3", target: "xtensa-esp32s3-none-elf", id: app::ESP32S3 },
+    Chip { name: "esp32c6", family: "ESP32-C6", target: "riscv32imac-unknown-none-elf", id: app::ESP32C6 },
+    Chip { name: "esp32c3", family: "ESP32-C3", target: "riscv32imc-unknown-none-elf", id: app::ESP32C3 },
+    Chip { name: "esp32c5", family: "ESP32-C5", target: "riscv32imac-unknown-none-elf", id: app::ESP32C5 },
+    Chip { name: "esp32h2", family: "ESP32-H2", target: "riscv32imac-unknown-none-elf", id: app::ESP32H2 },
+    Chip { name: "esp32s3", family: "ESP32-S3", target: "xtensa-esp32s3-none-elf", id: app::ESP32S3 },
 ];
 /// Chip and flash size when neither `--chip` nor `[package.metadata.iotkit]` says.
 const DEFAULT_CHIP: &str = "esp32c6";
@@ -37,6 +38,7 @@ const ESP_TOOLCHAIN: &str = "esp";
 #[derive(Clone, Copy)]
 struct Chip {
     name: &'static str,
+    family: &'static str,
     target: &'static str,
     id: u16,
 }
@@ -125,6 +127,23 @@ enum Cmd {
     /// OTA commands.
     #[command(subcommand)]
     Ota(Ota),
+    /// Build, then serve the install page (`dist/<package>/web/`) on this machine: open it in
+    /// Chrome or Edge to flash the device over USB and set its Wi-Fi (ESP Web Tools, Improv).
+    Web {
+        #[command(flatten)]
+        app: App,
+        /// Serve the last build instead of building.
+        #[arg(long)]
+        no_build: bool,
+        #[arg(long, default_value_t = 8000)]
+        port: u16,
+        #[arg(long, default_value = "0.0.0")]
+        min_version: String,
+        #[command(flatten)]
+        release: Release,
+        #[arg(long, default_value = "keys/ota.key")]
+        key: PathBuf,
+    },
 }
 
 #[derive(clap::Args)]
@@ -233,6 +252,16 @@ fn main() -> Result<()> {
                 build(&app, &min_version, &release, &key)?;
             }
             push(&host, &app.package, port)
+        }
+        Cmd::Web { app, no_build, port, min_version, release, key } => {
+            let app = Build::new(app)?;
+            if !no_build {
+                build(&app, &min_version, &release, &key)?;
+            }
+            let listener = TcpListener::bind(("127.0.0.1", port)).with_context(|| format!("port {port}"))?;
+            println!("open http://localhost:{port}/{}/web/ in Chrome or Edge (Ctrl-C stops)", app.package);
+            serve_dist(listener);
+            Ok(())
         }
         Cmd::Ota(Ota::Publish { to, base_url, app, no_build, min_version, release, key }) => {
             let app = Build::new(app)?;
@@ -455,8 +484,48 @@ fn build(app: &Build, min_version: &str, release: &Release, key: &Path) -> Resul
     let path = dir.join("manifest.json");
     fs::write(&path, &buf[..n])?;
     println!("{}: {} {version}, {} bytes, signed", path.display(), app.package, data.len());
+    web(app, &dir.join("web"), version_str)
+}
+
+/// The browser install (ESP Web Tools): a merged image to flash at 0 (bootloader, partition
+/// table, app; otadata stays erased, so it boots `ota_0`), its manifest and a page.
+fn web(app: &Build, dir: &Path, version: &str) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    let file = format!("{}-{version}-full.bin", app.package);
+    run(Command::new("espflash")
+        .args(["save-image", "--merge", "--skip-padding", "--chip", app.chip.name, "--flash-size", &app.flash_size])
+        .args(["--partition-table", app.partition_table()])
+        .arg(app.elf())
+        .arg(dir.join(&file)))?;
+    let manifest = serde_json::json!({
+        "name": app.package,
+        "version": version,
+        "new_install_prompt_erase": true,
+        // Firmware with `improv-serial` takes the Wi-Fi right after the install.
+        "new_install_improv_wait_time": 15,
+        "builds": [{ "chipFamily": app.chip.family, "parts": [{ "path": file, "offset": 0 }] }],
+    });
+    fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)? + "\n")?;
+    fs::write(dir.join("index.html"), INSTALL_PAGE.replace("{name}", &app.package).replace("{version}", version))?;
+    println!("{}: install page (cargo iotkit web)", dir.display());
     Ok(())
 }
+
+/// `dist/<package>/web/index.html`: serve the folder over HTTPS (or localhost) for Web Serial.
+const INSTALL_PAGE: &str = r#"<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install {name}</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<body style="font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem">
+<h1>{name} {version}</h1>
+<p>Plug the device in over USB, then install. Chrome or Edge on a computer; the device asks for
+your Wi-Fi at the end.</p>
+<esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+</body>
+</html>
+"#;
 
 fn verify(path: &Path, key: &Path) -> Result<()> {
     let key: [u8; 32] = read_hex(key)?;
@@ -594,8 +663,12 @@ fn serve_file(mut stream: TcpStream) -> Result<()> {
         }
     }
     let path = line.split(' ').nth(1).unwrap_or("/");
-    let relative = path.trim_start_matches('/');
-    let file = Path::new("dist").join(relative);
+    // A folder (the install page's URL) serves its `index.html`.
+    let relative = match path.trim_start_matches('/') {
+        r if r.is_empty() || r.ends_with('/') => format!("{r}index.html"),
+        r => r.to_string(),
+    };
+    let file = Path::new("dist").join(&relative);
     let body = if relative.split('/').any(|p| p == ".." || p.is_empty()) { None } else { fs::read(&file).ok() };
     match body {
         Some(body) if from <= body.len() => {
@@ -611,7 +684,16 @@ fn serve_file(mut stream: TcpStream) -> Result<()> {
                 )?;
             } else {
                 println!("served {path} ({} bytes)", body.len());
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())?;
+                let kind = match file.extension().and_then(|e| e.to_str()) {
+                    Some("html") => "text/html; charset=utf-8",
+                    Some("json") => "application/json",
+                    _ => "application/octet-stream",
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )?;
             }
             stream.write_all(rest)?;
             // Let the client close first: closing here could reset the connection before the

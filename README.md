@@ -1,347 +1,53 @@
 # iotkit
 
-A `no_std` firmware kit for the ESP32-C6 (esp-hal + Embassy): Wi-Fi setup, signed OTA updates
-with automatic rollback, crash records and watchdogs, and Home Assistant over MQTT and Matter.
-A device's `main` describes its entities and hardware, and calls `iotkit::start` for the rest.
+Rust firmware for ESP32 smart devices: Wi-Fi setup from a phone, signed OTA updates with
+automatic rollback, Home Assistant over MQTT and Matter, deep sleep. A `no_std` kit on esp-hal and
+Embassy for when ESPHome's YAML gets in the way.
 
-## Status
-
-Early, not released yet: APIs and the flash layout of the settings may still change.
-
-- Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and
-  serial), signed OTA with rollback, MQTT with a real Home Assistant, Matter over Wi-Fi with
-  Home Assistant's Matter server, deep sleep, updates from Home Assistant.
-- Built but not tested on hardware: the other chips, the BOOT button gestures, the entity kinds
-  beyond sensor, switch and light over Matter, Matter over Thread end to end (no border router
-  tried yet).
-- Matter uses the test attestation credentials: for development, not for a product.
-- Known issues and plans are in the [issues](https://github.com/tanguy-c/iotkit/issues).
-
-## Chips
-
-| Chip | Wi-Fi, MQTT, OTA, setup | Matter | Tested on hardware |
-| --- | --- | --- | --- |
-| ESP32-C6 | yes | Wi-Fi (`matter-wifi`), Thread (`apps/thread-light`) | yes (ESP32-C6-DevKitC-1, 8 MB) |
-| ESP32-C3 | yes | no: Matter needs about 24 KB more RAM than the C3 has | build only |
-| ESP32-C5 | yes | no: esp-hal 1.2 has no true RNG on the C5 yet | build only |
-| ESP32-S3 | yes | no: does not fit in internal RAM (PSRAM support later) | build only |
-| ESP32-H2 | no Wi-Fi | Thread (`apps/thread-light`) | build only |
-
-The ESP32-C6 is the reference: support for the other chips is added without changing it.
-`cargo iotkit ... --chip esp32c3` builds a firmware for another chip (`--flash-size 4mb` for
-4 MB boards); a generated project records its chip in `[package.metadata.iotkit]`.
-
-## 1. Prerequisites
-
-```bash
-rustup target add riscv32imac-unknown-none-elf riscv32imc-unknown-none-elf   # C6/C5/H2, C3
-cargo install espflash
-# ESP32-S3 only (Xtensa): Espressif's toolchain, then `. ~/export-esp.sh` in each shell.
-# Use 1.98.1.0: 1.99 fails to link esp-hal 1.2.2.
-cargo install espup && espup install --toolchain-version 1.98.1.0
-# The iotkit CLI (new projects, signed builds, flashing, OTA):
-cargo install --locked --git https://github.com/tanguy-c/iotkit iotkit-cli
-# or, from a checkout of this repository: cargo install --locked --path xtask
-```
-
-Linux: add yourself to the serial group (`sudo usermod -aG dialout $USER`), then log out and in.
-
-## 2. Create a project
-
-```bash
-cargo iotkit new garden-sensor
-```
-
-It asks what you are making, in plain words:
-
-- **what it is** (its name in Home Assistant) and your name or brand;
-- **the board** (ESP32-C6, C3, C5 or S3 DevKit, or another board with one of these chips);
-- **the power**: plugged in, or on battery (wakes up every few minutes, reports, sleeps; with
-  the battery level if you want);
-- **connectivity**: your Wi-Fi now or later from a phone, Home Assistant's MQTT broker, Matter
-  (C6) with **one fixed pairing code** shown as a QR code to print as a label (or a code per
-  device), and where you publish updates;
-- **the parts**, one by one, each with its pin: temperature, humidity, pressure, light level,
-  CO2, fine dust, soil moisture; motion, door, leak, smoke; relay, light, blind, valve, lock,
-  fan, thermostat, settings; push buttons. Pins are checked for the chip (no flash or USB pin, an
-  ADC pin for analog parts).
-
-The project gets one entity per part (Home Assistant and Matter types follow), a task per part
-with a `TODO` for its driver, a README with the wiring table, `.cargo/secrets.toml` with what
-you gave, and its signing keys. Scripts and CI: `cargo iotkit new DIR --answers FILE` (see
-`xtask/answers/`).
-
-A project depends on iotkit from this GitHub repository (`Cargo.lock` pins the commit; `cargo
-update` moves it on). To work on iotkit itself, `--iotkit-path DIR` makes the project use a
-local checkout instead.
-
-Without the questions: `cargo generate --git https://github.com/tanguy-c/iotkit template --name
-my-device` (asks the chip, and optionally a local checkout's path; then `cargo iotkit keygen`). Its `src/main.rs`, and the one a
-wizard project with no parts gets, shows the RGB LED as a light, toggled by a short press of BOOT:
+**[Guide](https://tanguy-c.github.io/iotkit/)** ·
+[Coming from ESPHome](https://tanguy-c.github.io/iotkit/coming-from-esphome.html) ·
+[Changelog](CHANGELOG.md)
 
 ```rust
-static LED: Light = Light::new("led", "LED");
-static TEMPERATURE: Sensor = Sensor::temperature("temperature", "Temperature");   // °C, 1 decimal
-static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))   // name + version from Cargo.toml
-    .manufacturer("Me")
-    .entities(&[&LED, &TEMPERATURE]);
+static PUMP: Switch = Switch::new("pump", "Pump");
+static TEMPERATURE: Sensor = Sensor::temperature("temperature", "Temperature");
+static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY)).entities(&[&PUMP, &TEMPERATURE]);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    iotkit::init!(p);   // clocks, heap, RTOS; `p`: the peripherals
+    iotkit::init!(p);
     iotkit::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
-    // the app's own hardware and tasks
+    spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default())).unwrap());
+    // ...
+}
+
+#[embassy_executor::task]
+async fn pump_task(pin: Output<'static>) {
+    components::relay(&PUMP, pin, Active::High).await   // Home Assistant switches it
 }
 ```
 
-Entities are `Sensor`, `BinarySensor`, `Switch`, `Light`, `Button`, `Event`, `Number`, `Select`,
-`TextSensor`, `Cover`, `Valve`, `Lock`, `Fan` and `Climate`: set their state from any
-task (`TEMPERATURE.set(21.5)`), wait for commands (`LED.wait_command().await`), and report the
-result with `set`. Device classes and units are typed (`.device_class(DeviceClass::MOTION)`,
-`.unit(Unit::PERCENT)`; `custom("...")` for others), and common sensors have shortcuts
-(`Sensor::humidity`, `pressure`, `illuminance`, `carbon_dioxide`, `pm25`, `battery`, `voltage`,
-`power`). `iotkit::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
+## Quick start
 
-Ready-made parts in `iotkit::components` drive an entity from any embedded-hal pin, PWM
-channel or driver: `relay`, `binary_input`, `button` (press, double, triple, long), `dimmer`,
-`fan`, `rgb_light` (WS2812, feature `smartled`), and `poll` for sensors, with filters
-(`Linear` calibration, `Clamp`, `MovingAverage`, `Delta`, ...). The app awaits one in its own
-task, so unused parts cost nothing; `cargo iotkit new` uses them where it can.
-`apps/devkit` is a fuller example: watched tasks, its own health check, an extra console command.
-
-## 3. First flash (USB)
+With an ESP32-C6 DevKit plugged in:
 
 ```bash
-cargo iotkit flash --release      # or `cargo run --release`: flash, then the serial monitor
+rustup target add riscv32imac-unknown-none-elf
+cargo install espflash
+cargo install --locked --git https://github.com/tanguy-c/iotkit iotkit-cli
+cargo iotkit new my-light --defaults && cd my-light
+cargo iotkit flash --release
 ```
 
-If the board is not detected, hold **BOOT**, tap **RESET**, release **BOOT**. Every USB flash
-boots `ota_0` (otadata is erased). `partitions.csv` is for 8 MB of flash (two 3.9 MB app slots,
-needed for Matter); `partitions-4mb.csv` fits 4 MB boards without Matter.
+Join the `iotkit-XXXX` network from a phone to give it your Wi-Fi, then type `mqtt <your broker>`
+on the console: the board's LED shows up in Home Assistant. `cargo iotkit new` without
+`--defaults` asks about your own board and parts.
 
-## 4. Join Wi-Fi
+## Status
 
-On first boot with no stored network the device opens a setup window. Give it your network any
-of three ways:
-
-- **Setup access point:** join the open network `iotkit-XXXX`; the phone shows the setup page
-  (or open `http://192.168.4.1/`). Keep the page open: it reloads and says when the device is
-  connected (the access point restarts once while it joins).
-- **Bluetooth ([Improv](https://www.improv-wifi.com)):** the Home Assistant app offers the device
-  under *Settings > Devices > Add*; improv-wifi.com works from a desktop browser.
-- **USB serial (Improv):** ESP Web Tools, or improv-wifi.com with Web Serial.
-
-The device tries the network before keeping it. The network must be 2.4 GHz, and the password
-empty or 8 to 63 characters. To change it later: hold **BOOT** 3 s (the devkit's LED turns
-blue) and release, or type `provision` on the USB console; the window stays open 10 minutes.
-Hold **BOOT** 10 s (red) to factory-reset: every setting and Matter pairing is erased.
-
-> During a setup window anyone in range can give the device a network (open access point,
-> Improv without a button press). Open it only when you need it.
-
-For development, `.cargo/secrets.toml` (from `secrets.toml.example`, git-ignored) can set
-`WIFI_SSID` / `WIFI_PASS` (and `MQTT_HOST`): the first boot stores them and skips the window.
-
-```bash
-ping iotkit-XXXX.local     # mDNS
-```
-
-## 5. Wireless updates (OTA)
-
-```bash
-cargo iotkit build --release                         # dist/<package>/: image + signed manifest
-cargo iotkit verify                                  # optional: check it like a device would
-cargo iotkit ota push --host iotkit-XXXX.local --release   # build, serve, have the device install it
-```
-
-`ota push` serves `dist/` from this machine, so the device must reach it (same network, port
-8000). If the host name does not resolve (no mDNS in the host's resolver), use the device's
-address (`net` on the console). Bump `version` in `Cargo.toml` for each update.
-
-What happens on the device:
-
-1. The manifest's Ed25519 signature is checked, and the version must be newer than the running
-   one (`--min-version` sets the oldest allowed to update).
-2. The image streams into the spare slot; its header must name the same product and version. A
-   dropped connection resumes with an HTTP `Range` request.
-3. Its size and SHA-256 must match the manifest; then the slot is selected and the device restarts.
-4. The new firmware gets 3 trial boots to pass the health check (boot recorded, Wi-Fi up, broker
-   reached, plus the app's own checks); then it is kept.
-5. If it never gets there, the firmware switches back to the previous slot by itself (no
-   bootloader support needed). An update that crashes before the kit counts its boots is caught
-   too, after 6 boots, by a counter in RTC memory.
-
-The OTA endpoint (port 80) answers anyone on the network, but installs only images signed with
-your key, and never an older version. [SECURITY.md](SECURITY.md) lists what iotkit protects and
-what it does not.
-
-The repository's devkit has two test switches: `DEVKIT_PANIC_AT_BOOT=1 cargo xtask ota push ...`
-pushes a build that never gets healthy, and `IOTKIT_PANIC_EARLY=1` one that crashes before the
-trial is counted; `push` then reports the rollback.
-
-### Updates from Home Assistant
-
-With `iotkit`'s `ha-update` feature (on in the template), the device has a *Firmware* update
-entity: Home Assistant shows the installed and latest versions, the release summary and its
-link, and installs the update with progress. The device checks a manifest URL at start, then
-every 6 hours:
-
-```bash
-# Build, sign and copy to a folder a web server serves (test-server's `updates` service serves
-# published/ on port 8080):
-cargo iotkit ota publish --to published --release --base-url http://192.168.1.10:8080 \
-    --summary "Faster Wi-Fi" --release-url https://example.com/notes/1.2.0
-# On the device's console, once (or OTA_MANIFEST_URL in .cargo/secrets.toml):
-update-url http://192.168.1.10:8080/my-device/manifest.json
-```
-
-The summary and the link are signed with the manifest. A failed install shows its error as the
-summary and keeps the running firmware.
-
-## 6. Home Assistant
-
-- **MQTT:** install the Mosquitto add-on and the MQTT integration, then point the device at the
-  broker: `mqtt 192.168.1.10` on the USB console (or `MQTT_HOST` in `.cargo/secrets.toml`). The
-  entities appear by themselves (MQTT discovery), and the device shows as unavailable when it
-  goes offline (last will, or `offline` before a planned restart).
-- **Matter over Wi-Fi** (`--features matter-wifi`, 8 MB flash): runs next to MQTT. Each device
-  draws its own pairing code at first boot (boot log, or `matter` on the console). In Home
-  Assistant: *Settings > Devices > Add > Matter*, with the code (no Bluetooth step: the device is
-  already on the network). Lights, switches (as plugs), sensors (temperature, humidity, pressure,
-  illuminance, air quality, battery), binary sensors (contact, motion, leak, smoke/CO), buttons
-  (as switches with events), covers, valves, locks, fans, thermostats and selects appear, named
-  after the entities;
-  other entities stay MQTT-only. `matter pair` lets another controller pair for 15 minutes;
-  `matter reset` forgets every pairing. Matter uses the test vendor's attestation: fine for
-  development, not for selling devices.
-- **Matter over Thread:** `apps/thread-light` (needs `clang` and `cmake`) boots and advertises
-  over Bluetooth, but is untested end to end (it needs a Thread border router).
-
-Topics: `iotkit/<host>/status` (`online`/`offline`), `iotkit/<host>/<entity>/state`,
-`iotkit/<host>/<entity>/set`, and discovery under `homeassistant/`.
-
-Without Home Assistant, `test-server/compose.yaml` runs a broker, a Home Assistant
-(`http://localhost:8123`, about 1.7 GB) and a Matter controller on the PC:
-
-```bash
-docker compose -f test-server/compose.yaml up -d mosquitto
-mosquitto_sub -h localhost -v -t 'iotkit/#' -t 'homeassistant/#'
-mosquitto_pub -h localhost -t iotkit/iotkit-XXXX/led/set -m '{"state":"ON","color":{"r":255,"g":0,"b":0}}'
-```
-
-The Matter controller needs the PC's network interface towards the device:
-`MATTER_INTERFACE=<interface> docker compose -f test-server/compose.yaml up -d matter-server`
-(`ip link` lists them; the default is `wlan0`).
-
-### Battery devices (deep sleep)
-
-`iotkit`'s `deep-sleep` feature (MQTT only; not with `matter-wifi`) starts a device that
-wakes up, reports and sleeps again. `apps/sleepy` is the example:
-
-```rust
-static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(300), max_awake: Duration::from_secs(30) };
-
-let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
-TEMPERATURE.set(reading);
-app.sleep().await // sends the states, disconnects, sleeps `interval`
-```
-
-- **A wake-up is short** (about 2 s from wake to sleep on the C6): the access point, channel and
-  address of the last wake-up are kept in RTC memory (no scan, no DHCP; the lease is reused for
-  30 minutes), boots are not written to flash, and the discovery is sent only when it changed.
-- **In Home Assistant** the device has no availability (asleep is not offline); its readings
-  expire after twice the interval. Commands are retained, so a switch turned on while the device
-  sleeps applies at the next wake-up; one-shot commands (buttons, *Install*) are cleared once
-  received.
-- **Stay awake for maintenance:** the app decides (`apps/sleepy` has a retained *Stay awake*
-  switch). The device also stays awake while a setup window is open or an update installs, so
-  *Install* in Home Assistant works on a sleeping device: it installs at the next wake-up.
-- **No broker:** if it is not reached within `max_awake`, the device sleeps 2, 4 then 8 times the
-  interval, and after two failures forgets the access point and address (a scan and DHCP next
-  time).
-- **Wake reason:** `app.wake_reason` (`PowerOn`, `Timer`, `Pin`); a pin armed with esp-hal's
-  `Input::wakeup_enable` wakes it too (on the C6 only GPIO0-7, so not BOOT).
-- **Battery level:** `iotkit::battery::Battery` reads an ADC1 pin behind a divider, with a
-  LiPo, 2×AA alkaline or custom discharge curve: `Battery::new(p.ADC1, p.GPIO2, 2.0).report(&BATTERY, Some(&VOLTAGE))`,
-  before Wi-Fi starts (the radio's load lowers the voltage).
-
-Deep sleep builds on the C3, C5, C6 and S3; it was tested on the C6 only. The USB serial port
-disappears while the chip sleeps: a monitor has to reopen it.
-
-## 7. USB console
-
-Type `help`: `info` (version, boot counters, last crash, last update), `net`, `provision`,
-`ota URL`, `mqtt [HOST[:PORT] [USER PASS]]`, `matter [pair|reset]`, and test commands (`panic`,
-`hang`, `reboot`, `factory-reset`). Apps add their own with `Config::console`.
-
-## 8. Logs
-
-`ESP_LOG` in `.cargo/config.toml` sets the level at build time (`info` by default). Release builds
-compile out debug and trace logs (they would cost RAM): for those, build without `--release`.
-
-## 9. Only what the device uses
-
-`iotkit`'s services are features, all on by default; a device that does not need one
-builds without it (`default-features = false`, then list the ones to keep):
-
-| Feature | What | Without it |
-| --- | --- | --- |
-| `improv-ble` | Wi-Fi setup over Bluetooth (Improv) | no Bluetooth stack: about 300 KB less flash; no `Board::bt` |
-| `softap` | the setup access point and its page | no portal, DHCP or DNS server |
-| `improv-serial` | Wi-Fi setup over USB (ESP Web Tools) | |
-| `console` | the USB console (`help`) | with `improv-serial` off too, the app keeps the USB port (`Board::usb`) |
-| `ota-push` | updates pushed with `cargo iotkit ota push` | updates only from Home Assistant (`ha-update`) or not at all |
-
-With no setup path left (`improv-ble`, `softap`, `improv-serial`), the build requires
-`WIFI_SSID` (`.cargo/secrets.toml`). `apps/lean` keeps `improv-serial` and `ota-push`: about
-350 KB less flash than devkit. `tools/link-check.sh` checks that what is off is not linked.
-
-Names: `IOTKIT_HOSTNAME` (default `iotkit`: `iotkit-aefc.local`, the access point, the device in
-Home Assistant) and `IOTKIT_TOPIC_PREFIX` (default `iotkit`: `iotkit/<host>/...`), set in the
-project's `.cargo/config.toml` `[env]`.
-
-Without `start` at all: the modules work on their own (`iotkit::ota` for signed updates,
-`iotkit::config` for settings, `iotkit::provision`, ...); `apps/thread-light` builds its firmware
-from them directly (`default-features = false`).
-
-## 10. VSCode
-
-Accept the recommended extensions (rust-analyzer, probe-rs, Even Better TOML, Error Lens). Tasks
-(`Ctrl+Shift+B`): **Flash USB**, **Monitor**, **Build signed**, **OTA push**. Debug (`F5`) uses
-probe-rs over the built-in USB-JTAG.
-
-## This repository
-
-| Path | What |
-| --- | --- |
-| `crates/iotkit` | what a device depends on: `start` and the modules (`net`, `ota`, `provision`, `mqtt`, `matter`, `components`, `diag`, `config`) |
-| `crates/iotkit-core` | the chip-independent part, re-exported by `iotkit`: `model`, `config` (the store), `image` (signed updates), `runtime` (health) |
-| `crates/iotkit-build` | the apps' `build.rs` helper |
-| `apps/devkit` | reference firmware; `cargo xtask ...` here is the same CLI as `cargo iotkit` |
-| `apps/showcase` | one entity of each kind, simulated, over MQTT and Matter |
-| `apps/sleepy` | a deep-sleeping sensor |
-| `apps/lean` | a sensor without Bluetooth, access point or console: the opt-out features |
-| `template/` | the `cargo generate` template; `check-sync.sh` keeps its copied files in step |
-| `xtask/` | the `cargo iotkit` CLI |
-| `test-server/` | broker, Home Assistant and Matter controller for tests |
-
-Before building the apps here, create a signing key: `cargo xtask keygen` (`keys/` is git-ignored:
-each developer signs with their own). Host tests: `cargo test-host`. Build apps one at a time
-(`cargo build -p devkit`): `cargo build --workspace` fails, because devkit (Wi-Fi) and
-thread-light (802.15.4) would share one esp-radio build.
-
-## Troubleshooting
-
-| Problem | Fix |
-| --- | --- |
-| `Permission denied` on `/dev/ttyACM0` | Add yourself to `dialout`, log in again |
-| `espflash` hangs on "Connecting" | Another program holds the serial port (a monitor); close it |
-| Build fails: "No OTA key" | `cargo iotkit keygen` (in this repository too: `keys/` is not committed) |
-| `ota push`: name not resolved | Use the device's IP address (`net` on the console) |
-| `ota push`: connection timed out | Device not on Wi-Fi yet, or on another network |
-| OTA refused | Key mismatch, version not newer, or image too big for the slot |
-| Device keeps rolling back | The health check never passes: read the log over USB |
-| Setup page cannot join | Wrong password, a 5 GHz-only network; some phone hotspots refuse for a minute after a wrong password |
+Early, not released yet: the API and the settings' flash layout may still change. Tested on an
+ESP32-C6-DevKitC-1; the C3, C5, S3 and H2 are build-tested ([chips](https://tanguy-c.github.io/iotkit/introduction.html#chips)).
+Matter uses test attestation credentials: for development, not for selling devices.
 
 ## License
 

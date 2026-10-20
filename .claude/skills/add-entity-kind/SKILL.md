@@ -19,7 +19,7 @@ Follow an existing kind end to end: `grep -rn Valve crates xtask apps` lists eve
    `platform()` in `codegen.rs` for a new entity type; a part in `xtask/answers/c6.toml` (CI
    generates and builds it).
 5. **Showcase**: one simulated entity in `apps/showcase/src/main.rs`.
-6. **Docs**: the entity lists in `README.md`.
+6. **Docs**: the entity tables in `docs/src/entities.md` and, for Matter, `docs/src/home-assistant.md`.
 7. Check: `cargo test-host`, xtask tests, clippy of `showcase` with and
    without `matter-wifi` (see `.github/workflows/ci.yml`), then `tools/size-check.sh`: unused
    kinds must cost devkit nothing.

@@ -724,7 +724,9 @@ pub fn readme(p: &Project) -> String {
         p.board.boot_pin
     );
     if p.parts.is_empty() {
-        s.push_str("\nNo parts yet: add entities in `src/main.rs` (see the iotkit README).\n");
+        s.push_str(
+            "\nNo parts yet: add entities in `src/main.rs` (see https://tanguy-c.github.io/iotkit/entities.html).\n",
+        );
     } else {
         s.push_str("\nThe code for each part is a `TODO(<id>)` in `src/main.rs`: write the driver there.\n");
     }
@@ -851,7 +853,8 @@ Never read or print `keys/ota.key` or `.cargo/secrets.toml`.
 
 ## API
 
-- iotkit: `cargo doc -p iotkit` (HTML in `target/*/doc/iotkit/`); source in {source}.
+- iotkit: the guide https://tanguy-c.github.io/iotkit/ (index: `llms.txt` there); `cargo doc -p iotkit`
+  (HTML in `target/*/doc/iotkit/`); source in {source}.
 - esp-hal: `~/.cargo/registry/src/*/esp-hal-1.2.2/`.
 - Examples: `apps/devkit` (plugged in) and `apps/sleepy` (battery) in {}.
 ",

@@ -1,6 +1,6 @@
 # iotkit device template
 
-`cargo iotkit new` (the questions, see the root README) renders these files too; `cargo generate
+`cargo iotkit new` (the questions, see the [guide](https://tanguy-c.github.io/iotkit/getting-started.html)) renders these files too; `cargo generate
 --path <iotkit>/template --name my-device` is the way without questions. It asks for the chip, and the
 absolute path of the iotkit checkout: the generated project uses `iotkit` and
 `iotkit-build` from there (a git dependency once the repository is published).

@@ -16,3 +16,6 @@ iotkit is not released yet: the API and the settings' flash layout may still cha
   sensors with filters), used by `cargo iotkit new`.
 - `init!`, `Config::new` with builders, typed `DeviceClass` / `Unit`, sensor shortcuts.
 - `cargo iotkit new`: `TODO(<id>)` hints, optional `AGENTS.md` for AI coding agents.
+- The guide (`docs/`, GitHub Pages) with a "Coming from ESPHome" page; a short README.
+- Install from the browser: `cargo iotkit build` writes an ESP Web Tools page and merged image
+  (`dist/<package>/web/`); `cargo iotkit web` serves it.

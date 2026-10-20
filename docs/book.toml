@@ -1,0 +1,11 @@
+[book]
+title       = "iotkit"
+description = "Rust firmware for ESP32 smart devices: Wi-Fi setup, signed OTA with rollback, Home Assistant over MQTT and Matter"
+authors     = ["The iotkit contributors"]
+language    = "en"
+src         = "src"
+
+[output.html]
+git-repository-url = "https://github.com/tanguy-c/iotkit"
+edit-url-template  = "https://github.com/tanguy-c/iotkit/edit/main/docs/{path}"
+site-url           = "/iotkit/"
