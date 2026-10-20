@@ -25,6 +25,26 @@ pub const HA_STATUS: &str = "homeassistant/status";
 /// An MQTT topic.
 pub type Topic = String<128>;
 
+/// The prefix of the device's own topics: `IOTKIT_TOPIC_PREFIX` at build time, `iotkit` by
+/// default (1 to 16 characters, no `+` or `#`).
+pub const TOPIC_PREFIX: &str = env!("IOTKIT_TOPIC_PREFIX");
+const _: () = {
+    let b = TOPIC_PREFIX.as_bytes();
+    assert!(!b.is_empty() && b.len() <= 16, "IOTKIT_TOPIC_PREFIX: 1 to 16 characters");
+    let mut i = 0;
+    while i < b.len() {
+        assert!(b[i] != b'+' && b[i] != b'#', "IOTKIT_TOPIC_PREFIX: no `+` or `#`");
+        i += 1;
+    }
+};
+
+/// `format_args!` with the topic prefix before `$fmt`.
+macro_rules! own {
+    ($fmt:literal $(, $arg:expr)* $(,)?) => {
+        format_args!(concat!(env!("IOTKIT_TOPIC_PREFIX"), $fmt) $(, $arg)*)
+    };
+}
+
 fn component(kind: Kind) -> &'static str {
     // A table in flash: a `match` would become a lookup table, which esp-hal keeps in RAM. In
     // the order of `Kind`.
@@ -65,32 +85,32 @@ fn topic(args: core::fmt::Arguments) -> Topic {
 
 /// Where the device publishes `online`, and its will `offline`.
 pub fn availability_topic(node: &str) -> Topic {
-    topic(format_args!("iotkit/{node}/status"))
+    topic(own!("/{}/status", node))
 }
 
 /// Where an entity's state goes.
 pub fn state_topic(node: &str, id: &str) -> Topic {
-    topic(format_args!("iotkit/{node}/{id}/state"))
+    topic(own!("/{}/{}/state", node, id))
 }
 
 /// Where an entity's commands come from.
 pub fn command_topic(node: &str, id: &str) -> Topic {
-    topic(format_args!("iotkit/{node}/{id}/set"))
+    topic(own!("/{}/{}/set", node, id))
 }
 
 /// Subscription for the commands of every entity.
 pub fn commands_filter(node: &str) -> Topic {
-    topic(format_args!("iotkit/{node}/+/set"))
+    topic(own!("/{}/+/set", node))
 }
 
 /// The command topic of one setting of an entity (`percentage`, `mode`, ...).
 pub fn feature_topic(node: &str, id: &str, feature: &str) -> Topic {
-    topic(format_args!("iotkit/{node}/{id}/{feature}/set"))
+    topic(own!("/{}/{}/{}/set", node, id, feature))
 }
 
 /// Subscription for the commands of one setting, of every entity.
 pub fn feature_commands_filter(node: &str) -> Topic {
-    topic(format_args!("iotkit/{node}/+/+/set"))
+    topic(own!("/{}/+/+/set", node))
 }
 
 /// Where an entity's discovery config goes.
@@ -102,7 +122,7 @@ pub fn discovery_topic(node: &str, entity: &dyn Entity) -> Topic {
 /// The entity id and the setting (`""` for the entity's own command topic) of a command topic
 /// of `node`.
 pub fn command_entity<'t>(node: &str, topic: &'t str) -> Option<(&'t str, &'t str)> {
-    let rest = topic.strip_prefix("iotkit/")?.strip_prefix(node)?.strip_prefix('/')?;
+    let rest = topic.strip_prefix(TOPIC_PREFIX)?.strip_prefix('/')?.strip_prefix(node)?.strip_prefix('/')?;
     let rest = rest.strip_suffix("/set")?;
     let (id, feature) = rest.split_once('/').unwrap_or((rest, ""));
     (!id.is_empty() && !feature.contains('/')).then_some((id, feature))
@@ -257,7 +277,7 @@ fn spec_fields(s: &mut impl Write, node: &str, entity: &dyn Entity) -> core::fmt
     if matches!(spec, Spec::Cover { position: true } if m.kind == Kind::Cover)
         || matches!(spec, Spec::Fan { .. } | Spec::Climate { .. })
     {
-        write!(s, ",\"~\":\"iotkit/{node}/{}\"", m.id)?;
+        write!(s, concat!(",\"~\":\"", env!("IOTKIT_TOPIC_PREFIX"), "/{}/{}\""), node, m.id)?;
     }
     match spec {
         Spec::None => {}

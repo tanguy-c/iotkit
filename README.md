@@ -279,7 +279,32 @@ Type `help`: `info` (version, boot counters, last crash, last update), `net`, `p
 `ESP_LOG` in `.cargo/config.toml` sets the level at build time (`info` by default). Release builds
 compile out debug and trace logs (they would cost RAM): for those, build without `--release`.
 
-## 9. VSCode
+## 9. Only what the device uses
+
+`iotkit-app`'s services are features, all on by default; a device that does not need one
+builds without it (`default-features = false`, then list the ones to keep):
+
+| Feature | What | Without it |
+| --- | --- | --- |
+| `improv-ble` | Wi-Fi setup over Bluetooth (Improv) | no Bluetooth stack: about 300 KB less flash; no `Board::bt` |
+| `softap` | the setup access point and its page | no portal, DHCP or DNS server |
+| `improv-serial` | Wi-Fi setup over USB (ESP Web Tools) | |
+| `console` | the USB console (`help`) | with `improv-serial` off too, the app keeps the USB port (`Board::usb`) |
+| `ota-push` | updates pushed with `cargo iotkit ota push` | updates only from Home Assistant (`ha-update`) or not at all |
+
+With no setup path left (`improv-ble`, `softap`, `improv-serial`), the build requires
+`WIFI_SSID` (`.cargo/secrets.toml`). `apps/lean` keeps `improv-serial` and `ota-push`: about
+350 KB less flash than devkit. `tools/link-check.sh` checks that what is off is not linked.
+
+Names: `IOTKIT_HOSTNAME` (default `iotkit`: `iotkit-aefc.local`, the access point, the device in
+Home Assistant) and `IOTKIT_TOPIC_PREFIX` (default `iotkit`: `iotkit/<host>/...`), set in the
+project's `.cargo/config.toml` `[env]`.
+
+Without `start` at all: the crates work on their own (`iotkit-ota` for signed updates,
+`iotkit-config` for settings, `iotkit-provision`, ...); `apps/thread-light` builds its firmware
+from them directly.
+
+## 10. VSCode
 
 Accept the recommended extensions (rust-analyzer, probe-rs, Even Better TOML, Error Lens). Tasks
 (`Ctrl+Shift+B`): **Flash USB**, **Monitor**, **Build signed**, **OTA push**. Debug (`F5`) uses
@@ -294,6 +319,7 @@ probe-rs over the built-in USB-JTAG.
 | `apps/devkit` | reference firmware; `cargo xtask ...` here is the same CLI as `cargo iotkit` |
 | `apps/showcase` | one entity of each kind, simulated, over MQTT and Matter |
 | `apps/sleepy` | a deep-sleeping sensor |
+| `apps/lean` | a sensor without Bluetooth, access point or console: the opt-out features |
 | `template/` | the `cargo generate` template; `check-sync.sh` keeps its copied files in step |
 | `xtask/` | the `cargo iotkit` CLI |
 | `test-server/` | broker, Home Assistant and Matter controller for tests |

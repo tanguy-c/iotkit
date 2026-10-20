@@ -1,5 +1,6 @@
-//! Line console on the USB serial port: diagnostics, setup, and failures on purpose. Improv
-//! frames share the port.
+//! Line console on the USB serial port (`console`): diagnostics, setup, and failures on purpose.
+//! Improv frames (`improv-serial`) share the port.
+#![cfg_attr(not(feature = "console"), allow(dead_code, unused_imports, unused_variables))]
 
 use embassy_time::Instant;
 use embedded_io_async::Read;
@@ -10,7 +11,9 @@ use iotkit_config::esp::SharedStore;
 use iotkit_diag::{BootStats, LastCrash};
 use iotkit_net::esp::Net;
 use iotkit_ota::LastUpdate;
-use iotkit_provision::esp::{Provisioner, Serial};
+use iotkit_provision::esp::Provisioner;
+#[cfg(feature = "improv-serial")]
+use iotkit_provision::esp::Serial;
 
 use crate::Config;
 
@@ -61,20 +64,24 @@ pub(crate) async fn console_task(
     config: &'static Config,
 ) {
     let net = provisioner.map(|p| p.net);
+    #[cfg(feature = "improv-serial")]
     let mut improv = Serial::new();
-    let mut line: String<64> = String::new();
     let mut buf = [0u8; 64];
-    let mut last = 0u8;
+    #[cfg(feature = "console")]
+    let (mut line, mut last) = (String::<64>::new(), 0u8);
+    #[cfg(feature = "console")]
     println!("Type 'help' and press Enter.");
     loop {
         let Ok(n) = rx.read(&mut buf).await;
         for &byte in &buf[..n] {
             // Improv frames (ESP Web Tools, improv-wifi.com) share the port.
+            #[cfg(feature = "improv-serial")]
             if let Some(p) = &provisioner
                 && improv.feed(p, byte).await
             {
                 continue;
             }
+            #[cfg(feature = "console")]
             match byte {
                 // Terminals send \r, \n or \r\n: one Enter.
                 b'\n' if last == b'\r' => {}
@@ -87,7 +94,10 @@ pub(crate) async fn console_task(
                 b' '..=b'~' if line.push(byte as char).is_ok() => print!("{}", byte as char),
                 _ => {}
             }
-            last = byte;
+            #[cfg(feature = "console")]
+            {
+                last = byte;
+            }
         }
     }
 }

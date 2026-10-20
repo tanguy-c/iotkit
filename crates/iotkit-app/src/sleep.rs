@@ -32,7 +32,6 @@ use esp_hal::{
         sleep::{LowPower, RtcSleepConfig},
     },
     timer::timg::TimerGroup,
-    usb::usb_serial_jtag::UsbSerialJtag,
 };
 use iotkit_config::esp::SharedStore;
 use iotkit_net::esp::{FastConnect, Net};
@@ -40,7 +39,7 @@ use log::{error, info, warn};
 use static_cell::StaticCell;
 
 use crate::{
-    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, console, network_check_task, spawn,
+    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, network_check_task, spawn,
     supervisor_task,
 };
 
@@ -336,9 +335,13 @@ pub async fn start_sleepy(
         warn!("no Wi-Fi network stored: join the setup access point, or use Improv (Bluetooth, USB serial)");
         HEALTH.pass(NETWORK);
     }
+    #[cfg(feature = "improv-ble")]
+    let bt = board.bt;
+    #[cfg(not(feature = "improv-ble"))]
+    let bt = ();
     let net = match iotkit_net::esp::start_fast(spawner, board.wifi, credentials, fast_connect()) {
         Ok(net) => {
-            start_services(spawner, net, store, board.bt, config, sleep, unprovisioned).await;
+            start_services(spawner, net, store, bt, config, sleep, unprovisioned).await;
             Some(net)
         }
         Err(e) => {
@@ -354,17 +357,8 @@ pub async fn start_sleepy(
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
         spawn(spawner, iotkit_provision::esp::button_task(button, store));
     }
-    let provisioner = net.map(|net| iotkit_provision::esp::Provisioner {
-        net,
-        store,
-        info: iotkit_provision::esp::DeviceInfo {
-            firmware: config.firmware.product,
-            version: config.firmware.version_text,
-            chip: config.chip,
-        },
-    });
-    let (usb_rx, _usb_tx) = UsbSerialJtag::new(board.usb).into_async().split();
-    spawn(spawner, console::console_task(usb_rx, store, provisioner, config));
+    #[cfg(any(feature = "console", feature = "improv-serial"))]
+    crate::spawn_console(spawner, board.usb, store, net.map(|net| crate::provisioner(net, store, config)), config);
 
     SleepyApp { app: App { store, net, stats }, wake_reason, boots, sleep }
 }
@@ -373,7 +367,7 @@ async fn start_services(
     spawner: Spawner,
     net: Net,
     store: &'static SharedStore,
-    bt: esp_hal::peripherals::BT<'static>,
+    bt: crate::Ble,
     config: &'static Config,
     sleep: &'static SleepConfig,
     unprovisioned: bool,
@@ -406,23 +400,11 @@ async fn start_services(
             HEALTH.pass(BROKER);
         }
     }
+    #[cfg(feature = "ota-push")]
     spawn(spawner, iotkit_ota::esp::serve_task(net, store, config.firmware));
     #[cfg(feature = "ha-update")]
     spawn(spawner, crate::update::update_task(net, store, config.firmware));
-    let info = iotkit_provision::esp::DeviceInfo {
-        firmware: config.firmware.product,
-        version: config.firmware.version_text,
-        chip: config.chip,
-    };
-    let provisioner = iotkit_provision::esp::Provisioner { net, store, info };
-    spawn(spawner, iotkit_provision::esp::window_task(bt, provisioner));
-    spawn(spawner, iotkit_provision::esp::dhcp_task(provisioner));
-    spawn(spawner, iotkit_provision::esp::dns_task(provisioner));
-    spawn(spawner, iotkit_provision::esp::portal_task(provisioner));
-    spawn(spawner, iotkit_provision::esp::portal_job_task(provisioner));
-    if unprovisioned {
-        iotkit_provision::esp::open_window();
-    }
+    crate::spawn_provisioning(spawner, bt, crate::provisioner(net, store, config), unprovisioned);
 }
 
 /// Once the broker is reached: remember how, for the next wake-up.

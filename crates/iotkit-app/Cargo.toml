@@ -9,6 +9,17 @@ repository.workspace   = true
 publish.workspace      = true
 
 [features]
+default = ["improv-ble", "softap", "improv-serial", "console", "ota-push"]
+## Improv over Bluetooth LE in a setup window (the Bluetooth stack: about 300 KB of flash).
+improv-ble = ["iotkit-provision/ble"]
+## The setup access point and its page in a setup window.
+softap = ["iotkit-provision/softap"]
+## Improv over the USB serial port (ESP Web Tools, improv-wifi.com).
+improv-serial = []
+## The USB console (`help`). Without it and `improv-serial`, the app keeps the USB port.
+console = []
+## Updates pushed over the network (`cargo iotkit ota push`).
+ota-push = []
 ## The chip (one is required).
 esp32c6 = [
     "esp-hal/esp32c6", "esp-println/esp32c6", "esp-alloc/esp32c6", "esp-rtos/esp32c6", "esp-bootloader-esp-idf/esp32c6",

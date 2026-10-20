@@ -47,6 +47,13 @@ compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-S3's interna
 #[cfg(all(feature = "esp32c3", feature = "matter-wifi"))]
 compile_error!("iotkit-app: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQTT, or a C6/C5/S3)");
 
+// With no setup path, only a network given at build time can be joined.
+#[cfg(not(any(feature = "improv-ble", feature = "softap", feature = "improv-serial")))]
+const _: () = assert!(
+    option_env!("WIFI_SSID").is_some(),
+    "iotkit-app: no setup path (improv-ble, softap, improv-serial): set WIFI_SSID at build time"
+);
+
 pub mod battery;
 mod console;
 #[cfg(feature = "deep-sleep")]
@@ -63,12 +70,15 @@ extern crate alloc;
 use embassy_executor::Spawner;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant};
+#[cfg(feature = "improv-ble")]
+use esp_hal::peripherals::BT;
 use esp_hal::{
     gpio::{AnyPin, Input, InputConfig, Pull},
-    peripherals::{BT, FLASH, TIMG1, USB_DEVICE, WIFI},
+    peripherals::{FLASH, TIMG1, WIFI},
     timer::timg::TimerGroup,
-    usb::usb_serial_jtag::UsbSerialJtag,
 };
+#[cfg(any(feature = "console", feature = "improv-serial"))]
+use esp_hal::{peripherals::USB_DEVICE, usb::usb_serial_jtag::UsbSerialJtag};
 use log::{error, info, warn};
 use static_cell::StaticCell;
 
@@ -104,11 +114,13 @@ pub struct Board {
     pub flash: FLASH<'static>,
     /// The Wi-Fi radio.
     pub wifi: WIFI<'static>,
-    /// Bluetooth LE, for Improv.
+    /// Bluetooth LE, for Improv (`improv-ble`).
+    #[cfg(feature = "improv-ble")]
     pub bt: BT<'static>,
     /// Its watchdog backs the task watchdog.
     pub timg1: TIMG1<'static>,
-    /// The USB serial port: console and Improv.
+    /// The USB serial port: console and Improv (`console`, `improv-serial`).
+    #[cfg(any(feature = "console", feature = "improv-serial"))]
     pub usb: USB_DEVICE<'static>,
     /// The BOOT button (active low; GPIO9 on the ESP32-C6-DevKitC-1): the setup window and
     /// factory reset ([`provision::gesture`]); a short press goes to the app
@@ -331,8 +343,12 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
         warn!("no Wi-Fi network stored: join the setup access point, or use Improv (Bluetooth, USB serial)");
         HEALTH.pass(NETWORK);
     }
+    #[cfg(feature = "improv-ble")]
+    let bt = board.bt;
+    #[cfg(not(feature = "improv-ble"))]
+    let bt = ();
     let provisioner = match iotkit_net::esp::start(spawner, board.wifi, credentials.clone()) {
-        Ok(net) => Some(start_services(spawner, net, store, board.bt, config, credentials.is_none()).await),
+        Ok(net) => Some(start_services(spawner, net, store, bt, config, credentials.is_none()).await),
         Err(e) => {
             error!("Wi-Fi: {e:?}");
             HEALTH.pass(NETWORK);
@@ -345,8 +361,8 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
         spawn(spawner, iotkit_provision::esp::button_task(button, store));
     }
-    let (usb_rx, _usb_tx) = UsbSerialJtag::new(board.usb).into_async().split();
-    spawn(spawner, console::console_task(usb_rx, store, provisioner, config));
+    #[cfg(any(feature = "console", feature = "improv-serial"))]
+    spawn_console(spawner, board.usb, store, provisioner, config);
 
     App { store, net: provisioner.map(|p| p.net), stats }
 }
@@ -356,7 +372,7 @@ async fn start_services(
     spawner: Spawner,
     net: Net,
     store: &'static SharedStore,
-    bt: BT<'static>,
+    bt: Ble,
     config: &'static Config,
     unprovisioned: bool,
 ) -> iotkit_provision::esp::Provisioner {
@@ -394,24 +410,62 @@ async fn start_services(
             HEALTH.pass(BROKER);
         }
     }
+    #[cfg(feature = "ota-push")]
     spawn(spawner, iotkit_ota::esp::serve_task(net, store, config.firmware));
     #[cfg(feature = "ha-update")]
     spawn(spawner, update::update_task(net, store, config.firmware));
+    let provisioner = provisioner(net, store, config);
+    spawn_provisioning(spawner, bt, provisioner, unprovisioned);
+    provisioner
+}
+
+/// Bluetooth for Improv: the peripheral with `improv-ble`, nothing without.
+#[cfg(feature = "improv-ble")]
+type Ble = BT<'static>;
+#[cfg(not(feature = "improv-ble"))]
+type Ble = ();
+
+/// What provisioning needs.
+fn provisioner(net: Net, store: &'static SharedStore, config: &Config) -> iotkit_provision::esp::Provisioner {
     let info = iotkit_provision::esp::DeviceInfo {
         firmware: config.firmware.product,
         version: config.firmware.version_text,
         chip: config.chip,
     };
-    let provisioner = iotkit_provision::esp::Provisioner { net, store, info };
-    spawn(spawner, iotkit_provision::esp::window_task(bt, provisioner));
-    spawn(spawner, iotkit_provision::esp::dhcp_task(provisioner));
-    spawn(spawner, iotkit_provision::esp::dns_task(provisioner));
-    spawn(spawner, iotkit_provision::esp::portal_task(provisioner));
-    spawn(spawner, iotkit_provision::esp::portal_job_task(provisioner));
+    iotkit_provision::esp::Provisioner { net, store, info }
+}
+
+/// The setup windows (Improv over Bluetooth, the access point), open at once while no network
+/// is stored.
+#[cfg_attr(not(feature = "improv-ble"), allow(unused_variables))]
+fn spawn_provisioning(spawner: Spawner, bt: Ble, p: iotkit_provision::esp::Provisioner, unprovisioned: bool) {
+    #[cfg(feature = "improv-ble")]
+    spawn(spawner, iotkit_provision::esp::window_task(bt, p));
+    #[cfg(not(feature = "improv-ble"))]
+    spawn(spawner, iotkit_provision::esp::window_task(p));
+    #[cfg(feature = "softap")]
+    {
+        spawn(spawner, iotkit_provision::esp::dhcp_task(p));
+        spawn(spawner, iotkit_provision::esp::dns_task(p));
+        spawn(spawner, iotkit_provision::esp::portal_task(p));
+        spawn(spawner, iotkit_provision::esp::portal_job_task(p));
+    }
     if unprovisioned {
         iotkit_provision::esp::open_window();
     }
-    provisioner
+}
+
+/// The USB serial port: console commands and Improv frames.
+#[cfg(any(feature = "console", feature = "improv-serial"))]
+fn spawn_console(
+    spawner: Spawner,
+    usb: USB_DEVICE<'static>,
+    store: &'static SharedStore,
+    p: Option<iotkit_provision::esp::Provisioner>,
+    config: &'static Config,
+) {
+    let (usb_rx, _usb_tx) = UsbSerialJtag::new(usb).into_async().split();
+    spawn(spawner, console::console_task(usb_rx, store, p, config));
 }
 
 /// Spawns a kit task; each runs once, so a failure is a bug.

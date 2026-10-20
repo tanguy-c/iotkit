@@ -10,12 +10,16 @@ mkdir -p "$out"
 
 # name;cargo args (-p app first)
 builds='devkit;-p devkit
-showcase;-p showcase'
+showcase;-p showcase
+lean;-p lean'
 
 # what;where (syms: `nm -C`, strings: string literals; inlined generics leave no symbol);pattern
 # (extended regex);absent from;present in
 rules='unused entity kinds;syms;<iotkit_model::appliances::(Cover|Valve|Lock|Fan|Climate) as iotkit_model::Entity>;devkit;showcase
-unused components;strings;rgb_light write failed;devkit;showcase'
+unused components;strings;rgb_light write failed;devkit;showcase
+no improv-ble: no Bluetooth stack;syms;r_ble_ll_|trouble_host;lean;devkit
+no console: no commands;strings;Type .help. and press Enter;lean;devkit
+no softap: no portal;syms;portal_task;lean;devkit'
 
 echo "$builds" | while IFS=';' read -r name args; do
     set -- $args

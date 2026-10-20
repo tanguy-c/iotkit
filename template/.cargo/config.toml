@@ -19,3 +19,7 @@ target = "{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp
 [env]
 # Log level, read at build time by esp-println.
 ESP_LOG = "info"
+# Names (1 to 10 of [a-z0-9-]; 1 to 16 characters): `<IOTKIT_HOSTNAME>-xxxx.local`, the setup
+# access point and the device in Home Assistant; MQTT topics `<IOTKIT_TOPIC_PREFIX>/<host>/...`.
+# IOTKIT_HOSTNAME     = "iotkit"
+# IOTKIT_TOPIC_PREFIX = "iotkit"

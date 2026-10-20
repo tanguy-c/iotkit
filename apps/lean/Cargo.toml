@@ -1,0 +1,26 @@
+[package]
+name         = "lean"
+description  = "A sensor with only what it uses: no Bluetooth, setup access point or console commands"
+publish      = false
+edition.workspace      = true
+rust-version.workspace = true
+version      = "0.1.0"
+license.workspace      = true
+
+[features]
+default = ["esp32c6"]
+esp32c6 = ["iotkit-app/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6"]
+
+[dependencies]
+# Setup over USB serial only (Improv: ESP Web Tools, improv-wifi.com), and OTA pushes.
+# A path, not `workspace = true`: older cargo cannot turn the default features off over it.
+iotkit-app = { path = "../../crates/iotkit-app", default-features = false, features = ["improv-serial", "ota-push"] }
+
+esp-hal          = { workspace = true }
+esp-rtos         = { workspace = true }
+embassy-executor = { workspace = true }
+embassy-time     = { workspace = true }
+log              = { workspace = true }
+
+[build-dependencies]
+iotkit-build = { workspace = true }

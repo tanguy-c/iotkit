@@ -11,7 +11,7 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
   - `components`: ready-made parts (async fns over embedded-hal traits), host-tested;
   - `app`: `iotkit_app::start` wires everything for an app; re-exports `components`.
 - `apps/`: `devkit` (reference firmware, the default member), `showcase` (one entity of each kind),
-  `sleepy` (deep sleep), `thread-light` (Matter over Thread, uses the crates directly).
+  `sleepy` (deep sleep), `lean` (opt-out features), `thread-light` (Matter over Thread, uses the crates directly).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
   its `new` wizard in `xtask/src/new/`; `test-server/`: Home Assistant and Mosquitto in compose.
 

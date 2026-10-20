@@ -50,10 +50,24 @@ impl WifiCredentials {
     }
 }
 
-/// `iotkit-` and the last two bytes of the MAC address, e.g. `iotkit-aefc`.
+/// The host name's prefix: `IOTKIT_HOSTNAME` at build time, `iotkit` by default (1 to 10 of
+/// `[a-z0-9-]`).
+pub const HOSTNAME_PREFIX: &str = env!("IOTKIT_HOSTNAME");
+const _: () = {
+    let b = HOSTNAME_PREFIX.as_bytes();
+    assert!(!b.is_empty() && b.len() <= 10, "IOTKIT_HOSTNAME: 1 to 10 characters");
+    let mut i = 0;
+    while i < b.len() {
+        assert!(matches!(b[i], b'a'..=b'z' | b'0'..=b'9' | b'-'), "IOTKIT_HOSTNAME: only [a-z0-9-]");
+        i += 1;
+    }
+};
+
+/// [`HOSTNAME_PREFIX`], `-` and the last two bytes of the MAC address, e.g. `iotkit-aefc`: the
+/// mDNS name, the setup access point and the device in Home Assistant.
 pub fn hostname(mac: [u8; 6]) -> String<16> {
     let mut name = String::new();
-    let _ = write!(name, "iotkit-{:02x}{:02x}", mac[4], mac[5]);
+    let _ = write!(name, concat!(env!("IOTKIT_HOSTNAME"), "-{:02x}{:02x}"), mac[4], mac[5]);
     name
 }
 
