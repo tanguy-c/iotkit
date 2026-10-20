@@ -37,7 +37,7 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
   [crates/iotkit-app/src/lib.rs](crates/iotkit-app/src/lib.rs).
 - The C3 has no atomics: `portable-atomic` is an opt-in feature its `esp32c3` features enable; the
   C6 keeps core atomics.
-- No heap growth: each app's `heap_allocator!` (64 + 96 KB) stays as is; use
+- No heap growth: `iotkit_app::init!`'s heap (64 + 96 KB) stays as is; use
   static or stack buffers (`heapless`, `static_cell`).
 - `template/check-sync.sh` fails when the template's copies drift from the root files.
 - `xtask/answers/*.toml` are CI inputs: a new part kind or board option belongs in them.

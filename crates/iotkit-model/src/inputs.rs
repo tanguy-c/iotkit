@@ -55,8 +55,8 @@ impl Number {
             commands: Signal::new(),
         }
     }
-    /// Unit of the value (`°C`, `%`, ...).
-    pub const fn unit(mut self, unit: &'static str) -> Self {
+    /// Unit of the value.
+    pub const fn unit(mut self, unit: crate::Unit) -> Self {
         self.meta.unit = Some(unit);
         self
     }

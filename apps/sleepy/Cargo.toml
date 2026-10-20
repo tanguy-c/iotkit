@@ -9,15 +9,13 @@ license.workspace      = true
 
 [features]
 default = ["esp32c6"]
-esp32c6 = ["iotkit-app/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-alloc/esp32c6", "esp-bootloader-esp-idf/esp32c6"]
+esp32c6 = ["iotkit-app/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6"]
 
 [dependencies]
 iotkit-app = { workspace = true, features = ["deep-sleep", "ha-update"] }
 
-esp-alloc              = { workspace = true }
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }
-esp-bootloader-esp-idf = { workspace = true }
 embassy-executor       = { workspace = true }
 embassy-futures        = "0.1"
 embassy-time           = { workspace = true }

@@ -9,13 +9,13 @@ use embassy_sync::{
     signal::Signal,
 };
 
-use crate::{Binding, Command, Dirty, Entity, Kind, Meta, State};
+use crate::{Binding, Command, DeviceClass, Dirty, Entity, Kind, Meta, State, Unit};
 
 macro_rules! builders {
     ($ty:ty) => {
         impl $ty {
-            /// Home Assistant device class (`temperature`, `motion`, `restart`, ...).
-            pub const fn device_class(mut self, class: &'static str) -> Self {
+            /// What it measures or is ([`DeviceClass`](crate::DeviceClass)).
+            pub const fn device_class(mut self, class: $crate::DeviceClass) -> Self {
                 self.meta.device_class = Some(class);
                 self
             }
@@ -55,8 +55,48 @@ impl Sensor {
     pub const fn new(id: &'static str, name: &'static str) -> Self {
         Self { meta: Meta::new(Kind::Sensor, id, name), value: AtomicU32::new(f32::NAN.to_bits()), dirty: Dirty::new() }
     }
-    /// Unit of the value (`°C`, `%`, ...).
-    pub const fn unit(mut self, unit: &'static str) -> Self {
+    /// A measurement of `class` in `unit`, shown with `decimals`: what the shortcuts below build.
+    pub const fn measuring(self, class: DeviceClass, unit: Unit, decimals: u8) -> Self {
+        self.device_class(class).unit(unit).measurement().precision(decimals)
+    }
+    /// Temperature in °C, 1 decimal.
+    pub const fn temperature(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::TEMPERATURE, Unit::CELSIUS, 1)
+    }
+    /// Relative humidity in %, 1 decimal.
+    pub const fn humidity(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::HUMIDITY, Unit::PERCENT, 1)
+    }
+    /// Air pressure in hPa, 1 decimal.
+    pub const fn pressure(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::PRESSURE, Unit::HECTOPASCAL, 1)
+    }
+    /// Light level in lux, no decimals.
+    pub const fn illuminance(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::ILLUMINANCE, Unit::LUX, 0)
+    }
+    /// CO2 in ppm, no decimals.
+    pub const fn carbon_dioxide(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::CARBON_DIOXIDE, Unit::PPM, 0)
+    }
+    /// PM2.5 in µg/m³, no decimals.
+    pub const fn pm25(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::PM25, Unit::MICROGRAMS_PER_CUBIC_METER, 0)
+    }
+    /// Battery charge in %, no decimals.
+    pub const fn battery(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::BATTERY, Unit::PERCENT, 0)
+    }
+    /// Voltage in V, 2 decimals.
+    pub const fn voltage(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::VOLTAGE, Unit::VOLT, 2)
+    }
+    /// Power in W, 1 decimal.
+    pub const fn power(id: &'static str, name: &'static str) -> Self {
+        Self::new(id, name).measuring(DeviceClass::POWER, Unit::WATT, 1)
+    }
+    /// Unit of the value.
+    pub const fn unit(mut self, unit: Unit) -> Self {
         self.meta.unit = Some(unit);
         self
     }

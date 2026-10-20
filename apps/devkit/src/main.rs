@@ -13,19 +13,17 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either4, select4};
 use embassy_time::{Duration, Instant, Ticker};
-use esp_hal::{Async, clock::CpuClock, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
+use esp_hal::{Async, rmt::Rmt, time::Rate};
 // The chip temperature sensor: on the ESP32-C6 and C3 only.
 #[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
 use esp_hal::tsens::{self, TemperatureSensor};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
 use iotkit_app::{
-    APP_CHECKS, App, Board, Button, Check, Config, ConsoleExtension, Entity, HEALTH, Light, LightState, PublicKey,
-    SaveLater, Sensor, Setting, Switch, TaskWatch,
+    APP_CHECKS, App, Board, Button, Check, Config, ConsoleExtension, DeviceClass, Entity, HEALTH, Light, LightState,
+    PublicKey, SaveLater, Sensor, Setting, Switch, TaskWatch, Unit,
 };
 use log::{info, warn};
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
-
-esp_bootloader_esp_idf::esp_app_desc!();
 
 /// Updates must be signed with the secret half (`cargo xtask keygen`).
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
@@ -68,41 +66,40 @@ static LED: Light = Light::new("led", "LED");
 static CYCLE: Switch = Switch::new("color_cycle", "Color cycle").icon("mdi:palette");
 #[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
 static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
-    .unit("°C")
-    .device_class("temperature")
+    .unit(Unit::CELSIUS)
+    .device_class(DeviceClass::TEMPERATURE)
     .measurement()
     .precision(1)
     .diagnostic();
-static UPTIME: Sensor = Sensor::new("uptime", "Uptime").unit("s").device_class("duration").diagnostic();
-static SIGNAL: Sensor =
-    Sensor::new("wifi_signal", "Wi-Fi signal").unit("dBm").device_class("signal_strength").measurement().diagnostic();
-static RESTART: Button = Button::new("restart", "Restart").device_class("restart").diagnostic();
+static UPTIME: Sensor =
+    Sensor::new("uptime", "Uptime").unit(Unit::SECOND).device_class(DeviceClass::DURATION).diagnostic();
+static SIGNAL: Sensor = Sensor::new("wifi_signal", "Wi-Fi signal")
+    .unit(Unit::DBM)
+    .device_class(DeviceClass::SIGNAL_STRENGTH)
+    .measurement()
+    .diagnostic();
+static RESTART: Button = Button::new("restart", "Restart").device_class(DeviceClass::RESTART).diagnostic();
 #[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
-static ENTITIES: [&dyn Entity; 6] = [&LED, &CYCLE, &TEMPERATURE, &UPTIME, &SIGNAL, &RESTART];
+static ENTITIES: &[&dyn Entity] = &[&LED, &CYCLE, &TEMPERATURE, &UPTIME, &SIGNAL, &RESTART];
 #[cfg(not(any(feature = "esp32c6", feature = "esp32c3")))]
-static ENTITIES: [&dyn Entity; 5] = [&LED, &CYCLE, &UPTIME, &SIGNAL, &RESTART];
+static ENTITIES: &[&dyn Entity] = &[&LED, &CYCLE, &UPTIME, &SIGNAL, &RESTART];
 
 /// The main loop ran for a while.
 const RUNNING: Check = Check(APP_CHECKS);
 
 static MAIN_WATCH: TaskWatch = TaskWatch::new("main", 15_000);
 static LED_WATCH: TaskWatch = TaskWatch::new("led", 3_000);
-static WATCHES: [&TaskWatch; 2] = [&MAIN_WATCH, &LED_WATCH];
 
-static CONFIG: Config = Config {
-    firmware: iotkit_app::firmware!(&OTA_KEY),
-    manufacturer: "iotkit",
-    model: "ESP32-C6-DevKitC-1",
-    chip: "ESP32-C6",
-    product_name: "iotkit devkit",
-    entities: &ENTITIES,
-    watches: &WATCHES,
-    checks: &[RUNNING],
-    console: Some(ConsoleExtension {
+static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+    .model("ESP32-C6-DevKitC-1")
+    .product_name("iotkit devkit")
+    .entities(ENTITIES)
+    .watches(&[&MAIN_WATCH, &LED_WATCH])
+    .checks(&[RUNNING])
+    .console(ConsoleExtension {
         help: "  starve         stop feeding the LED task's watch (watchdog record within ~4 s)",
         run: console_command,
-    }),
-};
+    });
 
 /// The LED's state, kept across restarts.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -134,12 +131,7 @@ fn console_command(cmd: &str) -> bool {
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    // The Wi-Fi and Bluetooth drivers allocate.
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
-    esp_alloc::heap_allocator!(size: 96 * 1024);
-    let timg0 = TimerGroup::new(p.TIMG0);
-    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
+    iotkit_app::init!(p);
 
     let board = Board {
         flash: p.FLASH,

@@ -1,7 +1,9 @@
 //! Value and unit conversions between the model and Matter's attributes (host-tested).
 //! Ported from esp-ha's `esp_ha_core::matter`.
 
-use iotkit_model::{CoverState, FanCommand, FanDirection, FanState, HvacAction, HvacMode, LockCommand, LockState};
+use iotkit_model::{
+    CoverState, DeviceClass, FanCommand, FanDirection, FanState, HvacAction, HvacMode, LockCommand, LockState, Unit,
+};
 
 use crate::{MatterKind, Pollutant};
 
@@ -25,20 +27,20 @@ fn log10(v: f32) -> f32 {
 
 /// A reading in `unit` in the unit Matter is based on for `kind` (°C, %, lx, hPa, ppm or
 /// µg/m³); `None` if the unit is not one it takes.
-pub fn to_matter_unit(kind: MatterKind, unit: &str, value: f32) -> Option<f32> {
+pub fn to_matter_unit(kind: MatterKind, unit: Unit, value: f32) -> Option<f32> {
     Some(match (kind, unit) {
-        (MatterKind::TemperatureSensor, "°C") => value,
-        (MatterKind::TemperatureSensor, "°F") => (value - 32.0) * 5.0 / 9.0,
-        (MatterKind::TemperatureSensor, "K") => value - 273.15,
-        (MatterKind::HumiditySensor | MatterKind::Battery, "%") => value,
-        (MatterKind::LightSensor, "lx") => value,
-        (MatterKind::PressureSensor, "hPa" | "mbar") => value,
-        (MatterKind::PressureSensor, "Pa") => value / 100.0,
-        (MatterKind::PressureSensor, "kPa") => value * 10.0,
-        (MatterKind::PressureSensor, "bar") => value * 1000.0,
-        (MatterKind::PressureSensor, "psi") => value * 68.947_57,
-        (MatterKind::PressureSensor, "inHg") => value * 33.863_89,
-        (MatterKind::PressureSensor, "mmHg") => value * 1.333_224,
+        (MatterKind::TemperatureSensor, Unit::CELSIUS) => value,
+        (MatterKind::TemperatureSensor, Unit::FAHRENHEIT) => (value - 32.0) * 5.0 / 9.0,
+        (MatterKind::TemperatureSensor, Unit::KELVIN) => value - 273.15,
+        (MatterKind::HumiditySensor | MatterKind::Battery, Unit::PERCENT) => value,
+        (MatterKind::LightSensor, Unit::LUX) => value,
+        (MatterKind::PressureSensor, Unit::HECTOPASCAL | Unit::MILLIBAR) => value,
+        (MatterKind::PressureSensor, Unit::PASCAL) => value / 100.0,
+        (MatterKind::PressureSensor, Unit::KILOPASCAL) => value * 10.0,
+        (MatterKind::PressureSensor, Unit::BAR) => value * 1000.0,
+        (MatterKind::PressureSensor, Unit::PSI) => value * 68.947_57,
+        (MatterKind::PressureSensor, Unit::INHG) => value * 33.863_89,
+        (MatterKind::PressureSensor, Unit::MMHG) => value * 1.333_224,
         (MatterKind::AirQualitySensor(p), unit) => return concentration(p, unit, value).map(|(v, _)| v),
         _ => return None,
     })
@@ -46,7 +48,7 @@ pub fn to_matter_unit(kind: MatterKind, unit: &str, value: f32) -> Option<f32> {
 
 /// A reading as Matter's `MeasuredValue` (or `BatPercentRemaining`); `None` when unknown or in
 /// a unit Matter does not take.
-pub fn measured_value(kind: MatterKind, unit: &str, value: f32) -> Option<i32> {
+pub fn measured_value(kind: MatterKind, unit: Unit, value: f32) -> Option<i32> {
     let value = to_matter_unit(kind, unit, value)?;
     if !value.is_finite() {
         return None;
@@ -68,16 +70,16 @@ pub fn measured_value(kind: MatterKind, unit: &str, value: f32) -> Option<i32> {
 }
 
 /// The Air Quality Sensor's pollutant of a sensor device class.
-pub fn pollutant(device_class: &str) -> Option<Pollutant> {
+pub fn pollutant(device_class: DeviceClass) -> Option<Pollutant> {
     Some(match device_class {
-        "carbon_dioxide" => Pollutant::Co2,
-        "carbon_monoxide" => Pollutant::Co,
-        "nitrogen_dioxide" => Pollutant::No2,
-        "ozone" => Pollutant::O3,
-        "pm1" => Pollutant::Pm1,
-        "pm25" => Pollutant::Pm25,
-        "pm10" => Pollutant::Pm10,
-        "volatile_organic_compounds" | "volatile_organic_compounds_parts" => Pollutant::Tvoc,
+        DeviceClass::CARBON_DIOXIDE => Pollutant::Co2,
+        DeviceClass::CARBON_MONOXIDE => Pollutant::Co,
+        DeviceClass::NITROGEN_DIOXIDE => Pollutant::No2,
+        DeviceClass::OZONE => Pollutant::O3,
+        DeviceClass::PM1 => Pollutant::Pm1,
+        DeviceClass::PM25 => Pollutant::Pm25,
+        DeviceClass::PM10 => Pollutant::Pm10,
+        DeviceClass::VOLATILE_ORGANIC_COMPOUNDS | DeviceClass::VOLATILE_ORGANIC_COMPOUNDS_PARTS => Pollutant::Tvoc,
         _ => return None,
     })
 }
@@ -106,14 +108,14 @@ fn molar_mass(p: Pollutant) -> Option<f32> {
 
 /// A reading as sent over Matter: gases in ppm (as Home Assistant expects), particles in
 /// µg/m³; a VOC mixture in µg/m³ stays so. `None` for a unit that does not convert.
-pub fn concentration(p: Pollutant, unit: &str, value: f32) -> Option<(f32, ConcentrationUnit)> {
+pub fn concentration(p: Pollutant, unit: Unit, value: f32) -> Option<(f32, ConcentrationUnit)> {
     use ConcentrationUnit::*;
     Some(match (p, unit) {
-        (Pollutant::Pm1 | Pollutant::Pm25 | Pollutant::Pm10, "µg/m³") => (value, Ugm3),
+        (Pollutant::Pm1 | Pollutant::Pm25 | Pollutant::Pm10, Unit::MICROGRAMS_PER_CUBIC_METER) => (value, Ugm3),
         (Pollutant::Pm1 | Pollutant::Pm25 | Pollutant::Pm10, _) => return None,
-        (_, "ppm") => (value, Ppm),
-        (_, "ppb") => (value / 1000.0, Ppm),
-        (_, "µg/m³") => match molar_mass(p) {
+        (_, Unit::PPM) => (value, Ppm),
+        (_, Unit::PPB) => (value / 1000.0, Ppm),
+        (_, Unit::MICROGRAMS_PER_CUBIC_METER) => match molar_mass(p) {
             Some(mass) => (value * MOLAR_VOLUME / mass / 1000.0, Ppm),
             None => (value, Ugm3),
         },
@@ -290,12 +292,12 @@ pub fn cover_operational_status(state: Option<CoverState>) -> u8 {
 }
 
 /// Window Covering `Type` and `EndProductType` of a device class.
-pub fn cover_types(class: Option<&str>) -> (u8, u8) {
+pub fn cover_types(class: Option<DeviceClass>) -> (u8, u8) {
     match class {
-        Some("awning") => (5, 19),
-        Some("curtain") => (4, 16),
-        Some("blind") => (8, 10),
-        Some("shade") => (0, 0),
+        Some(DeviceClass::AWNING) => (5, 19),
+        Some(DeviceClass::CURTAIN) => (4, 16),
+        Some(DeviceClass::BLIND) => (8, 10),
+        Some(DeviceClass::SHADE) => (0, 0),
         _ => (6, 17),
     }
 }
@@ -549,27 +551,30 @@ mod tests {
 
     #[test]
     fn measurements() {
-        assert_eq!(measured_value(MatterKind::TemperatureSensor, "°C", 21.46), Some(2146));
-        assert_eq!(measured_value(MatterKind::HumiditySensor, "%", 45.5), Some(4550));
-        assert_eq!(measured_value(MatterKind::PressureSensor, "hPa", 1013.2), Some(1013));
-        assert_eq!(measured_value(MatterKind::PressureSensor, "kPa", 101.3), Some(1013));
-        assert_eq!(measured_value(MatterKind::LightSensor, "lx", 0.5), Some(0));
-        assert_eq!(measured_value(MatterKind::LightSensor, "lx", 1.0), Some(1));
+        assert_eq!(measured_value(MatterKind::TemperatureSensor, Unit::CELSIUS, 21.46), Some(2146));
+        assert_eq!(measured_value(MatterKind::HumiditySensor, Unit::PERCENT, 45.5), Some(4550));
+        assert_eq!(measured_value(MatterKind::PressureSensor, Unit::HECTOPASCAL, 1013.2), Some(1013));
+        assert_eq!(measured_value(MatterKind::PressureSensor, Unit::KILOPASCAL, 101.3), Some(1013));
+        assert_eq!(measured_value(MatterKind::LightSensor, Unit::LUX, 0.5), Some(0));
+        assert_eq!(measured_value(MatterKind::LightSensor, Unit::LUX, 1.0), Some(1));
         // 10000 · log10(1000) + 1
-        let lux = measured_value(MatterKind::LightSensor, "lx", 1000.0).unwrap();
+        let lux = measured_value(MatterKind::LightSensor, Unit::LUX, 1000.0).unwrap();
         assert!((30000..=30002).contains(&lux), "{lux}");
-        assert_eq!(measured_value(MatterKind::Battery, "%", 87.0), Some(174));
-        assert_eq!(measured_value(MatterKind::HumiditySensor, "°C", 1.0), None, "wrong unit");
-        assert_eq!(measured_value(MatterKind::HumiditySensor, "%", f32::NAN), None);
+        assert_eq!(measured_value(MatterKind::Battery, Unit::PERCENT, 87.0), Some(174));
+        assert_eq!(measured_value(MatterKind::HumiditySensor, Unit::CELSIUS, 1.0), None, "wrong unit");
+        assert_eq!(measured_value(MatterKind::HumiditySensor, Unit::PERCENT, f32::NAN), None);
     }
 
     #[test]
     fn air() {
-        assert_eq!(pollutant("carbon_dioxide"), Some(Pollutant::Co2));
-        assert_eq!(pollutant("temperature"), None);
-        assert_eq!(concentration(Pollutant::Co2, "ppm", 650.0), Some((650.0, ConcentrationUnit::Ppm)));
-        assert_eq!(concentration(Pollutant::Pm25, "µg/m³", 12.0), Some((12.0, ConcentrationUnit::Ugm3)));
-        assert_eq!(concentration(Pollutant::Pm25, "ppm", 12.0), None);
+        assert_eq!(pollutant(DeviceClass::CARBON_DIOXIDE), Some(Pollutant::Co2));
+        assert_eq!(pollutant(DeviceClass::TEMPERATURE), None);
+        assert_eq!(concentration(Pollutant::Co2, Unit::PPM, 650.0), Some((650.0, ConcentrationUnit::Ppm)));
+        assert_eq!(
+            concentration(Pollutant::Pm25, Unit::MICROGRAMS_PER_CUBIC_METER, 12.0),
+            Some((12.0, ConcentrationUnit::Ugm3))
+        );
+        assert_eq!(concentration(Pollutant::Pm25, Unit::PPM, 12.0), None);
         assert_eq!(air_quality(Pollutant::Co2, 650.0), 1);
         assert_eq!(air_quality(Pollutant::Co2, 1200.0), 3);
         assert_eq!(air_quality(Pollutant::Co2, 9000.0), 6);

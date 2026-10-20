@@ -2,11 +2,12 @@ use embassy_futures::block_on;
 
 use super::*;
 
-static TEMP: Sensor = Sensor::new("temperature", "Temperature").unit("°C").device_class("temperature").measurement();
+static TEMP: Sensor =
+    Sensor::new("temperature", "Temperature").unit(Unit::CELSIUS).device_class(DeviceClass::TEMPERATURE).measurement();
 static RELAY: Switch = Switch::new("relay", "Relay");
 static LAMP: Light = Light::new("led", "LED");
-static RESTART: Button = Button::new("restart", "Restart").device_class("restart").diagnostic();
-static DOOR: BinarySensor = BinarySensor::new("door", "Door").device_class("door");
+static RESTART: Button = Button::new("restart", "Restart").device_class(DeviceClass::RESTART).diagnostic();
+static DOOR: BinarySensor = BinarySensor::new("door", "Door").device_class(DeviceClass::DOOR);
 static ENTITIES: [&dyn Entity; 5] = [&TEMP, &RELAY, &LAMP, &RESTART, &DOOR];
 static DEVICE: Device =
     Device { name: "Test", manufacturer: "iotkit", model: "devkit", sw_version: "1.0.0", entities: &ENTITIES };
@@ -14,7 +15,10 @@ static DEVICE: Device =
 #[test]
 fn metadata() {
     let m = TEMP.meta();
-    assert_eq!((m.kind, m.unit, m.device_class, m.measurement), (Kind::Sensor, Some("°C"), Some("temperature"), true));
+    assert_eq!(
+        (m.kind, m.unit, m.device_class, m.measurement),
+        (Kind::Sensor, Some(Unit::CELSIUS), Some(DeviceClass::TEMPERATURE), true)
+    );
     assert_eq!(RESTART.meta().category, Category::Diagnostic);
     assert_eq!(DEVICE.entity("relay").map(|e| e.meta().kind), Some(Kind::Switch));
     assert!(DEVICE.entity("nope").is_none());
@@ -109,7 +113,7 @@ fn buttons() {
 
 #[test]
 fn numbers_snap_to_range_and_step() {
-    static N: Number = Number::new("n", "N", 10.0, 30.0, 0.5).unit("°C");
+    static N: Number = Number::new("n", "N", 10.0, 30.0, 0.5).unit(Unit::CELSIUS);
     assert_eq!(N.spec(), Spec::Number { min: 10.0, max: 30.0, step: 0.5, slider: false });
     assert!(N.command(Command::Number(21.3)));
     assert_eq!(block_on(N.wait_command()), 21.5);
@@ -164,7 +168,7 @@ fn events_are_sent_once() {
 
 #[test]
 fn covers_valves_and_locks() {
-    static C: Cover = Cover::new("blind", "Blind").device_class("blind");
+    static C: Cover = Cover::new("blind", "Blind").device_class(DeviceClass::BLIND);
     static P: Cover = Cover::new("shade", "Shade").position();
     static L: Lock = Lock::new("door", "Door");
     assert!(!C.command(Command::Cover(CoverCommand::Position(50))), "no position support");
@@ -217,4 +221,17 @@ fn updates() {
     assert!(U.command(Command::Install));
     block_on(U.wait_install());
     assert!(!U.command(Command::Press));
+}
+
+#[test]
+fn shortcuts_and_classes() {
+    static T: Sensor = Sensor::temperature("t", "T");
+    let m = T.meta();
+    assert_eq!(
+        (m.device_class, m.unit, m.measurement, m.precision),
+        (Some(DeviceClass::TEMPERATURE), Some(Unit::CELSIUS), true, Some(1))
+    );
+    assert_eq!(DeviceClass::PM25.as_str(), "pm25");
+    assert_eq!(DeviceClass::custom("pm25"), DeviceClass::PM25);
+    assert!(matches!(Unit::custom("°C"), Unit::CELSIUS));
 }

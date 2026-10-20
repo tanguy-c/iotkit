@@ -11,20 +11,18 @@ license.workspace      = true
 [features]
 ## The chip: one of them (the ESP32-C6 by default; `--no-default-features --features esp32c3`).
 default = ["esp32c6"]
-esp32c6 = ["esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-alloc/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-hal-smartled/esp32c6", "iotkit-app/esp32c6"]
-esp32c3 = ["esp-hal/esp32c3", "esp-rtos/esp32c3", "esp-alloc/esp32c3", "esp-bootloader-esp-idf/esp32c3", "esp-hal-smartled/esp32c3", "iotkit-app/esp32c3"]
-esp32c5 = ["esp-hal/esp32c5", "esp-rtos/esp32c5", "esp-alloc/esp32c5", "esp-bootloader-esp-idf/esp32c5", "esp-hal-smartled/esp32c5", "iotkit-app/esp32c5"]
-esp32s3 = ["esp-hal/esp32s3", "esp-rtos/esp32s3", "esp-alloc/esp32s3", "esp-bootloader-esp-idf/esp32s3", "esp-hal-smartled/esp32s3", "iotkit-app/esp32s3"]
+esp32c6 = ["esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-hal-smartled/esp32c6", "iotkit-app/esp32c6"]
+esp32c3 = ["esp-hal/esp32c3", "esp-rtos/esp32c3", "esp-hal-smartled/esp32c3", "iotkit-app/esp32c3"]
+esp32c5 = ["esp-hal/esp32c5", "esp-rtos/esp32c5", "esp-hal-smartled/esp32c5", "iotkit-app/esp32c5"]
+esp32s3 = ["esp-hal/esp32s3", "esp-rtos/esp32s3", "esp-hal-smartled/esp32s3", "iotkit-app/esp32s3"]
 ## Matter over Wi-Fi, next to MQTT.
 matter-wifi = ["iotkit-app/matter-wifi"]
 
 [dependencies]
 iotkit-app = { workspace = true }
 
-esp-alloc              = { workspace = true }
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }
-esp-bootloader-esp-idf = { workspace = true }
 esp-hal-smartled       = { workspace = true }
 embassy-executor       = { workspace = true }
 embassy-futures        = "0.1"

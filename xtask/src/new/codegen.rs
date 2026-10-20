@@ -13,7 +13,7 @@ use super::{
 pub fn main_rs(p: &Project) -> String {
     let battery = p.battery();
     let led = p.status_led();
-    let mut iotkit: BTreeSet<&str> = ["Board", "Config", "Entity", "PublicKey"].into();
+    let mut iotkit: BTreeSet<&str> = ["Board", "Config", "PublicKey"].into();
     let mut time: BTreeSet<&str> = BTreeSet::new();
     let mut statics = String::new();
     let mut ids = Vec::new();
@@ -26,10 +26,15 @@ pub fn main_rs(p: &Project) -> String {
         let k = part.kind;
         iotkit.insert(k.ty);
         let builder = k.builder;
+        for ty in ["DeviceClass", "Unit"] {
+            if builder.contains(&format!("{ty}::")) {
+                iotkit.insert(ty);
+            }
+        }
         let _ = writeln!(
             statics,
-            "static {}: {} = {}::new({:?}, {:?}{}){builder};",
-            part.konst, k.ty, k.ty, part.id, part.name, k.new_args
+            "static {}: {} = {}::{}({:?}, {:?}{}){builder};",
+            part.konst, k.ty, k.ty, k.ctor, part.id, part.name, k.new_args
         );
         ids.push(part.konst.clone());
         let on_pin = match part.pin {
@@ -188,10 +193,7 @@ async fn {task}({param}) {{
         time.insert("Duration");
         if p.answers.battery_pin.is_some() {
             iotkit.insert("Sensor");
-            let _ = writeln!(
-                statics,
-                "static BATTERY: Sensor = Sensor::new(\"battery\", \"Battery\").unit(\"%\").device_class(\"battery\").measurement();"
-            );
+            let _ = writeln!(statics, "static BATTERY: Sensor = Sensor::battery(\"battery\", \"Battery\");");
             ids.push("BATTERY".into());
         }
     } else {
@@ -228,14 +230,16 @@ async fn {task}({param}) {{
     if !time.is_empty() {
         let _ = writeln!(s, "use embassy_time::{};", group(&time));
     }
-    let mut hal: BTreeSet<&str> = ["clock::CpuClock", "timer::timg::TimerGroup"].into();
+    let mut hal: BTreeSet<&str> = BTreeSet::new();
     if any_pin {
         hal.insert("gpio::AnyPin");
     }
     if led {
         hal.extend(["Async", "rmt::Rmt", "time::Rate"]);
     }
-    let _ = writeln!(s, "use esp_hal::{};", group(&hal));
+    if !hal.is_empty() {
+        let _ = writeln!(s, "use esp_hal::{};", group(&hal));
+    }
     if led {
         s.push_str("use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};\n");
     }
@@ -248,8 +252,6 @@ async fn {task}({param}) {{
     }
     s.push_str(
         "
-esp_bootloader_esp_idf::esp_app_desc!();
-
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!(\"../keys/ota.pub\"));
 
@@ -260,24 +262,16 @@ static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!(\"../keys/ota.pu
     s.push_str(&statics);
     let _ = writeln!(
         s,
-        "static ENTITIES: [&dyn Entity; {}] = [{}];\n",
-        ids.len(),
+        "
+static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+    .manufacturer({:?})
+    .model({:?})
+    .product_name({:?})
+    .entities(&[{}]);",
+        p.answers.maker,
+        p.board.model,
+        p.answers.name,
         ids.iter().map(|i| format!("&{i}")).collect::<Vec<_>>().join(", ")
-    );
-    let _ = writeln!(
-        s,
-        "static CONFIG: Config = Config {{
-    firmware: iotkit_app::firmware!(&OTA_KEY),
-    manufacturer: {:?},
-    model: {:?},
-    chip: {:?},
-    product_name: {:?},
-    entities: &ENTITIES,
-    watches: &[],
-    checks: &[],
-    console: None,
-}};",
-        p.answers.maker, p.board.model, p.board.chip_label, p.answers.name
     );
     if battery {
         let _ = writeln!(
@@ -298,26 +292,20 @@ type Led = RmtSmartLeds<'static, {{ buffer_size::<RGB8>(1) }}, Async, RGB8, colo
         );
     }
 
-    // main.
-    s.push_str(
+    // main. A part sharing the ADC with the battery reading needs `mut p` (to reborrow ADC1).
+    let shared_adc = battery && p.answers.battery_pin.is_some() && p.parts.iter().any(|part| part.kind.analog);
+    let _ = write!(
+        s,
         "
 #[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    // The Wi-Fi and Bluetooth drivers allocate.
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
-    esp_alloc::heap_allocator!(size: 96 * 1024);
-    let timg0 = TimerGroup::new(p.TIMG0);
-    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
+async fn main(spawner: Spawner) -> ! {{
+    iotkit_app::init!({}p);
 ",
+        if shared_adc { "mut " } else { "" }
     );
     if battery && let Some(pin) = p.answers.battery_pin {
         let curve = if p.answers.battery_curve == super::Curve::TwoAa { "ALKALINE_2AA" } else { "LIPO" };
-        let shared = if p.parts.iter().any(|part| part.kind.analog) {
-            "\n    // A part needs the ADC too: `let mut p` above, and `p.ADC1.reborrow()` here."
-        } else {
-            ""
-        };
+        let shared = if shared_adc { "\n    // A part needs the ADC too: `p.ADC1.reborrow()` here." } else { "" };
         let _ = write!(
             s,
             "

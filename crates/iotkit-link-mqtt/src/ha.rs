@@ -202,11 +202,11 @@ fn discovery_payload_with<const N: usize>(
         }
         if let Some(class) = m.device_class {
             s.write_str(",\"device_class\":")?;
-            json_str(&mut s, class)?;
+            json_str(&mut s, class.as_str())?;
         }
         if let Some(unit) = m.unit {
             s.write_str(",\"unit_of_measurement\":")?;
-            json_str(&mut s, unit)?;
+            json_str(&mut s, unit.as_str())?;
         }
         if m.measurement {
             s.write_str(",\"state_class\":\"measurement\"")?;
@@ -560,19 +560,19 @@ pub fn parse_command(entity: &dyn Entity, feature: &str, payload: &[u8]) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use iotkit_model::{BinarySensor, Button, Light, LightState, Sensor, Switch};
+    use iotkit_model::{BinarySensor, Button, DeviceClass, Light, LightState, Sensor, Switch, Unit};
 
     use super::*;
 
     static TEMP: Sensor = Sensor::new("temperature", "Chip \"temp\"")
-        .unit("°C")
-        .device_class("temperature")
+        .unit(Unit::CELSIUS)
+        .device_class(DeviceClass::TEMPERATURE)
         .measurement()
         .precision(1)
         .diagnostic();
     static RELAY: Switch = Switch::new("relay", "Relay");
     static LED: Light = Light::new("led", "LED");
-    static RESTART: Button = Button::new("restart", "Restart").device_class("restart").diagnostic();
+    static RESTART: Button = Button::new("restart", "Restart").device_class(DeviceClass::RESTART).diagnostic();
     static DOOR: BinarySensor = BinarySensor::new("door", "Door");
     static ENTITIES: [&dyn Entity; 5] = [&TEMP, &RELAY, &LED, &RESTART, &DOOR];
     static DEVICE: Device =
@@ -672,12 +672,12 @@ mod tests {
 
         use super::*;
 
-        static NUMBER: Number = Number::new("setpoint", "Setpoint", 5.0, 30.0, 0.5).unit("°C").slider();
+        static NUMBER: Number = Number::new("setpoint", "Setpoint", 5.0, 30.0, 0.5).unit(Unit::CELSIUS).slider();
         static SELECT: Select = Select::new("mode", "Mode", &["eco", "comfort"]);
         static TEXT: TextSensor = TextSensor::new("status", "Status");
         static EVENT: Event = Event::new("button", "Button", &["press", "long_press"]);
-        static COVER: Cover = Cover::new("blind", "Blind").device_class("blind").position();
-        static VALVE: Valve = Valve::new("water", "Water").device_class("water").position();
+        static COVER: Cover = Cover::new("blind", "Blind").device_class(DeviceClass::BLIND).position();
+        static VALVE: Valve = Valve::new("water", "Water").device_class(DeviceClass::WATER).position();
         static LOCK: Lock = Lock::new("door", "Door").open();
         static FAN: Fan = Fan::new("fan_with_a_long_name", "Fan")
             .speed()

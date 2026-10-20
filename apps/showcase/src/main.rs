@@ -11,39 +11,36 @@
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Ticker, Timer};
-use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
 use iotkit_app::{
-    BinarySensor, Board, Climate, ClimateState, Config, Cover, CoverCommand, CoverState, Entity, Event, Fan, FanState,
-    HvacAction, HvacMode, Lock, LockCommand, LockState, Number, PublicKey, Select, Sensor, TextSensor, Valve,
+    BinarySensor, Board, Climate, ClimateState, Config, Cover, CoverCommand, CoverState, DeviceClass, Entity, Event,
+    Fan, FanState, HvacAction, HvacMode, Lock, LockCommand, LockState, Number, PublicKey, Select, Sensor, TextSensor,
+    Unit, Valve,
 };
 use log::info;
 
-esp_bootloader_esp_idf::esp_app_desc!();
-
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
 
-static BLIND: Cover = Cover::new("blind", "Blind").device_class("blind").position();
-static VALVE: Valve = Valve::new("water_valve", "Water valve").device_class("water").position();
+static BLIND: Cover = Cover::new("blind", "Blind").device_class(DeviceClass::BLIND).position();
+static VALVE: Valve = Valve::new("water_valve", "Water valve").device_class(DeviceClass::WATER).position();
 static DOOR: Lock = Lock::new("door", "Front door");
 static FAN: Fan = Fan::new("fan", "Fan").speed().presets(&["sleep", "breeze"]).oscillation().direction();
 static THERMOSTAT: Climate =
     Climate::new("thermostat", "Thermostat", &[HvacMode::Heat, HvacMode::Cool, HvacMode::HeatCool, HvacMode::Off]);
-static SETPOINT: Number = Number::new("brightness_limit", "Brightness limit", 0.0, 100.0, 5.0).unit("%").slider();
+static SETPOINT: Number =
+    Number::new("brightness_limit", "Brightness limit", 0.0, 100.0, 5.0).unit(Unit::PERCENT).slider();
 static MODE: Select = Select::new("scene", "Scene", &["day", "evening", "night"]);
 static STATUS: TextSensor = TextSensor::new("status", "Status");
-static BUTTON: Event = Event::new("button", "Button", &["press", "triple_press"]).device_class("button");
-static HUMIDITY: Sensor =
-    Sensor::new("humidity", "Humidity").unit("%").device_class("humidity").measurement().precision(1);
-static PRESSURE: Sensor =
-    Sensor::new("pressure", "Pressure").unit("hPa").device_class("pressure").measurement().precision(1);
-static LUX: Sensor = Sensor::new("illuminance", "Illuminance").unit("lx").device_class("illuminance").measurement();
-static CO2: Sensor = Sensor::new("co2", "CO2").unit("ppm").device_class("carbon_dioxide").measurement();
-static BATTERY: Sensor = Sensor::new("battery", "Battery").unit("%").device_class("battery").measurement();
-static MOTION: BinarySensor = BinarySensor::new("motion", "Motion").device_class("occupancy");
-static LEAK: BinarySensor = BinarySensor::new("leak", "Leak").device_class("moisture");
-static SMOKE: BinarySensor = BinarySensor::new("smoke", "Smoke").device_class("smoke");
+static BUTTON: Event = Event::new("button", "Button", &["press", "triple_press"]).device_class(DeviceClass::BUTTON);
+static HUMIDITY: Sensor = Sensor::humidity("humidity", "Humidity");
+static PRESSURE: Sensor = Sensor::pressure("pressure", "Pressure");
+static LUX: Sensor = Sensor::illuminance("illuminance", "Illuminance");
+static CO2: Sensor = Sensor::carbon_dioxide("co2", "CO2");
+static BATTERY: Sensor = Sensor::battery("battery", "Battery");
+static MOTION: BinarySensor = BinarySensor::new("motion", "Motion").device_class(DeviceClass::OCCUPANCY);
+static LEAK: BinarySensor = BinarySensor::new("leak", "Leak").device_class(DeviceClass::MOISTURE);
+static SMOKE: BinarySensor = BinarySensor::new("smoke", "Smoke").device_class(DeviceClass::SMOKE);
 
-static ENTITIES: [&dyn Entity; 17] = [
+static ENTITIES: &[&dyn Entity] = &[
     &BLIND,
     &VALVE,
     &DOOR,
@@ -63,25 +60,12 @@ static ENTITIES: [&dyn Entity; 17] = [
     &SMOKE,
 ];
 
-static CONFIG: Config = Config {
-    firmware: iotkit_app::firmware!(&OTA_KEY),
-    manufacturer: "iotkit",
-    model: "Showcase",
-    chip: "ESP32-C6",
-    product_name: "iotkit showcase",
-    entities: &ENTITIES,
-    watches: &[],
-    checks: &[],
-    console: None,
-};
+static CONFIG: Config =
+    Config::new(iotkit_app::firmware!(&OTA_KEY)).model("Showcase").product_name("iotkit showcase").entities(ENTITIES);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
-    esp_alloc::heap_allocator!(size: 96 * 1024);
-    let timg0 = TimerGroup::new(p.TIMG0);
-    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
+    iotkit_app::init!(p);
 
     let board = Board {
         flash: p.FLASH,

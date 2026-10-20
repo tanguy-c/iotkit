@@ -4,13 +4,13 @@
 //! ```ignore
 //! static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../keys/ota.pub"));
 //! static LED: Light = Light::new("led", "LED");
-//! static ENTITIES: [&dyn Entity; 1] = [&LED];
-//! static CONFIG: Config = Config {
-//!     firmware: iotkit_app::firmware!(&OTA_KEY),
-//!     manufacturer: "Me", model: "Desk lamp", chip: "ESP32-C6", product_name: "Desk lamp",
-//!     entities: &ENTITIES, watches: &[], checks: &[], console: None,
-//! };
+//! static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+//!     .manufacturer("Me")
+//!     .model("Desk lamp")
+//!     .entities(&[&LED]);
 //!
+//! // in `main`:
+//! iotkit_app::init!(p);
 //! let app = iotkit_app::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
 //! ```
 //!
@@ -115,17 +115,22 @@ pub struct Board {
     pub boot_button: Option<AnyPin<'static>>,
 }
 
-/// What the device is.
+/// What the device is: `Config::new(iotkit_app::firmware!(&OTA_KEY))`, then the builders.
+///
+/// ```ignore
+/// static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+///     .manufacturer("Me")
+///     .entities(&[&LED, &TEMPERATURE]);
+/// ```
+#[non_exhaustive]
 pub struct Config {
     /// `iotkit_app::firmware!(&OTA_KEY)`: package name, version, update key.
     pub firmware: Firmware,
-    /// Shown in Home Assistant.
+    /// Shown in Home Assistant (default `"iotkit"`).
     pub manufacturer: &'static str,
-    /// Shown in Home Assistant.
+    /// Shown in Home Assistant (default: the chip, [`CHIP`]).
     pub model: &'static str,
-    /// Told to Improv clients.
-    pub chip: &'static str,
-    /// The product name over Matter.
+    /// The product name over Matter (default: the package name).
     pub product_name: &'static str,
     /// The device model: every entity, in order (Matter endpoints follow it).
     pub entities: &'static [&'static dyn Entity],
@@ -135,6 +140,109 @@ pub struct Config {
     pub checks: &'static [Check],
     /// Extra console commands.
     pub console: Option<ConsoleExtension>,
+    /// [`CHIP`]; read through the config, which is smaller code than the constant.
+    chip: &'static str,
+}
+
+impl Config {
+    /// The defaults: no entities, watches, checks or console commands.
+    pub const fn new(firmware: Firmware) -> Self {
+        Self {
+            firmware,
+            manufacturer: "iotkit",
+            model: CHIP,
+            product_name: firmware.product,
+            entities: &[],
+            watches: &[],
+            checks: &[],
+            console: None,
+            chip: CHIP,
+        }
+    }
+    /// See [`Config::manufacturer`](Self#structfield.manufacturer).
+    pub const fn manufacturer(mut self, manufacturer: &'static str) -> Self {
+        self.manufacturer = manufacturer;
+        self
+    }
+    /// See [`Config::model`](Self#structfield.model).
+    pub const fn model(mut self, model: &'static str) -> Self {
+        self.model = model;
+        self
+    }
+    /// See [`Config::product_name`](Self#structfield.product_name).
+    pub const fn product_name(mut self, name: &'static str) -> Self {
+        self.product_name = name;
+        self
+    }
+    /// See [`Config::entities`](Self#structfield.entities).
+    pub const fn entities(mut self, entities: &'static [&'static dyn Entity]) -> Self {
+        self.entities = entities;
+        self
+    }
+    /// See [`Config::watches`](Self#structfield.watches).
+    pub const fn watches(mut self, watches: &'static [&'static TaskWatch]) -> Self {
+        self.watches = watches;
+        self
+    }
+    /// See [`Config::checks`](Self#structfield.checks).
+    pub const fn checks(mut self, checks: &'static [Check]) -> Self {
+        self.checks = checks;
+        self
+    }
+    /// See [`Config::console`](Self#structfield.console).
+    pub const fn console(mut self, console: ConsoleExtension) -> Self {
+        self.console = Some(console);
+        self
+    }
+}
+
+/// The chip, as told to Improv clients (`"ESP32-C6"`, ...).
+pub const CHIP: &str = if cfg!(feature = "esp32c6") {
+    "ESP32-C6"
+} else if cfg!(feature = "esp32c3") {
+    "ESP32-C3"
+} else if cfg!(feature = "esp32c5") {
+    "ESP32-C5"
+} else {
+    "ESP32-S3"
+};
+
+/// Sets up the chip for the kit, in `main` before [`start`]: the app descriptor, the clocks at
+/// full speed, the heap (64 KB reclaimed from the bootloader plus `heap`, 96 KB by default; the
+/// Wi-Fi and Bluetooth drivers allocate) and the RTOS timer. Declares `$p`, the peripherals
+/// (`TIMG0` and `FROM_CPU_INTR0` are taken).
+///
+/// ```ignore
+/// iotkit_app::init!(p);
+/// iotkit_app::init!(mut p, heap: 128 * 1024);   // `mut`: to reborrow peripherals
+/// ```
+#[macro_export]
+macro_rules! init {
+    (mut $p:ident $(, heap: $heap:expr)?) => {
+        $crate::init!(@go [mut] $p, $($heap)?);
+    };
+    ($p:ident $(, heap: $heap:expr)?) => {
+        $crate::init!(@go [] $p, $($heap)?);
+    };
+    (@go [$($mut:tt)?] $p:ident,) => {
+        $crate::init!(@go [$($mut)?] $p, 96 * 1024);
+    };
+    (@go [$($mut:tt)?] $p:ident, $heap:expr) => {
+        $crate::__private::esp_bootloader_esp_idf::esp_app_desc!();
+        let $($mut)? $p = $crate::__private::esp_hal::init(
+            $crate::__private::esp_hal::Config::default()
+                .with_cpu_clock($crate::__private::esp_hal::clock::CpuClock::max()),
+        );
+        $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: 64 * 1024);
+        $crate::__private::esp_alloc::heap_allocator!(size: $heap);
+        let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
+        $crate::__private::esp_rtos::start(timg0.timer0, $p.FROM_CPU_INTR0);
+    };
+}
+
+#[doc(hidden)]
+pub mod __private {
+    pub use {esp_alloc, esp_bootloader_esp_idf, esp_hal, esp_rtos};
 }
 
 /// The running kit.

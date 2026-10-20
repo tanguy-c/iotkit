@@ -21,7 +21,7 @@ use {
     embassy_futures::select::{Either, select},
     embassy_time::{Duration, Ticker},
     esp_hal::tsens::{self, TemperatureSensor},
-    iotkit_model::Sensor,
+    iotkit_model::{DeviceClass, Sensor, Unit},
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -29,8 +29,8 @@ esp_bootloader_esp_idf::esp_app_desc!();
 static LED: Light = Light::new("led", "LED");
 #[cfg(feature = "esp32c6")]
 static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
-    .unit("°C")
-    .device_class("temperature")
+    .unit(Unit::CELSIUS)
+    .device_class(DeviceClass::TEMPERATURE)
     .measurement()
     .precision(1);
 #[cfg(feature = "esp32c6")]

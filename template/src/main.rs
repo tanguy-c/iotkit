@@ -10,44 +10,30 @@
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Ticker};
-use esp_hal::{Async, clock::CpuClock, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
+use esp_hal::{Async, rmt::Rmt, time::Rate};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit_app::{Board, Config, Entity, Light, LightState, PublicKey, Sensor};
+use iotkit_app::{Board, Config, DeviceClass, Light, LightState, PublicKey, Sensor, Unit};
 use log::warn;
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
-
-esp_bootloader_esp_idf::esp_app_desc!();
 
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../keys/ota.pub"));
 
 static LED: Light = Light::new("led", "LED");
-static UPTIME: Sensor = Sensor::new("uptime", "Uptime").unit("s").device_class("duration").diagnostic();
-static ENTITIES: [&dyn Entity; 2] = [&LED, &UPTIME];
+static UPTIME: Sensor = Sensor::new("uptime", "Uptime").unit(Unit::SECOND).device_class(DeviceClass::DURATION).diagnostic();
 
-static CONFIG: Config = Config {
-    firmware: iotkit_app::firmware!(&OTA_KEY),
-    manufacturer: "Me",
-    model: "{% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% elsif chip == "esp32c3" %}ESP32-C3-DevKitM-1{% elsif chip == "esp32c5" %}ESP32-C5-DevKitC-1{% else %}ESP32-S3-DevKitC-1{% endif %}",
-    chip: "{% if chip == "esp32c6" %}ESP32-C6{% elsif chip == "esp32c3" %}ESP32-C3{% elsif chip == "esp32c5" %}ESP32-C5{% else %}ESP32-S3{% endif %}",
-    product_name: "{{project-name}}",
-    entities: &ENTITIES,
-    watches: &[],
-    checks: &[],
-    console: None,
-};
+static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+    .manufacturer("Me")
+    .model("{% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% elsif chip == "esp32c3" %}ESP32-C3-DevKitM-1{% elsif chip == "esp32c5" %}ESP32-C5-DevKitC-1{% else %}ESP32-S3-DevKitC-1{% endif %}")
+    .product_name("{{project-name}}")
+    .entities(&[&LED, &UPTIME]);
 
 /// The DevKit's WS2812 LED on {% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}, driven by an RMT channel.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    // The Wi-Fi and Bluetooth drivers allocate.
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
-    esp_alloc::heap_allocator!(size: 96 * 1024);
-    let timg0 = TimerGroup::new(p.TIMG0);
-    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
+    iotkit_app::init!(p);
 
     let board = Board {
         flash: p.FLASH,

@@ -55,7 +55,7 @@ pub mod map;
 pub mod wifi;
 
 use iotkit_config::{Setting, keys};
-use iotkit_model::{Entity, Kind, Spec};
+use iotkit_model::{DeviceClass, Entity, Kind, Spec, Unit};
 
 /// The Matter device an entity becomes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,11 +133,11 @@ pub fn matter_kind(entity: &dyn Entity) -> Option<MatterKind> {
         Kind::Switch => Some(MatterKind::OnOffPlug),
         Kind::Sensor => {
             let kind = match class? {
-                "temperature" => MatterKind::TemperatureSensor,
-                "humidity" => MatterKind::HumiditySensor,
-                "illuminance" => MatterKind::LightSensor,
-                "pressure" => MatterKind::PressureSensor,
-                "battery" => MatterKind::Battery,
+                DeviceClass::TEMPERATURE => MatterKind::TemperatureSensor,
+                DeviceClass::HUMIDITY => MatterKind::HumiditySensor,
+                DeviceClass::ILLUMINANCE => MatterKind::LightSensor,
+                DeviceClass::PRESSURE => MatterKind::PressureSensor,
+                DeviceClass::BATTERY => MatterKind::Battery,
                 other => MatterKind::AirQualitySensor(map::pollutant(other)?),
             };
             // A temperature in an unknown unit is taken as °C, as before.
@@ -147,10 +147,10 @@ pub fn matter_kind(entity: &dyn Entity) -> Option<MatterKind> {
             map::to_matter_unit(kind, meta.unit?, 0.0).map(|_| kind)
         }
         Kind::BinarySensor => Some(match class {
-            Some("motion" | "occupancy" | "presence") => MatterKind::OccupancySensor,
-            Some("moisture") => MatterKind::WaterLeakDetector,
-            Some("smoke") => MatterKind::SmokeAlarm,
-            Some("carbon_monoxide" | "gas") => MatterKind::CoAlarm,
+            Some(DeviceClass::MOTION | DeviceClass::OCCUPANCY | DeviceClass::PRESENCE) => MatterKind::OccupancySensor,
+            Some(DeviceClass::MOISTURE) => MatterKind::WaterLeakDetector,
+            Some(DeviceClass::SMOKE) => MatterKind::SmokeAlarm,
+            Some(DeviceClass::CARBON_MONOXIDE | DeviceClass::GAS) => MatterKind::CoAlarm,
             _ => MatterKind::ContactSensor,
         }),
         Kind::Event => match entity.spec() {
@@ -194,8 +194,8 @@ pub fn brightness_from_level(level: u8) -> u8 {
 
 /// Temperature Measurement's `MeasuredValue`: hundredths of a degree Celsius. `unit`: the
 /// sensor's (`°C` or `°F`; others are taken as °C).
-pub fn temperature_hundredths(value: f32, unit: Option<&str>) -> Option<i16> {
-    let celsius = if unit == Some("°F") { (value - 32.0) * 5.0 / 9.0 } else { value };
+pub fn temperature_hundredths(value: f32, unit: Option<Unit>) -> Option<i16> {
+    let celsius = if unit == Some(Unit::FAHRENHEIT) { (value - 32.0) * 5.0 / 9.0 } else { value };
     let hundredths = celsius * 100.0;
     // MeasuredValue range: -273.15 .. 327.67 °C.
     (hundredths.is_finite() && (-27315.0..=32767.0).contains(&hundredths))
@@ -252,8 +252,8 @@ mod tests {
     fn kinds() {
         static L: Light = Light::new("l", "L");
         static S: Switch = Switch::new("s", "S");
-        static T: Sensor = Sensor::new("t", "T").device_class("temperature");
-        static U: Sensor = Sensor::new("u", "U").unit("s");
+        static T: Sensor = Sensor::new("t", "T").device_class(DeviceClass::TEMPERATURE);
+        static U: Sensor = Sensor::new("u", "U").unit(Unit::SECOND);
         static B: BinarySensor = BinarySensor::new("b", "B");
         static P: Button = Button::new("p", "P");
         assert_eq!(matter_kind(&L), Some(MatterKind::ExtendedColorLight));
@@ -262,11 +262,12 @@ mod tests {
         assert_eq!(matter_kind(&U), None);
         assert_eq!(matter_kind(&B), Some(MatterKind::ContactSensor));
         assert_eq!(matter_kind(&P), None);
-        static H: Sensor = Sensor::new("h", "H").device_class("humidity").unit("%");
-        static HX: Sensor = Sensor::new("hx", "HX").device_class("humidity").unit("g/m³");
-        static C: Sensor = Sensor::new("c", "C").device_class("carbon_dioxide").unit("ppm");
-        static M: BinarySensor = BinarySensor::new("m", "M").device_class("motion");
-        static W: BinarySensor = BinarySensor::new("w", "W").device_class("moisture");
+        static H: Sensor = Sensor::new("h", "H").device_class(DeviceClass::HUMIDITY).unit(Unit::PERCENT);
+        static HX: Sensor =
+            Sensor::new("hx", "HX").device_class(DeviceClass::HUMIDITY).unit(Unit::GRAMS_PER_CUBIC_METER);
+        static C: Sensor = Sensor::new("c", "C").device_class(DeviceClass::CARBON_DIOXIDE).unit(Unit::PPM);
+        static M: BinarySensor = BinarySensor::new("m", "M").device_class(DeviceClass::MOTION);
+        static W: BinarySensor = BinarySensor::new("w", "W").device_class(DeviceClass::MOISTURE);
         static E: Event = Event::new("e", "E", &["press", "long_press"]);
         static X: Event = Event::new("x", "X", &["spin"]);
         static N: Number = Number::new("n", "N", 0.0, 1.0, 0.1);
@@ -294,9 +295,9 @@ mod tests {
 
     #[test]
     fn temperatures() {
-        assert_eq!(temperature_hundredths(21.46, Some("°C")), Some(2146));
+        assert_eq!(temperature_hundredths(21.46, Some(Unit::CELSIUS)), Some(2146));
         assert_eq!(temperature_hundredths(-5.5, None), Some(-550));
-        assert_eq!(temperature_hundredths(212.0, Some("°F")), Some(10000));
+        assert_eq!(temperature_hundredths(212.0, Some(Unit::FAHRENHEIT)), Some(10000));
         assert_eq!(temperature_hundredths(f32::NAN, None), None);
         assert_eq!(temperature_hundredths(400.0, None), None);
     }

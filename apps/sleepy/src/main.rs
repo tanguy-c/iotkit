@@ -9,48 +9,29 @@
 
 use embassy_executor::Spawner;
 use embassy_time::Duration;
-use esp_hal::{
-    clock::CpuClock,
-    timer::timg::TimerGroup,
-    tsens::{self, TemperatureSensor},
-};
-use iotkit_app::{Board, Config, Entity, PublicKey, Sensor, SleepConfig, Switch};
+use esp_hal::tsens::{self, TemperatureSensor};
+use iotkit_app::{Board, Config, DeviceClass, PublicKey, Sensor, SleepConfig, Switch, Unit};
 use log::info;
-
-esp_bootloader_esp_idf::esp_app_desc!();
 
 static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
 
 static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
-    .unit("°C")
-    .device_class("temperature")
+    .unit(Unit::CELSIUS)
+    .device_class(DeviceClass::TEMPERATURE)
     .measurement()
     .precision(1);
 static WAKEUPS: Sensor = Sensor::new("wakeups", "Wake-ups").measurement().diagnostic();
 static STAY_AWAKE: Switch = Switch::new("stay_awake", "Stay awake").icon("mdi:sleep-off").config();
-static ENTITIES: [&dyn Entity; 3] = [&TEMPERATURE, &WAKEUPS, &STAY_AWAKE];
-
-static CONFIG: Config = Config {
-    firmware: iotkit_app::firmware!(&OTA_KEY),
-    manufacturer: "iotkit",
-    model: "ESP32-C6-DevKitC-1",
-    chip: "ESP32-C6",
-    product_name: "iotkit sleepy",
-    entities: &ENTITIES,
-    watches: &[],
-    checks: &[],
-    console: None,
-};
+static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+    .model("ESP32-C6-DevKitC-1")
+    .product_name("iotkit sleepy")
+    .entities(&[&TEMPERATURE, &WAKEUPS, &STAY_AWAKE]);
 
 static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(60), max_awake: Duration::from_secs(30) };
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
-    esp_alloc::heap_allocator!(size: 96 * 1024);
-    let timg0 = TimerGroup::new(p.TIMG0);
-    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
+    iotkit_app::init!(p);
 
     // Measured first: before the radio warms the chip.
     let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();

@@ -6,10 +6,9 @@
 //! ```
 //! use iotkit_model::{Entity, Sensor, Switch};
 //!
-//! static TEMPERATURE: Sensor = Sensor::new("temperature", "Chip temperature")
-//!     .unit("°C").device_class("temperature").measurement();
+//! static TEMPERATURE: Sensor = Sensor::temperature("temperature", "Chip temperature");
 //! static RELAY: Switch = Switch::new("relay", "Relay");
-//! static ENTITIES: [&dyn Entity; 2] = [&TEMPERATURE, &RELAY];
+//! static ENTITIES: &[&dyn Entity] = &[&TEMPERATURE, &RELAY];
 //!
 //! # RELAY.command(iotkit_model::Command::Set(true)); // what a binding does
 //! # embassy_futures::block_on(async {
@@ -35,6 +34,7 @@ pub(crate) use core::sync::atomic;
 pub(crate) use portable_atomic as atomic;
 
 mod appliances;
+mod classes;
 mod entities;
 mod inputs;
 mod update;
@@ -45,6 +45,7 @@ pub use appliances::{
     Climate, ClimateCommand, ClimateState, Cover, CoverCommand, CoverState, Fan, FanCommand, FanDirection, FanState,
     HvacAction, HvacMode, Lock, LockCommand, LockState, Valve,
 };
+pub use classes::{DeviceClass, Unit};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 pub use entities::{BinarySensor, Button, Light, LightState, Sensor, Switch};
 pub use inputs::{Event, Number, Select, TEXT_LEN, TextSensor};
@@ -105,10 +106,10 @@ pub struct Meta {
     pub id: &'static str,
     /// Shown in Home Assistant.
     pub name: &'static str,
-    /// Home Assistant device class (`temperature`, `restart`, ...), if any.
-    pub device_class: Option<&'static str>,
-    /// Unit of the value (`°C`, `%`, ...), if any.
-    pub unit: Option<&'static str>,
+    /// What it measures or is, if set.
+    pub device_class: Option<DeviceClass>,
+    /// Unit of the value, if set.
+    pub unit: Option<Unit>,
     /// Sensors: a measurement, so Home Assistant keeps statistics.
     pub measurement: bool,
     /// Material Design icon (`mdi:...`), if any.

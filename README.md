@@ -81,20 +81,26 @@ wizard project with no parts gets, shows the RGB LED as a light, toggled by a sh
 
 ```rust
 static LED: Light = Light::new("led", "LED");
-static ENTITIES: [&dyn Entity; 1] = [&LED];
-static CONFIG: Config = Config {
-    firmware: iotkit_app::firmware!(&OTA_KEY),   // package name + version from Cargo.toml
-    manufacturer: "Me", model: "ESP32-C6-DevKitC-1", chip: "ESP32-C6", product_name: "My device",
-    entities: &ENTITIES, watches: &[], checks: &[], console: None,
-};
-// in main, after esp_hal::init, the heap and esp_rtos::start:
-iotkit_app::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
+static TEMPERATURE: Sensor = Sensor::temperature("temperature", "Temperature");   // °C, 1 decimal
+static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))   // name + version from Cargo.toml
+    .manufacturer("Me")
+    .entities(&[&LED, &TEMPERATURE]);
+
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -> ! {
+    iotkit_app::init!(p);   // clocks, heap, RTOS; `p`: the peripherals
+    iotkit_app::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
+    // the app's own hardware and tasks
+}
 ```
 
 Entities are `Sensor`, `BinarySensor`, `Switch`, `Light`, `Button`, `Event`, `Number`, `Select`,
 `TextSensor`, `Cover`, `Valve`, `Lock`, `Fan` and `Climate`: set their state from any
-task (`TEMP.set(21.5)`), wait for commands (`LED.wait_command().await`), and report the result
-with `set`. `iotkit_app::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
+task (`TEMPERATURE.set(21.5)`), wait for commands (`LED.wait_command().await`), and report the
+result with `set`. Device classes and units are typed (`.device_class(DeviceClass::MOTION)`,
+`.unit(Unit::PERCENT)`; `custom("...")` for others), and common sensors have shortcuts
+(`Sensor::humidity`, `pressure`, `illuminance`, `carbon_dioxide`, `pm25`, `battery`, `voltage`,
+`power`). `iotkit_app::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
 `apps/devkit` is a fuller example: watched tasks, its own health check, an extra console command.
 
 ## 3. First flash (USB)

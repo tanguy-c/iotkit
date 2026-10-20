@@ -424,7 +424,7 @@ impl Ep {
         self.entity.command(Command::Light { on: Some(on), brightness: Some(brightness_from_level(level)), rgb: None });
     }
 
-    fn unit(&self) -> Option<&'static str> {
+    fn unit(&self) -> Option<iotkit_model::Unit> {
         self.entity.meta().unit
     }
 
