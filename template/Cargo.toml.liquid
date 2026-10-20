@@ -13,11 +13,11 @@ flash-size = "{% if chip == "esp32c3" %}4mb{% else %}8mb{% endif %}"
 
 [features]
 {% if chip == "esp32c6" %}## Matter over Wi-Fi, next to MQTT (needs the 8 MB partition table).
-matter-wifi = ["iotkit-app/matter-wifi"]
+matter-wifi = ["iotkit/matter-wifi"]
 {% endif %}
 [dependencies]
 # From GitHub. A local checkout instead: `iotkit_path` (cargo generate), `--iotkit-path` (cargo iotkit new).
-{% if iotkit_path == "" %}iotkit-app = { git = "https://github.com/tanguy-c/iotkit", features = ["{{chip}}", "ha-update"] }{% else %}iotkit-app = { path = "{{iotkit_path}}/crates/iotkit-app", features = ["{{chip}}", "ha-update"] }{% endif %}
+{% if iotkit_path == "" %}iotkit = { git = "https://github.com/tanguy-c/iotkit", features = ["{{chip}}", "ha-update"] }{% else %}iotkit = { path = "{{iotkit_path}}/crates/iotkit", features = ["{{chip}}", "ha-update"] }{% endif %}
 
 esp-hal                = { version = "~1.2.2", features = ["{{chip}}", "log-04", "unstable"] }
 esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "{{chip}}", "log-04"] }

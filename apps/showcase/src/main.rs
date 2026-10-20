@@ -14,7 +14,7 @@ use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Ticker, Timer};
 use esp_hal::{Async, rmt::Rmt, time::Rate};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit_app::{
+use iotkit::{
     BinarySensor, Board, Climate, ClimateState, Config, Cover, CoverCommand, CoverState, DeviceClass, Entity, Event,
     Fan, FanState, HvacAction, HvacMode, Light, Lock, LockCommand, LockState, Number, PublicKey, Select, Sensor,
     TextSensor, Unit, Valve,
@@ -22,7 +22,7 @@ use iotkit_app::{
 use log::info;
 use smart_leds::RGB8;
 
-static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
+static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../../../keys/ota.pub"));
 
 static BLIND: Cover = Cover::new("blind", "Blind").device_class(DeviceClass::BLIND).position();
 static VALVE: Valve = Valve::new("water_valve", "Water valve").device_class(DeviceClass::WATER).position();
@@ -68,19 +68,19 @@ static ENTITIES: &[&dyn Entity] = &[
 ];
 
 static CONFIG: Config =
-    Config::new(iotkit_app::firmware!(&OTA_KEY)).model("Showcase").product_name("iotkit showcase").entities(ENTITIES);
+    Config::new(iotkit::firmware!(&OTA_KEY)).model("Showcase").product_name("iotkit showcase").entities(ENTITIES);
 
 /// The board's WS2812 LED on GPIO8.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
 #[embassy_executor::task]
 async fn light_task(led: Led) {
-    iotkit_app::components::rgb_light(&LIGHT, led, 1).await
+    iotkit::components::rgb_light(&LIGHT, led, 1).await
 }
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    iotkit_app::init!(p);
+    iotkit::init!(p);
 
     let board = Board {
         flash: p.FLASH,
@@ -90,7 +90,7 @@ async fn main(spawner: Spawner) -> ! {
         usb: p.USB_DEVICE,
         boot_button: Some(p.GPIO9.into()),
     };
-    iotkit_app::start(spawner, board, &CONFIG).await;
+    iotkit::start(spawner, board, &CONFIG).await;
 
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
     let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
@@ -237,7 +237,7 @@ async fn settings_task() {
 async fn button_task() {
     let mut presses: [Instant; 3] = [Instant::MIN; 3];
     loop {
-        iotkit_app::provision::esp::wait_press().await;
+        iotkit::provision::esp::wait_press().await;
         presses.rotate_left(1);
         presses[2] = Instant::now();
         if presses[2] - presses[0] < Duration::from_secs(2) {

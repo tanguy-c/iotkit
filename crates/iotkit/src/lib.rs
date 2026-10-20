@@ -1,0 +1,111 @@
+//! A device's firmware in one call: [`start`] runs every iotkit service in the order they need,
+//! and the app keeps only its own hardware and entities.
+//!
+//! ```ignore
+//! static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../keys/ota.pub"));
+//! static LED: Light = Light::new("led", "LED");
+//! static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
+//!     .manufacturer("Me")
+//!     .model("Desk lamp")
+//!     .entities(&[&LED]);
+//!
+//! // in `main`:
+//! iotkit::init!(p);
+//! let app = iotkit::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
+//! ```
+//!
+//! The full, compiled version: `apps/devkit/src/main.rs`.
+//!
+//! What [`start`] does, in order: takes the crash record and counts the boot; guards and handles
+//! a pending update (trial boots, rollback); starts the watchdog; joins Wi-Fi (or opens the setup
+//! window: access point, Improv over Bluetooth and serial); answers `<host>.local`; starts MQTT
+//! (Home Assistant discovery) when a broker is set, and Matter with the `matter-wifi` feature;
+//! serves OTA pushes; watches the BOOT button; runs the USB console. Once every health check
+//! passes (the kit's and [`Config::checks`]), the boot is stable and an update is confirmed.
+
+#![no_std]
+#![warn(missing_docs)]
+// The Thread stack's nested futures go deeper than the default limit.
+#![recursion_limit = "256"]
+
+#[cfg(all(
+    feature = "wifi",
+    not(any(feature = "esp32c6", feature = "esp32c3", feature = "esp32c5", feature = "esp32s3"))
+))]
+compile_error!(
+    "iotkit: enable one chip feature: esp32c6, esp32c3, esp32c5 or esp32s3 (esp32h2: Thread only, without `wifi`)"
+);
+#[cfg(any(
+    all(feature = "esp32c6", any(feature = "esp32c3", feature = "esp32c5", feature = "esp32s3", feature = "esp32h2")),
+    all(feature = "esp32c3", any(feature = "esp32c5", feature = "esp32s3", feature = "esp32h2")),
+    all(feature = "esp32c5", any(feature = "esp32s3", feature = "esp32h2")),
+    all(feature = "esp32s3", feature = "esp32h2"),
+))]
+compile_error!("iotkit: enable only one chip feature");
+#[cfg(all(feature = "esp32c5", feature = "matter-wifi"))]
+compile_error!("iotkit: `matter-wifi` is not supported on the ESP32-C5 yet (no TRNG in esp-hal 1.2)");
+// Matter does not sleep (an always-on controller session).
+#[cfg(all(feature = "deep-sleep", feature = "matter-wifi"))]
+compile_error!("iotkit: `deep-sleep` is for MQTT devices; not with `matter-wifi`");
+// Matter over Wi-Fi needs about 21 KB more internal RAM than the ESP32-S3 has left (PSRAM
+// support would fix it; not done yet).
+#[cfg(all(feature = "esp32s3", feature = "matter-wifi"))]
+compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-S3's internal RAM yet (use MQTT, or a C6)");
+// Matter over Wi-Fi needs about 24 KB more static RAM than the ESP32-C3 has.
+#[cfg(all(feature = "esp32c3", feature = "matter-wifi"))]
+compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQTT, or a C6/C5/S3)");
+
+#[cfg(all(feature = "esp32h2", feature = "wifi"))]
+compile_error!("iotkit: the ESP32-H2 has no Wi-Fi: `default-features = false` with `matter-thread`");
+
+// With no setup path, only a network given at build time can be joined.
+#[cfg(all(feature = "wifi", not(any(feature = "improv-ble", feature = "softap", feature = "improv-serial"))))]
+const _: () = assert!(
+    option_env!("WIFI_SSID").is_some(),
+    "iotkit: no setup path (improv-ble, softap, improv-serial): set WIFI_SSID at build time"
+);
+
+// Matter and the update entity allocate (the heap set up by `init!`).
+extern crate alloc;
+
+/// `core::sync::atomic`, or `portable-atomic` on chips without compare-and-swap (ESP32-C3).
+#[cfg(all(feature = "_esp", not(feature = "portable-atomic")))]
+pub(crate) use core::sync::atomic;
+#[cfg(all(feature = "_esp", feature = "portable-atomic"))]
+pub(crate) use portable_atomic as atomic;
+
+pub use iotkit_core::{image, model, runtime};
+
+pub mod components;
+pub mod config;
+pub mod diag;
+#[cfg(feature = "_matter")]
+pub mod matter;
+pub mod mqtt;
+pub mod net;
+pub mod ota;
+pub mod provision;
+
+#[cfg(esp_wifi)]
+mod app;
+#[cfg(esp_wifi)]
+pub use app::*;
+
+pub use components::Active;
+pub use config::Setting;
+#[cfg(feature = "_esp")]
+pub use config::esp::SharedStore;
+pub use diag::{Boot, BootStats, TaskWatch};
+pub use image::{PublicKey, public_key};
+pub use model::*;
+#[cfg(esp_wifi)]
+pub use net::esp::Net;
+#[cfg(esp_wifi)]
+pub use ota::esp::Firmware;
+pub use runtime::{Check, Health};
+
+#[cfg(feature = "_esp")]
+#[doc(hidden)]
+pub mod __private {
+    pub use {esp_alloc, esp_bootloader_esp_idf, esp_hal, esp_rtos};
+}

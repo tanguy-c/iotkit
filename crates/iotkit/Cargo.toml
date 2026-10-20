@@ -1,0 +1,91 @@
+[package]
+name         = "iotkit"
+description  = "Firmware kit for ESP32 smart devices: Wi-Fi setup, signed OTA with rollback, Home Assistant over MQTT and Matter"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+publish.workspace      = true
+
+[features]
+default = ["wifi", "improv-ble", "softap", "improv-serial", "console", "ota-push"]
+
+## The chip: one for firmware (none builds the host-testable parts only).
+esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-println/esp32c6", "esp-alloc/esp32c6", "esp-rtos/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-storage/esp32c6", "esp-backtrace/esp32c6", "esp-radio?/esp32c6"]
+esp32c3 = ["_esp", "portable-atomic", "esp-hal/esp32c3", "esp-println/esp32c3", "esp-alloc/esp32c3", "esp-rtos/esp32c3", "esp-bootloader-esp-idf/esp32c3", "esp-storage/esp32c3", "esp-backtrace/esp32c3", "esp-radio?/esp32c3"]
+esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-println/esp32c5", "esp-alloc/esp32c5", "esp-rtos/esp32c5", "esp-bootloader-esp-idf/esp32c5", "esp-storage/esp32c5", "esp-backtrace/esp32c5", "esp-radio?/esp32c5"]
+esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-println/esp32s3", "esp-alloc/esp32s3", "esp-rtos/esp32s3", "esp-bootloader-esp-idf/esp32s3", "esp-storage/esp32s3", "esp-backtrace/esp32s3", "esp-radio?/esp32s3"]
+## Thread only (no Wi-Fi): `default-features = false` with `matter-thread`.
+esp32h2 = ["_esp", "esp-hal/esp32h2", "esp-println/esp32h2", "esp-alloc/esp32h2", "esp-rtos/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-storage/esp32h2", "esp-backtrace/esp32h2", "esp-radio?/esp32h2"]
+
+## Wi-Fi and everything on it: `start`, the network, updates, MQTT, the setup window.
+wifi = ["dep:esp-radio", "esp-radio?/wifi", "dep:embassy-net", "dep:smoltcp", "panic-handler"]
+## Improv over Bluetooth LE in a setup window (the Bluetooth stack: about 300 KB of flash).
+improv-ble = ["wifi", "esp-radio?/ble", "esp-radio?/coex", "dep:trouble-host", "dep:bt-hci"]
+## The setup access point and its page in a setup window.
+softap = ["wifi"]
+## Improv over the USB serial port (ESP Web Tools, improv-wifi.com).
+improv-serial = ["wifi"]
+## The USB console (`help`). Without it and `improv-serial`, the app keeps the USB port.
+console = ["wifi"]
+## Updates pushed over the network (`cargo iotkit ota push`).
+ota-push = ["wifi"]
+## Updates from Home Assistant: a `firmware` update entity; the device checks the manifest URL
+## set with `update-url` (or `OTA_MANIFEST_URL` at build time) and installs on request.
+ha-update = ["wifi"]
+## Deep-sleeping devices over MQTT (`start_sleepy`): fast reconnect, retained commands, sleep.
+deep-sleep = ["wifi"]
+## Matter over Wi-Fi, next to MQTT (8 MB flash: about 2.1 MB of firmware).
+matter-wifi = ["wifi", "_matter", "embassy-net?/proto-ipv6", "rs-matter-embassy?/embassy-net", "rs-matter-embassy?/rustcrypto", "rs-matter-embassy?/trouble"]
+## Matter over Thread (`matter::thread`; C code: needs clang and cmake).
+matter-thread = ["_matter", "rs-matter-embassy?/openthread", "rs-matter-embassy?/mbedtls", "rs-matter-embassy?/openthread-heap-int-8192", "rs-matter-embassy?/esp", "rs-matter-embassy?/trouble", "dep:tinyrlibc"]
+## Addressable LEDs (WS2812) as a light: `components::rgb_light`.
+smartled = ["dep:smart-leds"]
+## Records panics (and their backtrace) for the next boot; on with `wifi`.
+panic-handler = []
+## Atomics for chips without compare-and-swap (ESP32-C3).
+portable-atomic = ["dep:portable-atomic", "iotkit-core/portable-atomic"]
+_matter = ["dep:rs-matter-embassy", "dep:embassy-embedded-hal"]
+_esp = ["dep:esp-hal", "dep:esp-println", "dep:esp-alloc", "dep:esp-rtos", "dep:esp-bootloader-esp-idf", "dep:esp-storage", "dep:esp-backtrace", "dep:embassy-executor", "dep:embassy-embedded-hal", "dep:embedded-storage", "dep:static_cell"]
+
+[dependencies]
+iotkit-core = { workspace = true }
+
+embassy-futures        = "0.1"
+embassy-sync           = { workspace = true }
+embassy-time           = { workspace = true }
+embedded-hal           = "1.0"
+embedded-hal-async     = "1.0"
+embedded-io-async      = { workspace = true }
+embedded-storage-async = "0.4"
+heapless               = { workspace = true, features = ["serde"] }
+log                    = { workspace = true }
+portable-atomic        = { version = "1.11", optional = true, default-features = false }  # esp-hal sets its single-core mode
+serde                  = { version = "1", default-features = false, features = ["derive"] }
+serde-json-core        = "0.7"
+smart-leds             = { workspace = true, optional = true }
+
+bt-hci                 = { version = "0.10", optional = true }
+embassy-embedded-hal   = { version = "0.6", optional = true, default-features = false }
+embassy-executor       = { workspace = true, optional = true }
+embassy-net            = { version = "0.9.1", optional = true, features = ["dhcpv4", "dhcpv4-hostname", "dns", "log", "medium-ethernet", "multicast", "proto-ipv4", "tcp", "udp"] }
+embedded-storage       = { version = "0.3", optional = true }
+esp-alloc              = { workspace = true, optional = true }
+esp-backtrace          = { version = "0.20.0", optional = true, features = ["println"] }
+esp-bootloader-esp-idf = { workspace = true, optional = true }
+esp-hal                = { workspace = true, optional = true }
+esp-println            = { workspace = true, optional = true }
+esp-radio              = { version = "1.0.0-beta.1", optional = true, features = ["esp-alloc", "log-04", "unstable"] }
+esp-rtos               = { workspace = true, optional = true }
+esp-storage            = { version = "0.10", optional = true, features = ["embedded-storage"] }
+smoltcp                = { version = "0.13", optional = true, default-features = false, features = ["auto-icmp-echo-reply"] }
+static_cell            = { workspace = true, optional = true }
+trouble-host           = { version = "0.8", optional = true, default-features = false, features = ["peripheral", "gatt", "derive", "default-packet-pool", "connection-params-update"] }
+tinyrlibc = { version = "0.5", optional = true, default-features = false, features = ["memchr", "utoa", "strtoul", "strtol", "strcmp", "strncmp", "strlen", "strncpy", "strcpy", "strchr", "strrchr", "strstr", "strspn", "strcspn", "strcat", "atoi", "isspace", "isdigit", "isalpha", "isupper", "abs", "itoa", "qsort", "strncasecmp", "strtoull", "strtoll", "strtoimax", "strtoumax"] }
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "2a806b0b1b521293b34a773618499e87402c843c", optional = true, default-features = false, features = ["log"] }
+
+[dev-dependencies]
+critical-section = { version = "1.2", features = ["std"] }
+embassy-time     = { workspace = true, features = ["mock-driver", "generic-queue-8"] }
+postcard         = { version = "1.1", default-features = false }

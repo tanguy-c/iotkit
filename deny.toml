@@ -30,5 +30,5 @@ multiple-versions = "warn"
 [sources]
 unknown-registry = "deny"
 unknown-git      = "deny"
-# rs-matter-embassy has no crates.io release; pinned by rev in iotkit-link-matter.
+# rs-matter-embassy has no crates.io release; pinned by rev in crates/iotkit.
 allow-git        = ["https://github.com/sysgrok/rs-matter-embassy"]

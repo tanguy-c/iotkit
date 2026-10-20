@@ -253,7 +253,7 @@ pub fn run(args: NewArgs) -> Result<()> {
     let iotkit = match args.iotkit_path {
         Some(dir) => {
             ensure!(
-                dir.join("crates/iotkit-app").is_dir(),
+                dir.join("crates/iotkit").is_dir(),
                 "no iotkit checkout at {} (`--iotkit-path DIR`: the folder with crates/)",
                 dir.display()
             );
@@ -686,7 +686,7 @@ mod tests {
         assert!(main.contains("components::button(&BUTTON, pin, Active::Low"), "{main}");
         assert!(main.contains("components::poll(&SOIL_MOISTURE"), "{main}");
         assert!(main.contains("TODO(temperature):"));
-        assert!(main.contains("iotkit_app::start(spawner, board, &CONFIG).await;"));
+        assert!(main.contains("iotkit::start(spawner, board, &CONFIG).await;"));
         assert!(main.contains("led_task"));
         let secrets = codegen::secrets(&p).unwrap();
         assert!(secrets.contains(&format!("MATTER_PASSCODE = \"{}\"", p.matter_setup.unwrap().passcode)));

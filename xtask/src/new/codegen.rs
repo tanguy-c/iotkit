@@ -214,13 +214,13 @@ pub fn main_rs(p: &Project) -> String {
     if battery {
         let _ = writeln!(
             s,
-            "//! A battery device: it wakes up every {} min, reports, and sleeps (`iotkit_app::start_sleepy`).",
+            "//! A battery device: it wakes up every {} min, reports, and sleeps (`iotkit::start_sleepy`).",
             p.answers.report_every_min
         );
     } else {
         let _ = writeln!(
             s,
-            "//! `iotkit_app::start` brings Wi-Fi setup (access point, Improv), Home Assistant, signed updates,"
+            "//! `iotkit::start` brings Wi-Fi setup (access point, Improv), Home Assistant, signed updates,"
         );
         let _ = writeln!(s, "//! crash records, the watchdog and the USB console (`help`).");
     }
@@ -250,9 +250,9 @@ pub fn main_rs(p: &Project) -> String {
         s.push_str("use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};\n");
     }
     if battery && p.answers.battery_pin.is_some() {
-        s.push_str("use iotkit_app::battery::{Battery, BatteryCurve};\n");
+        s.push_str("use iotkit::battery::{Battery, BatteryCurve};\n");
     }
-    let _ = writeln!(s, "use iotkit_app::{};", group(&iotkit));
+    let _ = writeln!(s, "use iotkit::{};", group(&iotkit));
 
     if led {
         s.push_str("use log::warn;\nuse smart_leds::{RGB8, SmartLedsWriteAsync, brightness};\n");
@@ -260,7 +260,7 @@ pub fn main_rs(p: &Project) -> String {
     s.push_str(
         "
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
-static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!(\"../keys/ota.pub\"));
+static OTA_KEY: PublicKey = iotkit::public_key(include_str!(\"../keys/ota.pub\"));
 
 ",
     );
@@ -270,7 +270,7 @@ static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!(\"../keys/ota.pu
     let _ = writeln!(
         s,
         "
-static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .manufacturer({:?})
     .model({:?})
     .product_name({:?})
@@ -306,7 +306,7 @@ type Led = RmtSmartLeds<'static, {{ buffer_size::<RGB8>(1) }}, Async, RGB8, colo
         "
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {{
-    iotkit_app::init!({}p);
+    iotkit::init!({}p);
 ",
         if shared_adc { "mut " } else { "" }
     );
@@ -337,9 +337,9 @@ async fn main(spawner: Spawner) -> ! {{
         p.board.boot_pin
     );
     if battery {
-        s.push_str("    let app = iotkit_app::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;\n");
+        s.push_str("    let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;\n");
     } else {
-        s.push_str("    iotkit_app::start(spawner, board, &CONFIG).await;\n");
+        s.push_str("    iotkit::start(spawner, board, &CONFIG).await;\n");
     }
     if led {
         let pin = p.board.rgb_led.unwrap_or_default();
@@ -394,7 +394,7 @@ async fn led_task(mut led: Led) {
         if let Err(e) = led.write(brightness([color].into_iter(), state.brightness)).await {
             warn!(\"LED write failed: {e:?}\");
         }
-        state = match select(LED.wait_command(), iotkit_app::provision::esp::wait_press()).await {
+        state = match select(LED.wait_command(), iotkit::provision::esp::wait_press()).await {
             Either::First(wanted) => wanted,
             Either::Second(()) => LightState { on: !state.on, ..state },
         };
@@ -628,10 +628,10 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     }
     let source = match p.iotkit_path.as_str() {
         "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
-        path => format!("path = {:?}", format!("{path}/crates/iotkit-app")),
+        path => format!("path = {:?}", format!("{path}/crates/iotkit")),
     };
     let line = format!(
-        "iotkit-app = {{ {source}, features = [{}] }}",
+        "iotkit = {{ {source}, features = [{}] }}",
         app_features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
     );
     let mut out = String::new();
@@ -644,7 +644,7 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
                 out.push_str("[features]\n");
                 if p.board.matter() {
                     out.push_str("## Matter over Wi-Fi, next to MQTT (needs the 8 MB partition table).\n");
-                    out.push_str("matter-wifi = [\"iotkit-app/matter-wifi\"]\n");
+                    out.push_str("matter-wifi = [\"iotkit/matter-wifi\"]\n");
                     if p.answers.matter != MatterMode::Off {
                         out.push_str("default     = [\"matter-wifi\"]\n");
                     }
@@ -656,7 +656,7 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         if in_features {
             continue;
         }
-        if l.starts_with("iotkit-app ") || l.starts_with("iotkit-app=") {
+        if l.starts_with("iotkit ") || l.starts_with("iotkit=") {
             out.push_str(&line);
             replaced = true;
         } else {
@@ -664,7 +664,7 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         }
         out.push('\n');
     }
-    anyhow::ensure!(replaced, "the template's Cargo.toml has no `iotkit-app` line");
+    anyhow::ensure!(replaced, "the template's Cargo.toml has no `iotkit` line");
     Ok(out)
 }
 
@@ -810,7 +810,7 @@ Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>
     );
     if p.battery() {
         s.push_str(
-            "On battery (`iotkit_app::start_sleepy`): parts are read once per wake-up in `main`, then it sleeps.\n\
+            "On battery (`iotkit::start_sleepy`): parts are read once per wake-up in `main`, then it sleeps.\n\
              Read analog values before `start_sleepy`, as the battery level: Wi-Fi's load lowers the voltage.\n",
         );
     }
@@ -839,7 +839,7 @@ Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>
 - The heap is fixed (for Wi-Fi and Bluetooth): avoid `alloc`.
 - One task per part, never stalled: await a `Timer` or a pin edge. Short blocking bus reads are fine; no busy loops.
 - Report states with `.set(..)`; take commands with `.wait_command().await`.
-- Prefer the ready-made parts in `iotkit_app::components` (relay, binary_input, button, poll,
+- Prefer the ready-made parts in `iotkit::components` (relay, binary_input, button, poll,
   dimmer, fan, rgb_light); `poll` takes any driver in its read closure.
 - Versions are pinned (esp-hal ~1.2.2): check APIs in the docs or source below, not from memory.
 - Leave `partitions*.csv`, `[profile.*]` and `keys/` alone.
@@ -851,7 +851,7 @@ Never read or print `keys/ota.key` or `.cargo/secrets.toml`.
 
 ## API
 
-- iotkit: `cargo doc -p iotkit-app` (HTML in `target/*/doc/iotkit_app/`); source in {source}.
+- iotkit: `cargo doc -p iotkit` (HTML in `target/*/doc/iotkit/`); source in {source}.
 - esp-hal: `~/.cargo/registry/src/*/esp-hal-1.2.2/`.
 - Examples: `apps/devkit` (plugged in) and `apps/sleepy` (battery) in {}.
 ",

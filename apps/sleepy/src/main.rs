@@ -10,10 +10,10 @@
 use embassy_executor::Spawner;
 use embassy_time::Duration;
 use esp_hal::tsens::{self, TemperatureSensor};
-use iotkit_app::{Board, Config, DeviceClass, PublicKey, Sensor, SleepConfig, Switch, Unit};
+use iotkit::{Board, Config, DeviceClass, PublicKey, Sensor, SleepConfig, Switch, Unit};
 use log::info;
 
-static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
+static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../../../keys/ota.pub"));
 
 static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
     .unit(Unit::CELSIUS)
@@ -22,7 +22,7 @@ static TEMPERATURE: Sensor = Sensor::new("chip_temperature", "Chip temperature")
     .precision(1);
 static WAKEUPS: Sensor = Sensor::new("wakeups", "Wake-ups").measurement().diagnostic();
 static STAY_AWAKE: Switch = Switch::new("stay_awake", "Stay awake").icon("mdi:sleep-off").config();
-static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .model("ESP32-C6-DevKitC-1")
     .product_name("iotkit sleepy")
     .entities(&[&TEMPERATURE, &WAKEUPS, &STAY_AWAKE]);
@@ -31,7 +31,7 @@ static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(60), max
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    iotkit_app::init!(p);
+    iotkit::init!(p);
 
     // Measured first: before the radio warms the chip.
     let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();
@@ -45,7 +45,7 @@ async fn main(spawner: Spawner) -> ! {
         usb: p.USB_DEVICE,
         boot_button: Some(p.GPIO9.into()),
     };
-    let app = iotkit_app::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
+    let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
     TEMPERATURE.set((celsius * 10.0 + 0.5f32.copysign(celsius)) as i32 as f32 / 10.0);
     WAKEUPS.set(app.boots as f32);
     // Until Home Assistant says otherwise (its retained command comes right after connecting).

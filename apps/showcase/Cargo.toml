@@ -9,12 +9,12 @@ license.workspace      = true
 
 [features]
 default = ["esp32c6"]
-esp32c6 = ["iotkit-app/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-hal-smartled/esp32c6"]
+esp32c6 = ["iotkit/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-hal-smartled/esp32c6"]
 ## Matter over Wi-Fi, next to MQTT.
-matter-wifi = ["iotkit-app/matter-wifi"]
+matter-wifi = ["iotkit/matter-wifi"]
 
 [dependencies]
-iotkit-app = { workspace = true, features = ["ha-update", "smartled"] }
+iotkit = { workspace = true, features = ["ha-update", "smartled"] }
 
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }

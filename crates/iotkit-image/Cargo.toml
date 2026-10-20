@@ -1,6 +1,6 @@
 [package]
 name         = "iotkit-image"
-description  = "Firmware manifest and signature format shared by the device (iotkit-ota) and the host tooling (xtask)"
+description  = "Signed update images and manifests, shared by the device (iotkit::ota) and the CLI; re-exported as iotkit_core::image"
 edition.workspace      = true
 rust-version.workspace = true
 version.workspace      = true

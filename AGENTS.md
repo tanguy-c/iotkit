@@ -4,12 +4,14 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
 
 ## Layout
 
-- `crates/iotkit-*`, from the bottom up:
-  - `config`, `runtime`, `image`, `model`: no iotkit dependencies (`build` is the apps' build.rs helper);
-  - `diag`, `net` (on `config`, `runtime`), `ota`, `provision`;
-  - `link-mqtt` (Home Assistant discovery, `ha.rs`), `link-matter`: both map `model` entities;
-  - `components`: ready-made parts (async fns over embedded-hal traits), host-tested;
-  - `app`: `iotkit_app::start` wires everything for an app; re-exports `components`.
+- `crates/iotkit-core`: no chip, host-tested: `model`, `config` (the store), `image` (signed
+  updates; the CLI signs with it), `runtime` (health check).
+- `crates/iotkit`: what apps depend on. Modules `config::esp`, `diag`, `net`, `ota`, `provision`,
+  `mqtt` (Home Assistant discovery, `ha.rs`), `matter`, `components` (ready-made parts over
+  embedded-hal); `app.rs` (`start`, `Board`, `Config`, `init!`), re-exported at the root. Each
+  module's chip code is in its `esp.rs`, behind `feature = "_esp"` or, on the Wi-Fi side,
+  `cfg(esp_wifi)` (a chip and `wifi`, set by `build.rs`); the rest builds on the host.
+- `crates/iotkit-build`: the apps' build.rs helper.
 - `apps/`: `devkit` (reference firmware, the default member), `showcase` (one entity of each kind),
   `sleepy` (deep sleep), `lean` (opt-out features), `thread-light` (Matter over Thread, uses the crates directly).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
@@ -21,7 +23,7 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
 - One app at a time: `cargo build -p devkit`, `cargo build -p thread-light` (needs clang, cmake).
   Never `--workspace`: devkit's Wi-Fi and thread-light's 802.15.4 would unify into one esp-radio
   build.
-- Host tests: `cargo test-host --features iotkit-image/sign`;
+- Host tests: `cargo test-host` (`iotkit-core`, and `iotkit` without a chip);
   CLI: `cargo test --manifest-path xtask/Cargo.toml --target host-tuple`.
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for clippy, per-chip builds
   and template checks: run the matching lines before pushing.
@@ -35,10 +37,10 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
   settings or RAM/flash budget for another chip or feature: new work is additive, behind features
   or `cfg`. Drop a chip rather than alter the C6 path.
 - Refuse unsupported combinations at build time with `compile_error!`, as in
-  [crates/iotkit-app/src/lib.rs](crates/iotkit-app/src/lib.rs).
+  [crates/iotkit/src/lib.rs](crates/iotkit/src/lib.rs).
 - The C3 has no atomics: `portable-atomic` is an opt-in feature its `esp32c3` features enable; the
   C6 keeps core atomics.
-- No heap growth: `iotkit_app::init!`'s heap (64 + 96 KB) stays as is; use
+- No heap growth: `iotkit::init!`'s heap (64 + 96 KB) stays as is; use
   static or stack buffers (`heapless`, `static_cell`).
 - `template/check-sync.sh` fails when the template's copies drift from the root files.
 - `xtask/answers/*.toml` are CI inputs: a new part kind or board option belongs in them.
@@ -49,10 +51,10 @@ no_std Rust firmware kit for ESP32 (esp-hal 1.2.2, Embassy). Users start at [REA
 - Never run espflash while a monitor holds `/dev/ttyACM0`: it hangs on "Connecting".
 - `partitions.csv` is 8 MB: flash with `--flash-size 8mb`. 4 MB boards use `partitions-4mb.csv`,
   without Matter.
-- `ed25519-compact` and `iotkit-image` build at opt-level `z` ([Cargo.toml](Cargo.toml)); at `s`
+- `ed25519-compact` and `iotkit-core` build at opt-level `z` ([Cargo.toml](Cargo.toml)); at `s`
   the Ed25519 verification grows to about 1.2 MB.
 - esp-radio's `sta_disconnected_pm` starves BLE: keep it off (Improv setup over BLE,
-  `crates/iotkit-net/src/esp.rs`).
+  `crates/iotkit/src/net/esp.rs`).
 - The USB serial port disappears during deep sleep: wait for it to come back before espflash.
 - ESP32-S3 (Xtensa): esp toolchain 1.98.1.0 (`espup install --toolchain-version 1.98.1.0`); 1.99
   fails to link esp-hal 1.2.2.

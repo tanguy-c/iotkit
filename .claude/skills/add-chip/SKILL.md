@@ -11,11 +11,11 @@ is the worked example; follow `esp32c5` with `grep -rn esp32c5`.
    The workspace dependencies never pick a chip. No atomics: enable `portable-atomic` from that
    chip's features only, as `esp32c3` does.
 2. **Guards**: add the chip to the "one chip" `compile_error!`s in
-   `crates/iotkit-app/src/lib.rs`; refuse what cannot work (Matter, deep sleep) there and in
-   `crates/iotkit-link-matter/src/lib.rs`.
-3. **Chip code**: `cfg(feature = ...)` arms for the image chip id (`crates/iotkit-image`,
-   `app::ESP32..`), `CHIP_ID` in `crates/iotkit-ota/src/esp.rs`, reset reasons in
-   `crates/iotkit-diag/src/esp.rs`, pins in `apps/devkit` / `apps/thread-light`.
+   `crates/iotkit/src/lib.rs`; refuse what cannot work (Matter, deep sleep) there and in
+   `crates/iotkit/src/matter/mod.rs`.
+3. **Chip code**: `cfg(feature = ...)` arms for the image chip id (`crates/iotkit-core/src/image.rs`,
+   `app::ESP32..`), `CHIP_ID` in `crates/iotkit/src/ota/esp.rs`, reset reasons in
+   `crates/iotkit/src/diag/esp.rs`, pins in `apps/devkit` / `apps/thread-light`.
 4. **CLI** (`xtask/src/main.rs`): a `Chip` entry (target, id); a new target also needs
    `.cargo/config.toml` (and `rust-toolchain.toml` for a stable target).
 5. **Template**: the `chip` choices in `template/cargo-generate.toml` and what they drive

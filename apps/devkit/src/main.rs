@@ -2,7 +2,7 @@
 //!
 //! Shows up in Home Assistant over MQTT: the RGB LED as a light, a "Color cycle" switch, chip
 //! temperature, uptime, Wi-Fi signal and a Restart button. Everything else comes from
-//! `iotkit_app::start`: Wi-Fi (or a setup window), `iotkit-xxxx.local`, signed updates
+//! `iotkit::start`: Wi-Fi (or a setup window), `iotkit-xxxx.local`, signed updates
 //! (`cargo xtask ota push`), boot counters and the last crash, the USB serial console (`help`).
 
 #![no_std]
@@ -18,7 +18,7 @@ use esp_hal::{Async, rmt::Rmt, time::Rate};
 #[cfg(any(feature = "esp32c6", feature = "esp32c3"))]
 use esp_hal::tsens::{self, TemperatureSensor};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit_app::{
+use iotkit::{
     APP_CHECKS, App, Board, Button, Check, Config, ConsoleExtension, DeviceClass, Entity, HEALTH, Light, LightState,
     PublicKey, SaveLater, Sensor, Setting, Switch, TaskWatch, Unit,
 };
@@ -26,7 +26,7 @@ use log::{info, warn};
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
 
 /// Updates must be signed with the secret half (`cargo xtask keygen`).
-static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../../../keys/ota.pub"));
+static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../../../keys/ota.pub"));
 
 /// Each chip's DevKit pins: the WS2812 RGB LED and the BOOT button (from the boards' user
 /// guides; only the ESP32-C6-DevKitC-1 is tested). A macro, so each pin is taken where it is
@@ -90,7 +90,7 @@ const RUNNING: Check = Check(APP_CHECKS);
 static MAIN_WATCH: TaskWatch = TaskWatch::new("main", 15_000);
 static LED_WATCH: TaskWatch = TaskWatch::new("led", 3_000);
 
-static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .model("ESP32-C6-DevKitC-1")
     .product_name("iotkit devkit")
     .entities(ENTITIES)
@@ -111,7 +111,7 @@ struct SavedLight {
 }
 
 impl Setting for SavedLight {
-    const KEY: u16 = iotkit_app::config::APP_KEYS;
+    const KEY: u16 = iotkit::config::APP_KEYS;
     const VERSION: u8 = 1;
 }
 
@@ -131,7 +131,7 @@ fn console_command(cmd: &str) -> bool {
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    iotkit_app::init!(p);
+    iotkit::init!(p);
 
     let board = Board {
         flash: p.FLASH,
@@ -141,7 +141,7 @@ async fn main(spawner: Spawner) -> ! {
         usb: p.USB_DEVICE,
         boot_button: Some(pin!(p, boot).into()),
     };
-    let app = iotkit_app::start(spawner, board, &CONFIG).await;
+    let app = iotkit::start(spawner, board, &CONFIG).await;
     // Rollback test: a build with `DEVKIT_PANIC_AT_BOOT=1` never gets healthy.
     if option_env!("DEVKIT_PANIC_AT_BOOT").is_some() {
         panic!("DEVKIT_PANIC_AT_BOOT is set");
@@ -166,7 +166,7 @@ async fn main(spawner: Spawner) -> ! {
         if ticks.is_multiple_of(6) {
             info!("alive, up {} s", Instant::now().as_secs());
             UPTIME.set(Instant::now().as_secs() as f32);
-            SIGNAL.set(iotkit_app::net::esp::rssi().map_or(f32::NAN, |r| r as f32));
+            SIGNAL.set(iotkit::net::esp::rssi().map_or(f32::NAN, |r| r as f32));
         }
         ticks += 1;
     }
@@ -188,12 +188,12 @@ async fn temperature_task(tsens: TemperatureSensor<'static>) {
 async fn restart_task() {
     RESTART.wait_press().await;
     info!("restart requested from Home Assistant");
-    iotkit_app::diag::esp::restart().await;
+    iotkit::diag::esp::restart().await;
 }
 
 #[embassy_executor::task]
 async fn led_task(mut led: Led, app: App) {
-    use iotkit_app::provision::esp::{HELD, IDENTIFY, wait_press};
+    use iotkit::provision::esp::{HELD, IDENTIFY, wait_press};
     const COLORS: [RGB8; 4] = [RGB8::new(255, 0, 0), RGB8::new(0, 255, 0), RGB8::new(0, 0, 255), RGB8::new(0, 0, 0)];
     let saved = app.load::<SavedLight>().await;
     let saved = saved.unwrap_or(SavedLight { on: true, brightness: 10, rgb: [0, 255, 0], cycle: false });

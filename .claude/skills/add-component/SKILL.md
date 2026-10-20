@@ -1,16 +1,16 @@
 ---
 name: add-component
-description: Add a ready-made part to `iotkit-components` (an async fn that drives one entity from embedded-hal hardware) and offer it in the `cargo iotkit new` wizard. Use when a common part (sensor, actuator, input) should work without app code.
+description: Add a ready-made part to `iotkit::components` (an async fn that drives one entity from embedded-hal hardware) and offer it in the `cargo iotkit new` wizard. Use when a common part (sensor, actuator, input) should work without app code.
 ---
 
 Follow an existing part: `relay` (output), `button` (input with timing), `poll` (sensor).
 
-1. **The part** (`crates/iotkit-components/src/`): `pub async fn name(entity: &Kind, hw: impl Trait, ..) -> !`
+1. **The part** (`crates/iotkit/src/components/`): `pub async fn name(entity: &Kind, hw: impl Trait, ..) -> !`
    over embedded-hal(-async) traits, not a HAL type. Never a registry, a list of parts or a
    `#[used]`: the app's own task awaits it, so an unused part is not linked. Pure logic (timing,
    maths) in plain functions or a `filter`.
 2. **Dependencies**: an external driver crate is an optional dependency behind its own feature,
-   forwarded by `iotkit-app` (`smartled` is the pattern). It must be `no_std`, embedded-hal 1.0,
+   forwarded by `iotkit` (`smartled` is the pattern). It must be `no_std`, embedded-hal 1.0,
    and allowed by `deny.toml`.
 3. **Tests** (`src/tests.rs`): mock pins and the mock clock (`MockDriver`), one timed test at a
    time (`CLOCK`). `cargo test-host` runs them.

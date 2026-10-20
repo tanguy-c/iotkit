@@ -1079,7 +1079,7 @@ dependencies = [
  "esp-hal",
  "esp-hal-smartled",
  "esp-rtos",
- "iotkit-app",
+ "iotkit",
  "iotkit-build",
  "log",
  "serde",
@@ -2882,34 +2882,43 @@ dependencies = [
 ]
 
 [[package]]
-name = "iotkit-app"
+name = "iotkit"
 version = "0.1.0"
 dependencies = [
+ "bt-hci 0.10.1",
+ "critical-section",
+ "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
  "embassy-sync 0.8.0",
  "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "embedded-io-async 0.7.0",
+ "embedded-storage",
+ "embedded-storage-async",
  "esp-alloc",
+ "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
+ "esp-radio",
  "esp-rtos",
+ "esp-storage",
  "heapless 0.9.3",
- "iotkit-components",
- "iotkit-config",
- "iotkit-diag",
- "iotkit-image",
- "iotkit-link-matter",
- "iotkit-link-mqtt",
- "iotkit-model",
- "iotkit-net",
- "iotkit-ota",
- "iotkit-provision",
- "iotkit-runtime",
+ "iotkit-core",
  "log",
+ "portable-atomic",
+ "postcard",
+ "rs-matter-embassy",
+ "serde",
+ "serde-json-core",
+ "smart-leds",
+ "smoltcp",
  "static_cell",
+ "tinyrlibc",
+ "trouble-host",
 ]
 
 [[package]]
@@ -2917,55 +2926,19 @@ name = "iotkit-build"
 version = "0.1.0"
 
 [[package]]
-name = "iotkit-components"
+name = "iotkit-core"
 version = "0.1.0"
 dependencies = [
  "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
- "iotkit-model",
- "log",
- "smart-leds",
-]
-
-[[package]]
-name = "iotkit-config"
-version = "0.1.0"
-dependencies = [
- "embassy-embedded-hal",
- "embassy-futures",
- "embassy-sync 0.8.0",
- "embedded-storage",
  "embedded-storage-async",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-storage",
+ "heapless 0.9.3",
+ "iotkit-image",
  "log",
  "portable-atomic",
  "postcard",
  "sequential-storage",
- "serde",
-]
-
-[[package]]
-name = "iotkit-diag"
-version = "0.1.0"
-dependencies = [
- "embassy-executor",
- "embassy-time",
- "embedded-storage-async",
- "esp-backtrace",
- "esp-hal",
- "esp-println",
- "heapless 0.9.3",
- "iotkit-config",
- "iotkit-runtime",
- "log",
- "portable-atomic",
- "postcard",
  "serde",
 ]
 
@@ -2977,139 +2950,6 @@ dependencies = [
  "serde",
  "serde-json-core",
  "sha2",
-]
-
-[[package]]
-name = "iotkit-link-matter"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embassy-embedded-hal",
- "embassy-executor",
- "embassy-futures",
- "embassy-sync 0.8.0",
- "embassy-time",
- "esp-hal",
- "heapless 0.9.3",
- "iotkit-config",
- "iotkit-diag",
- "iotkit-model",
- "iotkit-net",
- "log",
- "rs-matter-embassy",
- "serde",
- "static_cell",
- "tinyrlibc",
-]
-
-[[package]]
-name = "iotkit-link-mqtt"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-io-async 0.7.0",
- "esp-hal",
- "heapless 0.9.3",
- "iotkit-config",
- "iotkit-model",
- "iotkit-net",
- "iotkit-runtime",
- "log",
- "portable-atomic",
- "serde",
- "serde-json-core",
-]
-
-[[package]]
-name = "iotkit-model"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embassy-futures",
- "embassy-sync 0.8.0",
- "heapless 0.9.3",
- "portable-atomic",
-]
-
-[[package]]
-name = "iotkit-net"
-version = "0.1.0"
-dependencies = [
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-io-async 0.7.0",
- "esp-hal",
- "esp-radio",
- "heapless 0.9.3",
- "iotkit-config",
- "log",
- "serde",
- "smoltcp",
- "static_cell",
-]
-
-[[package]]
-name = "iotkit-ota"
-version = "0.1.0"
-dependencies = [
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-io-async 0.7.0",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-storage",
- "heapless 0.9.3",
- "iotkit-config",
- "iotkit-diag",
- "iotkit-image",
- "iotkit-net",
- "log",
- "portable-atomic",
- "serde",
-]
-
-[[package]]
-name = "iotkit-provision"
-version = "0.1.0"
-dependencies = [
- "bt-hci 0.10.1",
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-io-async 0.7.0",
- "esp-hal",
- "esp-println",
- "esp-radio",
- "heapless 0.9.3",
- "iotkit-config",
- "iotkit-diag",
- "iotkit-net",
- "log",
- "static_cell",
- "trouble-host",
-]
-
-[[package]]
-name = "iotkit-runtime"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embassy-futures",
- "embassy-sync 0.8.0",
- "portable-atomic",
 ]
 
 [[package]]
@@ -3222,7 +3062,7 @@ dependencies = [
  "embassy-time",
  "esp-hal",
  "esp-rtos",
- "iotkit-app",
+ "iotkit",
  "iotkit-build",
  "log",
 ]
@@ -4647,7 +4487,7 @@ dependencies = [
  "esp-hal",
  "esp-hal-smartled",
  "esp-rtos",
- "iotkit-app",
+ "iotkit",
  "iotkit-build",
  "log",
  "smart-leds",
@@ -4684,7 +4524,7 @@ dependencies = [
  "embassy-time",
  "esp-hal",
  "esp-rtos",
- "iotkit-app",
+ "iotkit",
  "iotkit-build",
  "log",
 ]
@@ -5016,12 +4856,8 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "heapless 0.9.3",
+ "iotkit",
  "iotkit-build",
- "iotkit-config",
- "iotkit-diag",
- "iotkit-link-matter",
- "iotkit-model",
- "iotkit-net",
  "log",
  "smart-leds",
  "static_cell",

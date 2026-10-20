@@ -19,8 +19,8 @@ jobs:
           workspaces: ". -> target\nxtask -> target"
       - run: cargo fmt --all --check
       - run: cargo fmt --all --check --manifest-path xtask/Cargo.toml
-      - run: cargo test-host --features iotkit-image/sign
-      - run: cargo clippy -p iotkit-image -p iotkit-config -p iotkit-diag -p iotkit-runtime -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-model -p iotkit-link-mqtt -p iotkit-link-matter -p iotkit-build -p iotkit-components --target host-tuple --all-targets --features iotkit-image/sign,iotkit-components/smartled -- -D warnings
+      - run: cargo test-host
+      - run: cargo clippy -p iotkit-core -p iotkit -p iotkit-build --target host-tuple --all-targets --no-default-features --features iotkit-core/sign,iotkit/smartled -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --target host-tuple --all-targets -- -D warnings
       - run: cargo test --manifest-path xtask/Cargo.toml --target host-tuple
 
@@ -43,7 +43,7 @@ jobs:
       - run: cargo clippy -p sleepy -- -D warnings
       - run: cargo clippy -p lean -- -D warnings
       # The chip side of the libraries, which the host jobs do not build.
-      - run: cargo clippy -p iotkit-config -p iotkit-diag -p iotkit-net -p iotkit-ota -p iotkit-provision -p iotkit-link-mqtt -p iotkit-app --features iotkit-config/esp32c6,iotkit-diag/esp32c6,iotkit-net/esp32c6,iotkit-ota/esp32c6,iotkit-provision/esp32c6,iotkit-link-mqtt/esp32c6,iotkit-app/esp32c6 -- -D warnings
+      - run: cargo clippy -p iotkit --features iotkit/esp32c6 -- -D warnings
       # Matter over Wi-Fi next to MQTT (git dependency, 8 MB partitions).
       - run: cargo clippy -p devkit --features matter-wifi -- -D warnings
       # Matter over Thread builds OpenThread and mbedtls from C.
@@ -105,7 +105,7 @@ jobs:
       - run: cargo clippy -p ${{ matrix.app }} --no-default-features --features ${{ matrix.chip }} --target ${{ matrix.target }} -- -D warnings
       # Deep sleep (Wi-Fi chips only).
       - if: matrix.app == 'devkit'
-        run: cargo clippy -p iotkit-app --features iotkit-app/${{ matrix.chip }},iotkit-app/deep-sleep --target ${{ matrix.target }} -- -D warnings
+        run: cargo clippy -p iotkit --features iotkit/${{ matrix.chip }},iotkit/deep-sleep --target ${{ matrix.target }} -- -D warnings
       - if: matrix.app == 'devkit'
         run: cargo xtask build --release --chip ${{ matrix.chip }} && cargo xtask verify
 
@@ -126,7 +126,7 @@ jobs:
           key: esp32s3
       - run: cargo xtask keygen
       - run: cargo +esp clippy -p devkit --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
-      - run: cargo +esp clippy -p iotkit-app --features iotkit-app/esp32s3,iotkit-app/deep-sleep --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
+      - run: cargo +esp clippy -p iotkit --features iotkit/esp32s3,iotkit/deep-sleep --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
       - run: cargo xtask build --release --chip esp32s3 && cargo xtask verify
       # `cargo iotkit new` for the S3 (its project uses the esp toolchain).
       - run: cargo install --locked --path xtask

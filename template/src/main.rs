@@ -1,7 +1,7 @@
 //! {{project-name}}: the {% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% else %}DevKit{% endif %}'s RGB LED as a light in Home Assistant (MQTT{% if chip == "esp32c6" %}, and
 //! Matter with `--features matter-wifi`{% endif %}), toggled by a short press of BOOT.
 //!
-//! `iotkit_app::start` brings the rest: Wi-Fi setup (access point, Improv), signed updates
+//! `iotkit::start` brings the rest: Wi-Fi setup (access point, Improv), signed updates
 //! (`cargo iotkit ota push`), crash records, the watchdog, the USB console (`help`).
 
 #![no_std]
@@ -12,17 +12,17 @@ use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{Async, rmt::Rmt, time::Rate};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit_app::{Board, Config, DeviceClass, Light, LightState, PublicKey, Sensor, Unit};
+use iotkit::{Board, Config, DeviceClass, Light, LightState, PublicKey, Sensor, Unit};
 use log::warn;
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
 
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
-static OTA_KEY: PublicKey = iotkit_app::public_key(include_str!("../keys/ota.pub"));
+static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../keys/ota.pub"));
 
 static LED: Light = Light::new("led", "LED");
 static UPTIME: Sensor = Sensor::new("uptime", "Uptime").unit(Unit::SECOND).device_class(DeviceClass::DURATION).diagnostic();
 
-static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .manufacturer("Me")
     .model("{% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% elsif chip == "esp32c3" %}ESP32-C3-DevKitM-1{% elsif chip == "esp32c5" %}ESP32-C5-DevKitC-1{% else %}ESP32-S3-DevKitC-1{% endif %}")
     .product_name("{{project-name}}")
@@ -33,7 +33,7 @@ type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    iotkit_app::init!(p);
+    iotkit::init!(p);
 
     let board = Board {
         flash: p.FLASH,
@@ -43,7 +43,7 @@ async fn main(spawner: Spawner) -> ! {
         usb: p.USB_DEVICE,
         boot_button: Some(p.{% if chip == "esp32s3" %}GPIO0{% elsif chip == "esp32c5" %}GPIO28{% else %}GPIO9{% endif %}.into()),
     };
-    iotkit_app::start(spawner, board, &CONFIG).await;
+    iotkit::start(spawner, board, &CONFIG).await;
 
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
     let led = Led::new(WS2812_TIMING, rmt.channel0, p.{% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}, Rate::from_mhz(80)).unwrap();
@@ -66,7 +66,7 @@ async fn led_task(mut led: Led) {
         if let Err(e) = led.write(brightness([color].into_iter(), state.brightness)).await {
             warn!("LED write failed: {e:?}");
         }
-        state = match select(LED.wait_command(), iotkit_app::provision::esp::wait_press()).await {
+        state = match select(LED.wait_command(), iotkit::provision::esp::wait_press()).await {
             Either::First(wanted) => wanted,
             Either::Second(()) => LightState { on: !state.on, ..state },
         };

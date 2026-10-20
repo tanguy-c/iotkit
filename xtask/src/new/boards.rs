@@ -106,7 +106,7 @@ pub fn board(id: &str) -> Option<&'static Board> {
 }
 
 impl Board {
-    /// Matter over Wi-Fi fits and builds (see `iotkit-app`'s compile errors).
+    /// Matter over Wi-Fi fits and builds (see `iotkit`'s compile errors).
     pub fn matter(&self) -> bool {
         self.chip == "esp32c6"
     }

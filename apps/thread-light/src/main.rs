@@ -10,9 +10,9 @@ use embassy_sync::mutex::Mutex;
 use esp_hal::{Async, clock::CpuClock, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
 // The chip temperature sensor: on the ESP32-C6 only (the H2 has none).
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit_config::esp::SharedStore;
-use iotkit_link_matter::thread::Product;
-use iotkit_model::{Device, Entity, Light, LightState};
+use iotkit::config::esp::SharedStore;
+use iotkit::matter::thread::Product;
+use iotkit::model::{Device, Entity, Light, LightState};
 use log::{error, info, warn};
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
 use static_cell::StaticCell;
@@ -21,7 +21,7 @@ use {
     embassy_futures::select::{Either, select},
     embassy_time::{Duration, Ticker},
     esp_hal::tsens::{self, TemperatureSensor},
-    iotkit_model::{DeviceClass, Sensor, Unit},
+    iotkit::model::{DeviceClass, Sensor, Unit},
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -42,7 +42,7 @@ type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    let boot = iotkit_diag::esp::boot();
+    let boot = iotkit::diag::esp::boot();
     esp_println::logger::init_logger_from_env();
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     // OpenThread, Bluetooth and Matter allocate.
@@ -55,13 +55,13 @@ async fn main(spawner: Spawner) -> ! {
         error!("previous run crashed: {crash}");
     }
 
-    iotkit_config::esp::init(peripherals.FLASH);
+    iotkit::config::esp::init(peripherals.FLASH);
     static STORE: StaticCell<SharedStore> = StaticCell::new();
-    let store = match iotkit_config::esp::open().await {
+    let store = match iotkit::config::esp::open().await {
         Ok(store) => &*STORE.init(Mutex::new(store)),
         Err(e) => panic!("config: {e}"),
     };
-    if let Err(e) = iotkit_diag::record_boot(&mut *store.lock().await, &boot).await {
+    if let Err(e) = iotkit::diag::record_boot(&mut *store.lock().await, &boot).await {
         warn!("could not record the boot: {e}");
     }
 
@@ -76,7 +76,7 @@ async fn main(spawner: Spawner) -> ! {
 
     static NAME: StaticCell<heapless::String<16>> = StaticCell::new();
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or_default();
-    let name = NAME.init(iotkit_net::hostname(mac)).as_str();
+    let name = NAME.init(iotkit::net::hostname(mac)).as_str();
     static DEVICE: StaticCell<Device> = StaticCell::new();
     let device = &*DEVICE.init(Device {
         name,
@@ -87,8 +87,8 @@ async fn main(spawner: Spawner) -> ! {
     });
     let product = Product { name: "iotkit thread light", version: env!("CARGO_PKG_VERSION"), version_number: 1 };
     spawner.spawn(
-        iotkit_link_matter::thread::matter_task(
-            iotkit_link_matter::thread::Peripherals {
+        iotkit::matter::thread::matter_task(
+            iotkit::matter::thread::Peripherals {
                 radio: peripherals.IEEE802154,
                 bt: peripherals.BT,
                 rng: peripherals.RNG,

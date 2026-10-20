@@ -1,5 +1,5 @@
 # 8 MB flash (ESP32-C6-DevKitC-1 N8). Two app slots make OTA possible; 3.9 MB each fits Matter.
-# `config` holds iotkit-config's records and is found by its label: espflash 4.6 rejects custom
+# `config` holds iotkit's settings and is found by its label: espflash 4.6 rejects custom
 # data subtypes (0x40-0xfe). Matter keeps its pairings in `nvs`. For 4 MB boards (no Matter),
 # use partitions-4mb.csv. Changing tables needs a USB flash; nvs/otadata/config keep their place.
 # Name,   Type, SubType,   Offset,   Size

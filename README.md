@@ -2,7 +2,7 @@
 
 A `no_std` firmware kit for the ESP32-C6 (esp-hal + Embassy): Wi-Fi setup, signed OTA updates
 with automatic rollback, crash records and watchdogs, and Home Assistant over MQTT and Matter.
-A device's `main` describes its entities and hardware, and calls `iotkit_app::start` for the rest.
+A device's `main` describes its entities and hardware, and calls `iotkit::start` for the rest.
 
 ## Status
 
@@ -82,14 +82,14 @@ wizard project with no parts gets, shows the RGB LED as a light, toggled by a sh
 ```rust
 static LED: Light = Light::new("led", "LED");
 static TEMPERATURE: Sensor = Sensor::temperature("temperature", "Temperature");   // °C, 1 decimal
-static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))   // name + version from Cargo.toml
+static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))   // name + version from Cargo.toml
     .manufacturer("Me")
     .entities(&[&LED, &TEMPERATURE]);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    iotkit_app::init!(p);   // clocks, heap, RTOS; `p`: the peripherals
-    iotkit_app::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
+    iotkit::init!(p);   // clocks, heap, RTOS; `p`: the peripherals
+    iotkit::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
     // the app's own hardware and tasks
 }
 ```
@@ -100,9 +100,9 @@ task (`TEMPERATURE.set(21.5)`), wait for commands (`LED.wait_command().await`), 
 result with `set`. Device classes and units are typed (`.device_class(DeviceClass::MOTION)`,
 `.unit(Unit::PERCENT)`; `custom("...")` for others), and common sensors have shortcuts
 (`Sensor::humidity`, `pressure`, `illuminance`, `carbon_dioxide`, `pm25`, `battery`, `voltage`,
-`power`). `iotkit_app::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
+`power`). `iotkit::App::load`/`save` keep settings in flash (`SaveLater` debounces them).
 
-Ready-made parts in `iotkit_app::components` drive an entity from any embedded-hal pin, PWM
+Ready-made parts in `iotkit::components` drive an entity from any embedded-hal pin, PWM
 channel or driver: `relay`, `binary_input`, `button` (press, double, triple, long), `dimmer`,
 `fan`, `rgb_light` (WS2812, feature `smartled`), and `poll` for sensors, with filters
 (`Linear` calibration, `Clamp`, `MovingAverage`, `Delta`, ...). The app awaits one in its own
@@ -181,7 +181,7 @@ trial is counted; `push` then reports the rollback.
 
 ### Updates from Home Assistant
 
-With `iotkit-app`'s `ha-update` feature (on in the template), the device has a *Firmware* update
+With `iotkit`'s `ha-update` feature (on in the template), the device has a *Firmware* update
 entity: Home Assistant shows the installed and latest versions, the release summary and its
 link, and installs the update with progress. The device checks a manifest URL at start, then
 every 6 hours:
@@ -235,13 +235,13 @@ The Matter controller needs the PC's network interface towards the device:
 
 ### Battery devices (deep sleep)
 
-`iotkit-app`'s `deep-sleep` feature (MQTT only; not with `matter-wifi`) starts a device that
+`iotkit`'s `deep-sleep` feature (MQTT only; not with `matter-wifi`) starts a device that
 wakes up, reports and sleeps again. `apps/sleepy` is the example:
 
 ```rust
 static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(300), max_awake: Duration::from_secs(30) };
 
-let app = iotkit_app::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
+let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
 TEMPERATURE.set(reading);
 app.sleep().await // sends the states, disconnects, sleeps `interval`
 ```
@@ -261,7 +261,7 @@ app.sleep().await // sends the states, disconnects, sleeps `interval`
   time).
 - **Wake reason:** `app.wake_reason` (`PowerOn`, `Timer`, `Pin`); a pin armed with esp-hal's
   `Input::wakeup_enable` wakes it too (on the C6 only GPIO0-7, so not BOOT).
-- **Battery level:** `iotkit_app::battery::Battery` reads an ADC1 pin behind a divider, with a
+- **Battery level:** `iotkit::battery::Battery` reads an ADC1 pin behind a divider, with a
   LiPo, 2×AA alkaline or custom discharge curve: `Battery::new(p.ADC1, p.GPIO2, 2.0).report(&BATTERY, Some(&VOLTAGE))`,
   before Wi-Fi starts (the radio's load lowers the voltage).
 
@@ -281,7 +281,7 @@ compile out debug and trace logs (they would cost RAM): for those, build without
 
 ## 9. Only what the device uses
 
-`iotkit-app`'s services are features, all on by default; a device that does not need one
+`iotkit`'s services are features, all on by default; a device that does not need one
 builds without it (`default-features = false`, then list the ones to keep):
 
 | Feature | What | Without it |
@@ -300,9 +300,9 @@ Names: `IOTKIT_HOSTNAME` (default `iotkit`: `iotkit-aefc.local`, the access poin
 Home Assistant) and `IOTKIT_TOPIC_PREFIX` (default `iotkit`: `iotkit/<host>/...`), set in the
 project's `.cargo/config.toml` `[env]`.
 
-Without `start` at all: the crates work on their own (`iotkit-ota` for signed updates,
-`iotkit-config` for settings, `iotkit-provision`, ...); `apps/thread-light` builds its firmware
-from them directly.
+Without `start` at all: the modules work on their own (`iotkit::ota` for signed updates,
+`iotkit::config` for settings, `iotkit::provision`, ...); `apps/thread-light` builds its firmware
+from them directly (`default-features = false`).
 
 ## 10. VSCode
 
@@ -314,8 +314,9 @@ probe-rs over the built-in USB-JTAG.
 
 | Path | What |
 | --- | --- |
-| `crates/iotkit-app` | `start`: the kit in one call, the console |
-| `crates/iotkit-*` | the layers: config (settings in flash), diag, runtime (health), net, ota, image (manifest), provision, model, link-mqtt, link-matter, build (`build.rs` helper) |
+| `crates/iotkit` | what a device depends on: `start` and the modules (`net`, `ota`, `provision`, `mqtt`, `matter`, `components`, `diag`, `config`) |
+| `crates/iotkit-core` | the chip-independent part, re-exported by `iotkit`: `model`, `config` (the store), `image` (signed updates), `runtime` (health) |
+| `crates/iotkit-build` | the apps' `build.rs` helper |
 | `apps/devkit` | reference firmware; `cargo xtask ...` here is the same CLI as `cargo iotkit` |
 | `apps/showcase` | one entity of each kind, simulated, over MQTT and Matter |
 | `apps/sleepy` | a deep-sleeping sensor |
@@ -325,7 +326,7 @@ probe-rs over the built-in USB-JTAG.
 | `test-server/` | broker, Home Assistant and Matter controller for tests |
 
 Before building the apps here, create a signing key: `cargo xtask keygen` (`keys/` is git-ignored:
-each developer signs with their own). Host tests: `cargo test-host --features iotkit-image/sign`. Build apps one at a time
+each developer signs with their own). Host tests: `cargo test-host`. Build apps one at a time
 (`cargo build -p devkit`): `cargo build --workspace` fails, because devkit (Wi-Fi) and
 thread-light (802.15.4) would share one esp-radio build.
 
@@ -344,4 +345,7 @@ thread-light (802.15.4) would share one esp-radio build.
 
 ## License
 
-[Apache License, Version 2.0](LICENSE).
+At your option, [Apache License, Version 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).
+
+Unless you state otherwise, any contribution you submit for inclusion in iotkit is licensed as
+above, without any additional terms or conditions.

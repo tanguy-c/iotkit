@@ -10,15 +10,12 @@ license.workspace      = true
 [features]
 ## The chip: one with an 802.15.4 radio (the ESP32-C6 by default).
 default = ["esp32c6"]
-esp32c6 = ["esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-alloc/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-hal-smartled/esp32c6", "esp-radio/esp32c6", "esp-println/esp32c6", "iotkit-config/esp32c6", "iotkit-diag/esp32c6", "iotkit-link-matter/esp32c6"]
-esp32h2 = ["esp-hal/esp32h2", "esp-rtos/esp32h2", "esp-alloc/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-hal-smartled/esp32h2", "esp-radio/esp32h2", "esp-println/esp32h2", "iotkit-config/esp32h2", "iotkit-diag/esp32h2", "iotkit-link-matter/esp32h2"]
+esp32c6 = ["esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-alloc/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-hal-smartled/esp32c6", "esp-radio/esp32c6", "esp-println/esp32c6", "iotkit/esp32c6"]
+esp32h2 = ["esp-hal/esp32h2", "esp-rtos/esp32h2", "esp-alloc/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-hal-smartled/esp32h2", "esp-radio/esp32h2", "esp-println/esp32h2", "iotkit/esp32h2"]
 
 [dependencies]
-iotkit-config      = { workspace = true }
-iotkit-diag        = { workspace = true, features = ["panic-handler"] }
-iotkit-link-matter = { workspace = true, features = ["thread"] }
-iotkit-model       = { workspace = true }
-iotkit-net         = { workspace = true }
+# A path, not `workspace = true`: older cargo cannot turn the default features off over it.
+iotkit = { path = "../../crates/iotkit", default-features = false, features = ["matter-thread", "panic-handler"] }
 
 esp-alloc              = { workspace = true }
 esp-hal                = { workspace = true }

@@ -48,7 +48,7 @@ mod tests {
         }
         let cargo = render("Cargo.toml", FILES[1].1, "my-device", "esp32c3", "/opt/iotkit").unwrap();
         assert!(cargo.contains("name         = \"my-device\"") && cargo.contains("flash-size = \"4mb\""));
-        assert!(cargo.contains("iotkit-app = { path = \"/opt/iotkit/crates/iotkit-app\""));
+        assert!(cargo.contains("iotkit = { path = \"/opt/iotkit/crates/iotkit\""));
         // No checkout: the git repository.
         let cargo = render("Cargo.toml", FILES[1].1, "my-device", "esp32c6", "").unwrap();
         let git = format!("git = \"{}\"", crate::new::IOTKIT_GIT);

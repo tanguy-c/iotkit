@@ -11,25 +11,16 @@ default-members = ["apps/devkit"]
 edition      = "2024"
 rust-version = "1.95"
 version      = "0.1.0"
-license      = "Apache-2.0"
+license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/tanguy-c/iotkit"
 # Not on crates.io (yet): projects use the git repository.
 publish      = false
 
 [workspace.dependencies]
+iotkit-core   = { path = "crates/iotkit-core" }
 iotkit-image  = { path = "crates/iotkit-image" }
-iotkit-config = { path = "crates/iotkit-config" }
-iotkit-diag   = { path = "crates/iotkit-diag" }
-iotkit-runtime = { path = "crates/iotkit-runtime" }
-iotkit-net    = { path = "crates/iotkit-net" }
-iotkit-ota    = { path = "crates/iotkit-ota" }
-iotkit-provision = { path = "crates/iotkit-provision" }
-iotkit-model  = { path = "crates/iotkit-model" }
-iotkit-link-mqtt = { path = "crates/iotkit-link-mqtt" }
-iotkit-link-matter = { path = "crates/iotkit-link-matter" }
-iotkit-app    = { path = "crates/iotkit-app" }
+iotkit        = { path = "crates/iotkit" }
 iotkit-build  = { path = "crates/iotkit-build" }
-iotkit-components = { path = "crates/iotkit-components" }
 
 # No chip feature here: each app picks its chip (`esp32c6` by default) and forwards it.
 esp-hal                = { version = "~1.2.2", features = ["log-04", "unstable"] }
@@ -54,7 +45,7 @@ log                    = { version = "0.4.27", features = ["release_max_level_in
 opt-level = "s"
 
 # Ed25519 verification unrolls into about 1.2 MB at `s`; at `z` it is a fraction of that. Also
-# for `iotkit-image`, as LTO inlines the verification into it.
+# for `iotkit-image` (kept apart for this), as LTO inlines the verification into it.
 [profile.release.package.ed25519-compact]
 opt-level = "z"
 

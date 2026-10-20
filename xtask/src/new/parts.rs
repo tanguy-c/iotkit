@@ -86,7 +86,7 @@ impl Bus {
     }
 }
 
-/// A ready-made part from `iotkit_app::components`, used on plugged-in devices with a pin
+/// A ready-made part from `iotkit::components`, used on plugged-in devices with a pin
 /// chosen (else the TODO stays).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Component {

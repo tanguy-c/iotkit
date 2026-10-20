@@ -5,12 +5,12 @@ description: Add a new entity kind (like Valve or Lock) through the model, the M
 
 Follow an existing kind end to end: `grep -rn Valve crates xtask apps` lists every place.
 
-1. **Model** (`crates/iotkit-model`): a variant in `Kind` (`src/lib.rs`), the entity type in
+1. **Model** (`crates/iotkit-core/src/model`): a variant in `Kind` (`mod.rs`), the entity type in
    `src/entities.rs` or `src/appliances.rs` (`builders!`, `motion!`), its `Spec`, `State` and
    `Command` if new, the re-export in `lib.rs`; a test in `src/tests.rs`.
-2. **MQTT** (`crates/iotkit-link-mqtt/src/ha.rs`): the discovery component and config, state
+2. **MQTT** (`crates/iotkit/src/mqtt/ha.rs`): the discovery component and config, state
    payload, command parsing (`match` on `Kind`); a test in its `tests` module.
-3. **Matter** (`crates/iotkit-link-matter`), if a device type fits, else map the kind to `None`:
+3. **Matter** (`crates/iotkit/src/matter`), if a device type fits, else map the kind to `None`:
    - `src/lib.rs`: a `MatterKind`, the `Kind -> MatterKind` match, the table in the crate docs;
    - `src/map.rs`: value conversions, host-tested there;
    - `src/endpoints.rs`: device type and clusters; `src/appliances.rs` or `src/clusters.rs`:
@@ -20,6 +20,6 @@ Follow an existing kind end to end: `grep -rn Valve crates xtask apps` lists eve
    generates and builds it).
 5. **Showcase**: one simulated entity in `apps/showcase/src/main.rs`.
 6. **Docs**: the entity lists in `README.md`.
-7. Check: `cargo test-host --features iotkit-image/sign`, xtask tests, clippy of `showcase` with and
+7. Check: `cargo test-host`, xtask tests, clippy of `showcase` with and
    without `matter-wifi` (see `.github/workflows/ci.yml`), then `tools/size-check.sh`: unused
    kinds must cost devkit nothing.

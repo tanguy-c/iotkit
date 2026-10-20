@@ -18,7 +18,7 @@ mod new;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
-use iotkit_image::{Manifest, Version, app, hex_decode, hex_encode, sha256};
+use iotkit_core::image::{Manifest, Version, app, hex_decode, hex_encode, sha256};
 
 /// The chips iotkit builds for: name (cargo feature and `espflash --chip`), target, image id.
 const CHIPS: &[Chip] = &[
