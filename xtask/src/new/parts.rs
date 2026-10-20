@@ -23,10 +23,8 @@ impl Group {
 /// How the generated code drives the part.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Stub {
-    /// A reading (`Sensor::set`), every 30 s; `example` is a plausible value.
-    Reading {
-        example: &'static str,
-    },
+    /// A reading (`Sensor::set`), every 30 s.
+    Reading,
     /// Something detected (`BinarySensor::set`).
     Detect,
     /// Presses (`Event::trigger`).
@@ -39,6 +37,53 @@ pub enum Stub {
     Climate,
     Number,
     Select,
+}
+
+/// How a part talks to the chip.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Bus {
+    GpioIn,
+    GpioOut,
+    Adc,
+    I2c,
+    OneWire,
+    Uart,
+    Ledc,
+    Rmt,
+}
+
+impl Bus {
+    /// The esp-hal 1.2 setup, on one line, for `pin` (the ADC needs `p.GPIOn`, not an `AnyPin`).
+    pub fn hint(self, pin: &str) -> String {
+        match self {
+            Bus::GpioIn => format!("GPIO: `Input::new({pin}, InputConfig::default().with_pull(Pull::Up))`"),
+            Bus::GpioOut => {
+                format!(
+                    "GPIO: `Output::new({pin}, Level::Low, OutputConfig::default())` once, then `set_high()`/`set_low()`"
+                )
+            }
+            Bus::Adc => {
+                format!("ADC: `config.enable_pin({pin}, Attenuation::_11dB)`, `Adc::new(p.ADC1, config).into_async()`")
+            }
+            Bus::I2c => {
+                format!("I²C: `I2c::new(p.I2C0, Default::default()).unwrap().with_sda({pin}).with_scl(…).into_async()`")
+            }
+            Bus::OneWire => {
+                format!(
+                    "1-Wire: `Flex::new({pin})`, `apply_output_config` with `DriveMode::OpenDrain`, input and output enabled"
+                )
+            }
+            Bus::Uart => format!(
+                "UART: `Uart::new(p.UART1, cfg).unwrap().with_rx({pin}).into_async()`, `cfg`: `uart::Config::default().with_baudrate(9600)`"
+            ),
+            Bus::Ledc => format!(
+                "LEDC: `Ledc::new(p.LEDC)`, `timer::<LowSpeed>(Timer0)`, `channel(Channel0, {pin})`, `set_duty(percent)`"
+            ),
+            Bus::Rmt => format!(
+                "RMT: `Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async()` (one per chip), its `channel1` on `{pin}`"
+            ),
+        }
+    }
 }
 
 pub struct Kind {
@@ -57,8 +102,12 @@ pub struct Kind {
     pub analog: bool,
     /// What to connect to the pin (README's wiring table).
     pub wiring: &'static str,
-    /// The TODO in the generated code.
+    /// The TODO in the generated code: what to do, in the part's terms.
     pub todo: &'static str,
+    /// How it can be wired (alternatives): one setup hint each under the TODO.
+    pub buses: &'static [Bus],
+    /// Driver crates (no_std, embedded-hal 1.0), checked on crates.io.
+    pub drivers: &'static str,
     pub stub: Stub,
     /// The Matter device type it shows as, if any.
     pub matter: Option<&'static str>,
@@ -76,8 +125,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("°C").device_class("temperature").measurement().precision(1)"#,
         analog: false,
         wiring: "the sensor's data pin (DS18B20 on 1-Wire with a 4.7 kΩ pull-up), or SDA of an I²C sensor (BME280, SHT31)",
-        todo: "read the temperature in °C: a DS18B20 (crate `ds18b20` + `one-wire-bus`) or an I²C sensor (crates `bme280`, `sht3x`; esp-hal's `I2c`)",
-        stub: Stub::Reading { example: "21.5" },
+        todo: "read °C",
+        buses: &[Bus::I2c, Bus::OneWire],
+        drivers: "`sht4x`, `embedded-sht3x`, `bme280-rs`; DS18B20: `onewire` (blocking)",
+        stub: Stub::Reading,
         matter: Some("Temperature sensor"),
     },
     Kind {
@@ -90,8 +141,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("%").device_class("humidity").measurement().precision(1)"#,
         analog: false,
         wiring: "SDA of an I²C sensor (BME280, SHT31, AHT20)",
-        todo: "read the relative humidity in %: an I²C sensor (crates `bme280`, `sht3x`, `aht20-driver`; esp-hal's `I2c`)",
-        stub: Stub::Reading { example: "45.0" },
+        todo: "read % RH",
+        buses: &[Bus::I2c],
+        drivers: "`sht4x`, `embedded-sht3x`, `bme280-rs`, `aht20-async`",
+        stub: Stub::Reading,
         matter: Some("Humidity sensor"),
     },
     Kind {
@@ -104,8 +157,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("hPa").device_class("pressure").measurement().precision(1)"#,
         analog: false,
         wiring: "SDA of an I²C sensor (BME280, BMP280)",
-        todo: "read the pressure in hPa: a BME280/BMP280 over I²C (crate `bme280`; esp-hal's `I2c`)",
-        stub: Stub::Reading { example: "1013.2" },
+        todo: "read hPa",
+        buses: &[Bus::I2c],
+        drivers: "`bme280-rs`; BMP280: `bme280` (blocking)",
+        stub: Stub::Reading,
         matter: Some("Pressure sensor"),
     },
     Kind {
@@ -118,8 +173,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("lx").device_class("illuminance").measurement()"#,
         analog: false,
         wiring: "SDA of an I²C light sensor (BH1750, VEML7700)",
-        todo: "read the light level in lux: a BH1750 or VEML7700 over I²C (crates `bh1750`, `veml7700`; esp-hal's `I2c`)",
-        stub: Stub::Reading { example: "320.0" },
+        todo: "read lux",
+        buses: &[Bus::I2c],
+        drivers: "`bh1750` (blocking), `veml7700`",
+        stub: Stub::Reading,
         matter: Some("Light sensor"),
     },
     Kind {
@@ -132,8 +189,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("ppm").device_class("carbon_dioxide").measurement()"#,
         analog: false,
         wiring: "SDA of an SCD4x (I²C), or TX of a MH-Z19 (UART)",
-        todo: "read the CO2 level in ppm: an SCD40/41 over I²C (crate `scd4x`) or a MH-Z19 over UART",
-        stub: Stub::Reading { example: "650.0" },
+        todo: "read ppm",
+        buses: &[Bus::I2c, Bus::Uart],
+        drivers: "SCD4x: `scd4x`; MH-Z19: `mh-z19` (frames only; add `.with_tx`)",
+        stub: Stub::Reading,
         matter: Some("Air quality sensor"),
     },
     Kind {
@@ -146,8 +205,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("µg/m³").device_class("pm25").measurement()"#,
         analog: false,
         wiring: "TX of a PMS5003 / SDS011 (UART)",
-        todo: "read PM2.5 in µg/m³: a PMS5003 or SDS011 over UART (esp-hal's `Uart`; crate `pmsx003`)",
-        stub: Stub::Reading { example: "8.0" },
+        todo: "read PM2.5 in µg/m³",
+        buses: &[Bus::Uart],
+        drivers: "PMS5003: `pmsx003` (blocking `embedded-io`)",
+        stub: Stub::Reading,
         matter: Some("Air quality sensor"),
     },
     Kind {
@@ -160,8 +221,10 @@ pub const KINDS: &[Kind] = &[
         builder: r#".unit("%").device_class("moisture").measurement()"#,
         analog: true,
         wiring: "the probe's analog output (AOUT)",
-        todo: "read the probe with the ADC (esp-hal's `Adc` on ADC1) and map dry..wet to 0..100 %",
-        stub: Stub::Reading { example: "40.0" },
+        todo: "read the probe, map dry..wet to 0..100 %",
+        buses: &[Bus::Adc],
+        drivers: "",
+        stub: Stub::Reading,
         matter: None,
     },
     Kind {
@@ -174,8 +237,10 @@ pub const KINDS: &[Kind] = &[
         builder: ".measurement()",
         analog: false,
         wiring: "your sensor",
-        todo: "read the value (add `.unit(\"...\")` and a `.device_class(\"...\")` to the entity)",
-        stub: Stub::Reading { example: "1.0" },
+        todo: "read the value (and add `.unit(\"...\")`, `.device_class(\"...\")` to the entity)",
+        buses: &[],
+        drivers: "",
+        stub: Stub::Reading,
         matter: None,
     },
     // Detects
@@ -189,7 +254,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("motion")"#,
         analog: false,
         wiring: "the PIR sensor's OUT pin (HC-SR501, AM312)",
-        todo: "detect motion: `Input::new(_pin, InputConfig::default())`, high while the PIR sees motion",
+        todo: "high while the PIR sees motion",
+        buses: &[Bus::GpioIn],
+        drivers: "",
         stub: Stub::Detect,
         matter: Some("Occupancy sensor"),
     },
@@ -203,7 +270,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("door")"#,
         analog: false,
         wiring: "one side of the reed switch (the other to GND)",
-        todo: "read the reed switch: `Input::new(_pin, InputConfig::default().with_pull(Pull::Up))`, low while closed (`true` = open)",
+        todo: "low while closed (`true` = open)",
+        buses: &[Bus::GpioIn],
+        drivers: "",
         stub: Stub::Detect,
         matter: Some("Contact sensor"),
     },
@@ -217,7 +286,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("moisture")"#,
         analog: false,
         wiring: "one probe of the leak sensor (the other to GND)",
-        todo: "detect water: `Input::new(_pin, InputConfig::default().with_pull(Pull::Up))`, low when the probes are wet",
+        todo: "low when the probes are wet",
+        buses: &[Bus::GpioIn],
+        drivers: "",
         stub: Stub::Detect,
         matter: Some("Water leak detector"),
     },
@@ -231,7 +302,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("smoke")"#,
         analog: false,
         wiring: "the alarm's interconnect / relay output",
-        todo: "read the smoke alarm's output: `Input::new(_pin, InputConfig::default())`",
+        todo: "read the alarm's output",
+        buses: &[Bus::GpioIn],
+        drivers: "",
         stub: Stub::Detect,
         matter: Some("Smoke alarm"),
     },
@@ -246,7 +319,9 @@ pub const KINDS: &[Kind] = &[
         builder: "",
         analog: false,
         wiring: "the relay module's IN pin",
-        todo: "drive the relay: `Output::new(_pin, Level::Low, OutputConfig::default())` once, then `set_level(on.into())`",
+        todo: "switch the relay to `on`",
+        buses: &[Bus::GpioOut],
+        drivers: "",
         stub: Stub::Switch,
         matter: Some("On/off plug"),
     },
@@ -260,7 +335,9 @@ pub const KINDS: &[Kind] = &[
         builder: "",
         analog: false,
         wiring: "DIN of a WS2812 strip, or the gate of a MOSFET for a single-colour strip",
-        todo: "drive the light: a WS2812 strip with esp-hal's `Rmt` (crate `esp-hal-smartled`), or a dimmer with `Ledc` PWM",
+        todo: "drive the light from `state.on`, `state.brightness`, `state.rgb`",
+        buses: &[Bus::Rmt, Bus::Ledc],
+        drivers: "WS2812: `esp-hal-smartled` (as the status LED)",
         stub: Stub::Light,
         matter: Some("Extended colour light"),
     },
@@ -274,7 +351,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("blind").position()"#,
         analog: false,
         wiring: "the motor driver's direction / enable input",
-        todo: "move the motor to `position` (0 closed, 100 open), e.g. timed runs of a motor driver",
+        todo: "move the motor to `position` (0 closed, 100 open; halt it on `Stop`), e.g. timed runs",
+        buses: &[Bus::GpioOut],
+        drivers: "",
         stub: Stub::Cover,
         matter: Some("Window covering"),
     },
@@ -288,7 +367,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("water")"#,
         analog: false,
         wiring: "the valve's relay or driver input",
-        todo: "open or close the valve (`position`: 0 closed, 100 open), e.g. a relay on a solenoid valve",
+        todo: "open or close the valve (`position`: 0 closed, 100 open)",
+        buses: &[Bus::GpioOut],
+        drivers: "",
         stub: Stub::Cover,
         matter: Some("Water valve"),
     },
@@ -302,7 +383,9 @@ pub const KINDS: &[Kind] = &[
         builder: "",
         analog: false,
         wiring: "the strike's relay or driver input",
-        todo: "lock or unlock: e.g. drive the door strike's relay",
+        todo: "drive the strike's relay",
+        buses: &[Bus::GpioOut],
+        drivers: "",
         stub: Stub::Lock,
         matter: Some("Door lock"),
     },
@@ -316,7 +399,9 @@ pub const KINDS: &[Kind] = &[
         builder: ".speed()",
         analog: false,
         wiring: "the fan's PWM input or its MOSFET gate",
-        todo: "run the fan at `wanted` (on, speed in %): PWM with esp-hal's `Ledc`",
+        todo: "run the fan at `wanted` (on, speed in %; PWM at 25 kHz)",
+        buses: &[Bus::Ledc],
+        drivers: "",
         stub: Stub::Fan,
         matter: Some("Fan"),
     },
@@ -330,7 +415,9 @@ pub const KINDS: &[Kind] = &[
         builder: "",
         analog: false,
         wiring: "the heater's relay input",
-        todo: "read the room temperature into `state.current`, then switch the heater towards `state.target` (set `state.action`)",
+        todo: "read the room temperature into `state.current` (as for a temperature part), then switch the heater towards `state.target` (set `state.action`)",
+        buses: &[Bus::GpioOut],
+        drivers: "",
         stub: Stub::Climate,
         matter: Some("Thermostat"),
     },
@@ -345,6 +432,8 @@ pub const KINDS: &[Kind] = &[
         analog: false,
         wiring: "(none: a value the device uses)",
         todo: "use the new value (and keep it across restarts with `App::save`, if needed)",
+        buses: &[],
+        drivers: "",
         stub: Stub::Number,
         matter: None,
     },
@@ -359,6 +448,8 @@ pub const KINDS: &[Kind] = &[
         analog: false,
         wiring: "(none: a choice the device uses)",
         todo: "apply the chosen mode (`index` into the options)",
+        buses: &[],
+        drivers: "",
         stub: Stub::Select,
         matter: Some("Mode select"),
     },
@@ -373,7 +464,9 @@ pub const KINDS: &[Kind] = &[
         builder: r#".device_class("button")"#,
         analog: false,
         wiring: "one side of the button (the other to GND)",
-        todo: "detect presses: `Input::new(_pin, InputConfig::default().with_pull(Pull::Up))`, `wait_for_falling_edge().await`, then time them; `trigger(0)` press, `trigger(1)` double, `trigger(2)` long",
+        todo: "time the presses (`wait_for_falling_edge().await`, not the timer): `trigger(0)` press, `trigger(1)` double, `trigger(2)` long",
+        buses: &[Bus::GpioIn],
+        drivers: "",
         stub: Stub::Presses,
         matter: Some("Generic switch"),
     },
@@ -386,7 +479,7 @@ pub fn kind(id: &str) -> Option<&'static Kind> {
 impl Kind {
     /// Read once per wake-up on a battery device (rather than driven by commands).
     pub fn is_reading(&self) -> bool {
-        matches!(self.stub, Stub::Reading { .. } | Stub::Detect)
+        matches!(self.stub, Stub::Reading | Stub::Detect)
     }
 }
 
@@ -436,5 +529,18 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), KINDS.len(), "unique ids");
+    }
+
+    /// Every wired part gets a hint per bus, on the pin it is given.
+    #[test]
+    fn hints() {
+        for k in KINDS {
+            let wired = !k.wiring.starts_with("(none") && k.id != "number";
+            assert_eq!(!k.buses.is_empty(), wired, "{}", k.id);
+            for bus in k.buses {
+                assert!(bus.hint("p.GPIO23").contains("p.GPIO23"), "{} {bus:?}", k.id);
+            }
+            assert_eq!(k.analog, k.buses == [Bus::Adc], "{}", k.id);
+        }
     }
 }

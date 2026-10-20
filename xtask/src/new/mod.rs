@@ -51,6 +51,8 @@ pub struct Answers {
     /// The manifest Home Assistant's updates come from.
     pub updates_url: Option<String>,
     pub parts: Vec<PartAnswer>,
+    /// Writes AGENTS.md, for AI coding agents.
+    pub ai_agents: bool,
 }
 
 impl Default for Answers {
@@ -76,6 +78,7 @@ impl Default for Answers {
             matter_discriminator: None,
             updates_url: None,
             parts: Vec::new(),
+            ai_agents: false,
         }
     }
 }
@@ -328,6 +331,9 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
     // The generated code, in the project's style (best effort: rustfmt may be missing).
     let _ = std::process::Command::new("rustfmt").args(["--edition", "2024", "src/main.rs"]).current_dir(dir).status();
     put(&dir.join("README.md"), &codegen::readme(p))?;
+    if p.answers.ai_agents {
+        put(&dir.join("AGENTS.md"), &codegen::agents_md(p))?;
+    }
     if let Some(secrets) = codegen::secrets(p) {
         put(&dir.join(".cargo/secrets.toml"), &secrets)?;
     }
@@ -369,6 +375,9 @@ fn report(p: &Project, dir: &Path) {
         "\nNext:\n  cd {}\n  cargo iotkit flash --release{flash}\n\nWiring and setup: README.md. Each part's code is a TODO in src/main.rs.",
         dir.display()
     );
+    if p.answers.ai_agents {
+        println!("AI coding agents: AGENTS.md.");
+    }
 }
 
 // The questions.
@@ -551,6 +560,12 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         a.parts.push(PartAnswer { kind: kind.id.into(), name: Some(name), pin });
     }
 
+    // 6. Tooling.
+    a.ai_agents = Confirm::new("Set up for AI coding agents (Claude Code, Codex, Cursor, Copilot…)?")
+        .with_default(false)
+        .with_help_message("Adds AGENTS.md")
+        .prompt()?;
+
     let project = Project::new(a, iotkit_path)?;
     summary(&project);
     if !Confirm::new("Create it?").with_default(true).prompt()? {
@@ -618,6 +633,9 @@ fn summary(p: &Project) {
         let pin = part.pin.map_or("pin to choose".into(), |n| format!("GPIO{n}"));
         println!("  part     {} ({}), {pin}", part.name, part.kind.label);
     }
+    if a.ai_agents {
+        println!("  agents   AGENTS.md");
+    }
     for w in &p.warnings {
         println!("  note     {w}");
     }
@@ -681,6 +699,7 @@ mod tests {
         assert!(main.contains("start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP)"), "{main}");
         assert!(main.contains("Duration::from_secs(900)"));
         assert!(main.contains("Battery::new(p.ADC1, p.GPIO3, 2.0).curve(BatteryCurve::ALKALINE_2AA)"));
+        assert!(main.contains("`p.ADC1.reborrow()`"), "the soil probe shares the ADC");
         assert!(!main.contains("led_task") && !main.contains("Ticker"));
         let cargo = codegen::cargo_toml(
             &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c3", "/opt/iotkit").unwrap(),
@@ -688,5 +707,52 @@ mod tests {
         )
         .unwrap();
         assert!(cargo.contains("\"deep-sleep\"") && !cargo.contains("matter-wifi"), "{cargo}");
+    }
+
+    /// One `TODO(<id>)` per part, its hints in `main` on a battery device, and every comment
+    /// within the project's `max_width`.
+    #[test]
+    fn todos() {
+        for (answers, battery) in
+            [(include_str!("../../answers/c6.toml"), false), (include_str!("../../answers/c3.toml"), true)]
+        {
+            let p = project(answers);
+            let main = codegen::main_rs(&p);
+            for part in &p.parts {
+                assert_eq!(main.matches(&format!("TODO({}):", part.id)).count(), 1, "{}", part.id);
+            }
+            // Plus the header's `TODO(<entity id>)` and, on battery, `TODO(battery)` (the divider).
+            assert_eq!(main.matches("TODO(").count(), p.parts.len() + 1 + usize::from(battery), "{main}");
+            assert!(!main.contains("TODO:"), "{main}");
+            for line in main.lines().filter(|l| l.trim_start().starts_with("//")) {
+                assert!(line.chars().count() <= codegen::MAX_WIDTH, "{line}");
+            }
+            if battery {
+                assert!(main.contains("with_sda(p.GPIO4)") && main.contains("Input::new(p.GPIO5"), "{main}");
+            }
+        }
+    }
+
+    /// AGENTS.md only when asked for, with the lines that apply to the device.
+    #[test]
+    fn agents() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/gen/xtask-test");
+        for (name, answers) in
+            [("c6", include_str!("../../answers/c6.toml")), ("c3", include_str!("../../answers/c3.toml"))]
+        {
+            let p = project(answers);
+            let dir = base.join(name);
+            let _ = fs::remove_dir_all(&dir);
+            write(&p, &dir).unwrap();
+            assert_eq!(dir.join("AGENTS.md").exists(), p.answers.ai_agents, "{name}");
+            let md = codegen::agents_md(&p);
+            assert!(md.contains(&format!("{}. A smart device on an", p.answers.name)), "{md}");
+            assert_eq!(md.contains("Matter"), name == "c6");
+            assert_eq!(md.contains("start_sleepy"), name == "c3");
+            assert!(!md.contains("export-esp"));
+            assert!(md.lines().count() <= 60, "{md}");
+        }
+        assert!(project("ai_agents = true").answers.ai_agents && !project("").answers.ai_agents);
+        assert!(codegen::agents_md(&project("board = \"esp32s3-devkitc-1\"")).contains("export-esp"));
     }
 }

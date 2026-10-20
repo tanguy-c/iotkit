@@ -3,7 +3,10 @@
 
 use std::{collections::BTreeSet, fmt::Write as _};
 
-use super::{MatterMode, Project, parts::Stub};
+use super::{
+    MatterMode, Part, Project,
+    parts::{Bus, Stub},
+};
 
 /// `src/main.rs`. Each part gets an entity and, in its task (or, on a battery device, in
 /// `main`), a `TODO` saying what to write.
@@ -33,23 +36,11 @@ pub fn main_rs(p: &Project) -> String {
             Some(n) => format!(", on GPIO{n}"),
             None => String::new(),
         };
-        let todo = match part.pin {
-            Some(_) => k.todo.to_string(),
-            None => format!("{} (no pin chosen yet: pass one from `main`)", k.todo),
-        };
+        let c = &part.konst;
+        let set = format!("{}, then `{c}.set(..)`", k.todo);
 
         if battery && k.is_reading() {
-            let set = match k.stub {
-                Stub::Reading { example } => format!("{}.set({example});", part.konst),
-                _ => format!("{}.set(false);", part.konst),
-            };
-            // In `main`, the pin is still in `p`.
-            let todo = match part.pin {
-                Some(n) => todo.replace("_pin", &format!("p.GPIO{n}")),
-                None => todo,
-            };
-            readings.push_str(&comment(4, &format!("{}{on_pin}. TODO: {todo}, then:", part.name)));
-            let _ = writeln!(readings, "    // {set}");
+            readings.push_str(&todo(4, part, &set, true));
             continue;
         }
 
@@ -62,39 +53,37 @@ pub fn main_rs(p: &Project) -> String {
         };
         let task = format!("{}_task", part.id);
         let _ = writeln!(spawns, "    spawner.spawn({task}({arg}).unwrap());");
-        let c = &part.konst;
+        // Commands: the TODO sits between the command and the state it reports.
+        let t = todo(8, part, k.todo, false);
         let body = match k.stub {
-            Stub::Reading { example } => {
+            Stub::Reading => {
                 time.extend(["Duration", "Ticker"]);
                 format!(
                     "    let mut ticker = Ticker::every(Duration::from_secs(30));
     loop {{
-{}        // {c}.set({example});
-        ticker.next().await;
+{}        ticker.next().await;
     }}",
-                    comment(8, &format!("TODO: {todo}, then:"))
+                    todo(8, part, &set, false)
                 )
             }
             Stub::Detect | Stub::Presses => {
                 time.insert("Timer");
-                let set = if k.stub == Stub::Detect { "set(true)" } else { "trigger(0)" };
-                let todo = format!(
-                    "{todo}, then wait for the next change (`wait_for_any_edge().await`) instead of the timer:"
-                );
+                let head = match k.stub {
+                    Stub::Detect => format!("{set} at each change (`wait_for_any_edge().await`, not the timer)"),
+                    _ => k.todo.to_string(),
+                };
                 format!(
                     "    loop {{
-{}        // {c}.{set};
-        Timer::after_secs(1).await;
+{}        Timer::after_secs(1).await;
     }}",
-                    comment(8, &format!("TODO: {todo}"))
+                    todo(8, part, &head, false)
                 )
             }
             Stub::Switch => format!(
                 "    {c}.set(false);
     loop {{
         let on = {c}.wait_command().await;
-        // TODO: {todo}.
-        {c}.set(on);
+{t}        {c}.set(on);
     }}"
             ),
             Stub::Light => {
@@ -102,8 +91,7 @@ pub fn main_rs(p: &Project) -> String {
                 format!(
                     "    let mut state = LightState {{ on: false, brightness: 255, rgb: [255, 255, 255] }};
     loop {{
-        // TODO: {todo} (`state.on`, `state.brightness`, `state.rgb`).
-        {c}.set(state);
+{t}        {c}.set(state);
         state = {c}.wait_command().await;
     }}"
                 )
@@ -117,11 +105,9 @@ pub fn main_rs(p: &Project) -> String {
             CoverCommand::Open => 100,
             CoverCommand::Close => 0,
             CoverCommand::Position(p) => p,
-            // TODO: stop moving.
             CoverCommand::Stop => continue,
         }};
-        // TODO: {todo}.
-        {c}.set(Some(if position == 0 {{ CoverState::Closed }} else {{ CoverState::Open }}), Some(position));
+{t}        {c}.set(Some(if position == 0 {{ CoverState::Closed }} else {{ CoverState::Open }}), Some(position));
     }}"
                 )
             }
@@ -134,8 +120,7 @@ pub fn main_rs(p: &Project) -> String {
             LockCommand::Lock => LockState::Locked,
             LockCommand::Unlock | LockCommand::Open => LockState::Unlocked,
         }};
-        // TODO: {todo}.
-        {c}.set(state);
+{t}        {c}.set(state);
     }}"
                 )
             }
@@ -145,8 +130,7 @@ pub fn main_rs(p: &Project) -> String {
                     "    {c}.set(FanState::OFF);
     loop {{
         let wanted = {c}.wait_command().await;
-        // TODO: {todo}.
-        {c}.set(wanted);
+{t}        {c}.set(wanted);
     }}"
                 )
             }
@@ -155,8 +139,7 @@ pub fn main_rs(p: &Project) -> String {
                 format!(
                     "    let mut state = ClimateState {{ mode: HvacMode::Heat, target: 20.0, current: None, action: None }};
     loop {{
-        // TODO: {todo}.
-        {c}.set(state);
+{t}        {c}.set(state);
         let wanted = {c}.wait_command().await;
         state.mode = wanted.mode;
         state.target = wanted.target;
@@ -167,16 +150,14 @@ pub fn main_rs(p: &Project) -> String {
                 "    {c}.set(50.0);
     loop {{
         let value = {c}.wait_command().await;
-        // TODO: {todo}.
-        {c}.set(value);
+{t}        {c}.set(value);
     }}"
             ),
             Stub::Select => format!(
                 "    {c}.set(0);
     loop {{
         let index = {c}.wait_command().await;
-        // TODO: {todo}.
-        {c}.set(index);
+{t}        {c}.set(index);
     }}"
             ),
         };
@@ -234,7 +215,10 @@ async fn {task}({param}) {{
         );
         let _ = writeln!(s, "//! crash records, the watchdog and the USB console (`help`).");
     }
-    s.push_str("//! Each part's code is below: look for `TODO`.\n\n#![no_std]\n#![no_main]\n\n");
+    s.push_str(
+        "//! Each part's code is below: look for `TODO(<entity id>)`. The drivers named there are `no_std`\n\
+         //! and embedded-hal 1.0; prefer their async mode.\n\n#![no_std]\n#![no_main]\n\n",
+    );
 
     // Imports.
     s.push_str("use embassy_executor::Spawner;\n");
@@ -329,11 +313,16 @@ async fn main(spawner: Spawner) -> ! {
     );
     if battery && let Some(pin) = p.answers.battery_pin {
         let curve = if p.answers.battery_curve == super::Curve::TwoAa { "ALKALINE_2AA" } else { "LIPO" };
+        let shared = if p.parts.iter().any(|part| part.kind.analog) {
+            "\n    // A part needs the ADC too: `let mut p` above, and `p.ADC1.reborrow()` here."
+        } else {
+            ""
+        };
         let _ = write!(
             s,
             "
     // Before Wi-Fi starts: the radio's load lowers the voltage. 2.0: two equal resistors
-    // between the battery and GPIO{pin} (TODO: your divider's ratio).
+    // between the battery and GPIO{pin} (TODO(battery): your divider's ratio).{shared}
     Battery::new(p.ADC1, p.GPIO{pin}, 2.0).curve(BatteryCurve::{curve}).report(&BATTERY, None);
 "
         );
@@ -426,36 +415,67 @@ fn comment(indent: usize, text: &str) -> String {
     format!("{:indent$}// {text}\n", "")
 }
 
-/// Wraps `//` comments longer than 100 columns (rustfmt does not), keeping their indent.
+/// A part's `TODO(<id>)`: `head`, then a setup hint per bus and the driver crates. In `main`
+/// (`in_main`), the pin is still `p.GPIOn`; in a task it is `_pin`.
+fn todo(indent: usize, part: &Part, head: &str, in_main: bool) -> String {
+    let k = part.kind;
+    let unpinned =
+        if part.pin.is_none() && !k.buses.is_empty() { " (no pin chosen yet: pass one from `main`)" } else { "" };
+    let mut s = comment(indent, &format!("TODO({}): {head}{unpinned}.", part.id));
+    for &bus in k.buses {
+        let pin = match part.pin {
+            Some(n) if in_main || bus == Bus::Adc => format!("p.GPIO{n}"),
+            Some(_) => "_pin".into(),
+            None => "<pin>".into(),
+        };
+        s += &comment(indent, &format!("  {}", bus.hint(&pin)));
+    }
+    if !k.drivers.is_empty() {
+        s += &comment(indent, &format!("  drivers: {}", k.drivers));
+    }
+    s
+}
+
+/// Wraps `//` comments longer than 100 columns (rustfmt does not), keeping their indent. An
+/// indented line (a `TODO`'s hint, code-like) wraps only past `MAX_WIDTH`, 2 columns further.
 fn wrap_comments(source: &str) -> String {
-    const WIDTH: usize = 100;
     let mut out = String::new();
     for line in source.lines() {
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
-        let Some(text) = trimmed.strip_prefix("// ").filter(|_| line.chars().count() > WIDTH) else {
+        let text = trimmed.strip_prefix("// ").unwrap_or_default();
+        let lead = text.len() - text.trim_start().len();
+        let width = if lead > 0 { MAX_WIDTH } else { 100 };
+        if !trimmed.starts_with("// ") || line.chars().count() <= width {
             out.push_str(line);
             out.push('\n');
             continue;
-        };
-        let prefix = format!("{:indent$}// ", "");
-        let mut current = prefix.clone();
-        for word in text.split(' ') {
-            if current.len() > prefix.len() && current.chars().count() + 1 + word.chars().count() > WIDTH {
+        }
+        let first = format!("{:indent$}// {:lead$}", "", "");
+        let next = if lead > 0 { format!("{first}  ") } else { first.clone() };
+        let mut current = first;
+        let mut empty = true;
+        for word in text.trim_start().split(' ') {
+            if !empty && current.chars().count() + 1 + word.chars().count() > width {
                 out.push_str(current.trim_end());
                 out.push('\n');
-                current = prefix.clone();
+                current = next.clone();
+                empty = true;
             }
-            if current.len() > prefix.len() {
+            if !empty {
                 current.push(' ');
             }
             current.push_str(word);
+            empty = false;
         }
         out.push_str(&current);
         out.push('\n');
     }
     out
 }
+
+/// The generated project's `rustfmt.toml` `max_width`.
+pub const MAX_WIDTH: usize = 120;
 
 fn group(items: &BTreeSet<&str>) -> String {
     if items.len() == 1 {
@@ -545,18 +565,24 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     Ok(out)
 }
 
-/// The project's README: what it is, the wiring, and how to flash, set up and pair it.
-pub fn readme(p: &Project) -> String {
+/// One sentence: the board, the power and what it talks to (README and AGENTS.md).
+fn summary(p: &Project) -> String {
     let a = &p.answers;
-    let mut s = String::new();
-    let _ = writeln!(s, "# {}\n", a.name);
     let power = if p.battery() {
         format!("on battery, reporting every {} min", a.report_every_min)
     } else {
         "plugged in".into()
     };
     let link = if a.matter != MatterMode::Off { "Home Assistant (MQTT) and Matter" } else { "Home Assistant (MQTT)" };
-    let _ = writeln!(s, "A smart device on an {}, {power}, for {link}. Made with `cargo iotkit new`.\n", p.board.model);
+    format!("A smart device on an {}, {power}, for {link}.", p.board.model)
+}
+
+/// The project's README: what it is, the wiring, and how to flash, set up and pair it.
+pub fn readme(p: &Project) -> String {
+    let a = &p.answers;
+    let mut s = String::new();
+    let _ = writeln!(s, "# {}\n", a.name);
+    let _ = writeln!(s, "{} Made with `cargo iotkit new`.\n", summary(p));
 
     s.push_str("## Parts and wiring\n\n| Part | Pin | Connect | In Home Assistant | Over Matter |\n| --- | --- | --- | --- | --- |\n");
     for part in &p.parts {
@@ -597,7 +623,7 @@ pub fn readme(p: &Project) -> String {
     if p.parts.is_empty() {
         s.push_str("\nNo parts yet: add entities in `src/main.rs` (see the iotkit README).\n");
     } else {
-        s.push_str("\nThe code for each part is a `TODO` in `src/main.rs`: write the driver there.\n");
+        s.push_str("\nThe code for each part is a `TODO(<id>)` in `src/main.rs`: write the driver there.\n");
     }
 
     s.push_str(
@@ -660,6 +686,72 @@ pub fn readme(p: &Project) -> String {
             "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it (`update-url URL` on the console)\n```\n",
         ),
     }
+    s
+}
+
+/// `AGENTS.md`, for AI coding agents (opt-in): the device, commands, rules and where the API is.
+pub fn agents_md(p: &Project) -> String {
+    let a = &p.answers;
+    let mut s = format!(
+        "# AGENTS.md
+
+Instructions for AI coding agents. Humans: see README.md.
+
+## Device
+
+{}. {}
+Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>)` in `src/main.rs`.
+",
+        a.name,
+        summary(p)
+    );
+    if p.battery() {
+        s.push_str(
+            "On battery (`iotkit_app::start_sleepy`): parts are read once per wake-up in `main`, then it sleeps.\n\
+             Read analog values before `start_sleepy`, as the battery level: Wi-Fi's load lowers the voltage.\n",
+        );
+    }
+    if a.matter != MatterMode::Off {
+        s.push_str("Matter (`matter-wifi` feature) needs the 8 MB partition table.\n");
+    }
+    if p.board.xtensa() {
+        s.push_str("ESP32-S3 (Xtensa): the `esp` toolchain; run `. ~/export-esp.sh` in each new shell before cargo.\n");
+    }
+    let source = match p.iotkit_path.as_str() {
+        "" => "`~/.cargo/git/checkouts/iotkit-*/crates/`".to_string(),
+        path => format!("`{path}/crates/`"),
+    };
+    let _ = write!(
+        s,
+        "
+## Commands
+
+- Check: `cargo clippy --release -- -D warnings` (must pass).
+- Build and check the signed image: `cargo iotkit build --release`, then `cargo iotkit verify`.
+- `cargo iotkit flash` and `cargo iotkit ota push` touch hardware: only when the user asks.
+
+## Rules
+
+- `no_std`. Drivers must be `no_std`, preferably embedded-hal-async 1.0.
+- The heap is fixed (for Wi-Fi and Bluetooth): avoid `alloc`.
+- One task per part, never stalled: await a `Timer` or a pin edge. Short blocking bus reads are fine; no busy loops.
+- Report states with `.set(..)`; take commands with `.wait_command().await`.
+- Versions are pinned (esp-hal ~1.2.2): check APIs in the docs or source below, not from memory.
+- Leave `partitions*.csv`, `[profile.*]` and `keys/` alone.
+- Bump `version` in `Cargo.toml` for each OTA update.
+
+## Secrets
+
+Never read or print `keys/ota.key` or `.cargo/secrets.toml`.
+
+## API
+
+- iotkit: `cargo doc -p iotkit-app` (HTML in `target/*/doc/iotkit_app/`); source in {source}.
+- esp-hal: `~/.cargo/registry/src/*/esp-hal-1.2.2/`.
+- Examples: `apps/devkit` (plugged in) and `apps/sleepy` (battery) in {}.
+",
+        crate::new::IOTKIT_GIT
+    );
     s
 }
 
