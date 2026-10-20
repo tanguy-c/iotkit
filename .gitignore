@@ -12,3 +12,5 @@ test-server/ha-config/
 test-server/matter-data/
 # Releases published for the test server (`cargo iotkit ota publish --to published`).
 published/
+# Agent worktrees (Claude Code).
+.claude/worktrees/

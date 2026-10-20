@@ -56,6 +56,22 @@ jobs:
           name: devkit
           path: dist/
 
+  # The C6 builds must not grow (see AGENTS.md). Growth meant by the PR: add the `size-ok` label
+  # and re-run.
+  size:
+    name: C6 size against the PR base
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'size-ok')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: size
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake
+      - run: tools/size-check.sh ${{ github.event.pull_request.base.sha }}
+
   # The other chips: build-tested only (the C6 job above is the one tested on hardware).
   chips-riscv:
     name: Firmware (${{ matrix.chip }})
