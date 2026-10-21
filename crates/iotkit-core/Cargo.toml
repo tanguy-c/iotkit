@@ -25,7 +25,7 @@ embedded-storage-async = "0.4"
 heapless               = "0.9"
 log                    = "0.4.27"
 postcard               = { version = "1.1", default-features = false }
-sequential-storage     = "3.0"
+sequential-storage     = "8.0"
 serde                  = { version = "1", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
