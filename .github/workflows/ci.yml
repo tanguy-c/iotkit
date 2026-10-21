@@ -22,7 +22,7 @@ jobs:
     name: Host crates and the CLI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target\nxtask -> target"
@@ -38,7 +38,7 @@ jobs:
     name: Firmware (ESP32-C6)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
@@ -78,7 +78,7 @@ jobs:
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'size-ok')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # Only what goes into the firmware can change its size: not docs, workflows, xtask or Actions
@@ -104,7 +104,7 @@ jobs:
     name: Unused code is not linked
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           key: links
@@ -114,7 +114,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Advisories change without a commit: full.yml checks them nightly.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
