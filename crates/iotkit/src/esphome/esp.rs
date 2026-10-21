@@ -14,7 +14,7 @@ use crate::model::{Binding, Device};
 use crate::net::{esp::Net, mdns::Service};
 use embassy_futures::select::{Either3, select3};
 use embassy_net::tcp::TcpSocket;
-use embassy_time::Duration;
+use embassy_time::{Duration, with_timeout};
 use embedded_io_async::Write;
 use heapless::String;
 
@@ -37,6 +37,8 @@ enum Error {
     Io,
     /// Not the API's encrypted protocol.
     Protocol,
+    /// A client without encryption: told that the device needs it.
+    Plaintext,
     /// The client does not have the key.
     Key,
     /// A message failed to decrypt, or to fit.
@@ -101,8 +103,10 @@ pub async fn api_task(net: Net, device: &'static Device, key: ApiKey) {
             Err(Error::Closed) | Ok(()) => log::info!("esphome: {peer:?} disconnected"),
             Err(e) => log::warn!("esphome: {peer:?}: {e:?}"),
         }
-        socket.close();
-        let _ = socket.flush().await;
+        // What was sent goes out, then the port listens again at once: waiting for the client's
+        // FIN would refuse its reconnection (Home Assistant reconnects right after a key check).
+        let _ = with_timeout(Duration::from_secs(2), socket.flush()).await;
+        socket.abort();
         if let Some(p) = party.as_mut()
             && p.is_requested()
         {
@@ -124,8 +128,10 @@ impl Inbox {
         if self.len < HEADER {
             return Ok(None);
         }
-        if self.buf[0] != 1 {
-            return Err(Error::Protocol);
+        match self.buf[0] {
+            1 => {}
+            0 => return Err(Error::Plaintext),
+            _ => return Err(Error::Protocol),
         }
         let end = HEADER + usize::from(u16::from_be_bytes([self.buf[1], self.buf[2]]));
         if end > FRAME_MAX {
@@ -199,7 +205,15 @@ async fn session(
     let mut out = [0u8; FRAME_MAX];
 
     // The client's hello (an empty frame), then its handshake message after a 0 byte.
-    let hello = inbox.next(socket).await?;
+    let hello = match inbox.next(socket).await {
+        // An encrypted frame back is how a client learns that the device needs a key (Home
+        // Assistant then asks for it).
+        Err(Error::Plaintext) => {
+            send_plain(socket, b"\x01Bad indicator byte").await?;
+            return Err(Error::Plaintext);
+        }
+        r => r?,
+    };
     inbox.consume(hello.end);
     let handshake = inbox.next(socket).await?;
     let message = inbox.buf.get(handshake.clone()).and_then(|m| m.split_first());

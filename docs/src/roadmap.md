@@ -5,8 +5,8 @@ today.
 
 ## Before 0.1
 
-- **Hardware tests** beyond the ESP32-C6: the C3, C5, S3 and original ESP32; the ESPHome API with
-  Home Assistant; Matter over Thread with a border router.
+- **Hardware tests** beyond the ESP32-C6: the C3, C5, S3 and original ESP32; Matter over Thread
+  with a border router.
 - **Publishing on crates.io**, once rs-matter-embassy is released (iotkit depends on it from git).
 
 ## Next

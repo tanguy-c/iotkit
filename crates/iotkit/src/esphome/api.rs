@@ -1,6 +1,8 @@
 //! The ESPHome API's messages for the device model: device info, the entity list, states and
 //! commands. Message ids and fields from ESPHome's `api.proto`, API version [`VERSION`].
 
+use core::fmt::Write as _;
+
 use crate::esphome::proto::{Fields, Value, Writer};
 use crate::model::{
     Category, ClimateCommand, Command, CoverCommand, CoverState, Device, Entity, FanCommand, FanDirection, HvacAction,
@@ -48,8 +50,11 @@ pub fn device_info(w: &mut Writer, device: &Device, mac: &str) -> u16 {
     // Shown as the ESPHome version: iotkit's.
     w.str(4, env!("CARGO_PKG_VERSION"));
     w.str(6, device.model);
-    // The app as an ESPHome "project": its firmware version shows in Home Assistant.
-    w.str(8, device.model);
+    // The app as an ESPHome "project", `maker.model`: Home Assistant shows the two parts as the
+    // device's manufacturer and model (it requires the dot), and the firmware version.
+    let mut project = heapless::String::<96>::new();
+    let _ = write!(project, "{}.{}", device.manufacturer, device.model);
+    w.str(8, &project);
     w.str(9, device.sw_version);
     w.str(12, device.manufacturer);
     w.str(13, device.name);

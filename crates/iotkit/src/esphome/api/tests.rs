@@ -65,6 +65,7 @@ fn hello_and_device_info() {
     assert_eq!(id, id::DEVICE_INFO_RESPONSE);
     assert_eq!(field(&f, 3).unwrap().str(), "AA:BB:CC:DD:EE:FF");
     assert_eq!(field(&f, 9).unwrap().str(), "1.2.3");
+    assert_eq!(field(&f, 8).unwrap().str(), "iotkit.Test", "maker.model, as Home Assistant splits it");
     assert_eq!(field(&f, 1), None, "no password");
 }
 

@@ -46,9 +46,10 @@ Early, not released yet: the API and the settings' flash layout may still change
 
 - Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and serial),
   signed OTA with rollback, MQTT with Home Assistant, Matter over Wi-Fi with Home Assistant's
-  Matter server, deep sleep, updates from Home Assistant, installing from the browser.
-- Built but not tested on hardware: the other chips, the ESPHome API, the BOOT button gestures,
-  most entity kinds over Matter, Matter over Thread end to end (no border router tried yet).
+  Matter server, deep sleep, updates from Home Assistant, installing from the browser, Home
+  Assistant's ESPHome integration, MQTT and updates over TLS.
+- Built but not tested on hardware: the other chips, the BOOT button gestures, most entity kinds
+  over Matter, Matter over Thread end to end (no border router tried yet).
 - Matter uses the test attestation credentials: for development, not for selling devices.
 
 ## Chips
