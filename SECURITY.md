@@ -17,9 +17,12 @@ update your devices, and without it you cannot.
 make the device download a manifest, but it installs only a signed, newer image; the cost is a
 download and a restart.
 
-**Downloads are plain HTTP**, and so is MQTT: no TLS yet. Someone on the network can read the
-states and commands, and send commands. The signature still protects updates. Run devices on a
-network you trust.
+**Without the `tls` feature, downloads are plain HTTP and MQTT is plain TCP.** Someone on the
+network can read the states and commands, and send commands. The signature still protects
+updates. With `tls`, MQTT on port 8883 and `https://` downloads use TLS 1.3, and the server's
+certificate must chain to the CA built into the firmware (`IOTKIT_TLS_CA`) and carry the name
+or address the device connects to. The device has no clock yet: an expired certificate is still
+accepted. The OTA push endpoint (port 80) stays plain: it only takes signed images.
 
 **The setup window is open.** While it is open (first boot, BOOT held 3 s, or `provision` on the
 console), anyone in range can give the device a Wi-Fi network: the setup access point has no

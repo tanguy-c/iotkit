@@ -46,6 +46,11 @@ jobs:
       - run: cargo clippy -p iotkit --features iotkit/esp32c6 -- -D warnings
       # Matter over Wi-Fi next to MQTT (git dependency, 8 MB partitions).
       - run: cargo clippy -p devkit --features matter-wifi -- -D warnings
+      # TLS, with a throw-away CA to build in.
+      - run: |
+          openssl ecparam -name prime256v1 -genkey -noout -out "$RUNNER_TEMP/ca.key"
+          openssl req -x509 -new -key "$RUNNER_TEMP/ca.key" -subj /CN=ci -outform der -out "$RUNNER_TEMP/ca.der"
+          IOTKIT_TLS_CA="$RUNNER_TEMP/ca.der" cargo clippy -p devkit --features tls -- -D warnings
       # Matter over Thread builds OpenThread and mbedtls from C.
       - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: cargo clippy -p thread-light -- -D warnings
@@ -72,6 +77,22 @@ jobs:
           key: size
       - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: tools/size-check.sh ${{ github.event.pull_request.base.sha }}
+
+  fuzz:
+    name: Fuzz the parsers (short)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      # 30 s each; longer runs: `cargo +nightly fuzz run <target> -- -max_total_time=3600`.
+      - run: for t in $(cargo +nightly fuzz list); do cargo +nightly fuzz run "$t" -- -max_total_time=30; done
+        working-directory: fuzz
 
   links:
     name: Unused code is not linked

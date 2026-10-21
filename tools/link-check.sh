@@ -7,11 +7,18 @@ cd "$(dirname "$0")/.."
 out=target/link-check
 mkdir -p "$out"
 [ -f keys/ota.pub ] || cargo xtask keygen
+# The `tls` build needs a CA to build in: any will do here.
+if [ ! -f "$out/ca.der" ]; then
+    openssl ecparam -name prime256v1 -genkey -noout -out "$out/ca.key"
+    openssl req -x509 -new -key "$out/ca.key" -subj /CN=link-check -outform der -out "$out/ca.der"
+fi
+export IOTKIT_TLS_CA="$PWD/$out/ca.der"
 
 # name;cargo args (-p app first)
 builds='devkit;-p devkit
 showcase;-p showcase
-lean;-p lean'
+lean;-p lean
+devkit-tls;-p devkit --features tls'
 
 # what;where (syms: `nm -C`, strings: string literals; inlined generics leave no symbol);pattern
 # (extended regex);absent from;present in
@@ -19,7 +26,8 @@ rules='unused entity kinds;syms;<iotkit_core::model::appliances::(Cover|Valve|Lo
 unused components;strings;rgb_light write failed;devkit;showcase
 no improv-ble: no Bluetooth stack;syms;r_ble_ll_|trouble_host;lean;devkit
 no console: no commands;strings;Type .help. and press Enter;lean;devkit
-no softap: no portal;syms;portal_task;lean;devkit'
+no softap: no portal;syms;portal_task;lean;devkit
+no tls: no TLS code;strings;TLS with;devkit;devkit-tls'
 
 echo "$builds" | while IFS=';' read -r name args; do
     set -- $args

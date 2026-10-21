@@ -9,6 +9,8 @@ pub mod backoff;
 pub mod esp;
 pub mod http;
 pub mod mdns;
+#[cfg(all(esp_wifi, feature = "tls"))]
+pub mod tls;
 
 use core::fmt::Write;
 

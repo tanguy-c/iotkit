@@ -16,6 +16,10 @@ iotkit is not released yet: the API and the settings' flash layout may still cha
   sensors with filters), used by `cargo iotkit new`.
 - `init!`, `Config::new` with builders, typed `DeviceClass` / `Unit`, sensor shortcuts.
 - `cargo iotkit new`: `TODO(<id>)` hints, optional `AGENTS.md` for AI coding agents.
+- `tls`: TLS 1.3 for MQTT (port 8883) and `https://` downloads, with the server checked against a
+  built-in CA.
+- Fuzz targets for the network-facing parsers (`fuzz/`), and `tools/hil/run.py`, a hardware test
+  (flash, healthy, OTA kept, OTA rolled back) with a nightly workflow for a self-hosted runner.
 - The guide (`docs/`, GitHub Pages) with a "Coming from ESPHome" page; a short README.
 - Install from the browser: `cargo iotkit build` writes an ESP Web Tools page and merged image
   (`dist/<package>/web/`); `cargo iotkit web` serves it.

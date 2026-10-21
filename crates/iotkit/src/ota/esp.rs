@@ -492,6 +492,8 @@ fn drop_sink<E>(e: GetError<E>) -> GetError<()> {
         GetError::Url(e) => GetError::Url(e),
         GetError::Dns => GetError::Dns,
         GetError::Connect => GetError::Connect,
+        #[cfg(feature = "tls")]
+        GetError::Tls => GetError::Tls,
         GetError::Io => GetError::Io,
         GetError::BadResponse(e) => GetError::BadResponse(e),
         GetError::Status(s) => GetError::Status(s),

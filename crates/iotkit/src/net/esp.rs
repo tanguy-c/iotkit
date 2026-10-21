@@ -453,15 +453,57 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
     }
 }
 
+/// A connected stream: TCP, or TLS over it (`tls`). The methods return the socket's own futures,
+/// so code written for a `Stream` compiles for a TCP socket as if written for it.
+pub(crate) trait Stream {
+    /// Why a read or write failed.
+    type Error: core::fmt::Debug;
+    /// Reads what is there (`Ok(0)`: the peer closed).
+    fn recv<'a>(&'a mut self, buf: &'a mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> + 'a;
+    /// Sends `bytes` now (TLS: the record goes out instead of waiting in its buffer).
+    fn send<'a>(&'a mut self, bytes: &'a [u8]) -> impl Future<Output = Result<(), Self::Error>> + 'a;
+    /// Closes the connection after what was sent (TLS: the TCP socket closes when dropped).
+    fn shut(&mut self);
+}
+
+impl Stream for TcpSocket<'_> {
+    type Error = embassy_net::tcp::Error;
+    fn recv<'a>(&'a mut self, buf: &'a mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> + 'a {
+        TcpSocket::read(self, buf)
+    }
+    fn send<'a>(&'a mut self, bytes: &'a [u8]) -> impl Future<Output = Result<(), Self::Error>> + 'a {
+        self.write_all(bytes)
+    }
+    fn shut(&mut self) {
+        self.close();
+    }
+}
+
+#[cfg(feature = "tls")]
+impl Stream for super::tls::Connection<'_> {
+    type Error = embedded_tls::TlsError;
+    fn recv<'a>(&'a mut self, buf: &'a mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> + 'a {
+        self.read(buf)
+    }
+    async fn send(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.write_all(bytes).await?;
+        self.flush().await
+    }
+    fn shut(&mut self) {}
+}
+
 /// Why a GET failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GetError<E> {
-    /// Not a valid `http://` URL.
+    /// Not a valid URL.
     Url(http::Error),
     /// The host name did not resolve.
     Dns,
     /// The TCP connection failed.
     Connect,
+    /// The TLS handshake failed (`tls`): the certificate, or the server.
+    #[cfg(feature = "tls")]
+    Tls,
     /// Read/write failure or timeout.
     Io,
     /// Not a valid HTTP response.
@@ -491,9 +533,63 @@ pub trait Sink {
     async fn data(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
-/// GETs `url` (`http://` only) into `sink`.
+/// GETs `url` (`http://`, or `https://` with the `tls` feature) into `sink`.
 pub async fn get<S: Sink>(stack: Stack<'static>, url: &str, sink: &mut S) -> Result<(), GetError<S::Error>> {
     get_from(stack, url, 0, sink).await
+}
+
+/// The GET over the connected `$socket` (TCP, or TLS over it). A macro, expanded per stream
+/// type, so a build without `tls` keeps one state machine for the whole GET.
+macro_rules! exchange {
+    ($socket:ident, $url:ident, $from:ident, $sink:ident) => {{
+        let mut request = [0u8; 384];
+        let n = http::write_get(&$url, $from, &mut request).map_err(GetError::Url)?;
+        Stream::send(&mut $socket, &request[..n]).await.map_err(|_| GetError::Io)?;
+
+        // Head, possibly with the start of the body.
+        let mut buf = [0u8; 1024];
+        let mut filled = 0;
+        let head = loop {
+            let n = $socket.read(&mut buf[filled..]).await.map_err(|_| GetError::Io)?;
+            if n == 0 {
+                return Err(GetError::BadResponse(http::Error::BadResponse));
+            }
+            filled += n;
+            match http::parse_response_head(&buf[..filled]).map_err(GetError::BadResponse)? {
+                Some(head) => break head,
+                None if filled == buf.len() => return Err(GetError::BadResponse(http::Error::BadResponse)),
+                None => {}
+            }
+        };
+        if head.status != if $from > 0 { 206 } else { 200 } {
+            return Err(GetError::Status(head.status));
+        }
+        $sink.begin(head.content_length).map_err(GetError::Sink)?;
+
+        let mut received = (filled - head.len) as u32;
+        if received > 0 {
+            $sink.data(&buf[head.len..filled]).await.map_err(GetError::Sink)?;
+        }
+        while head.content_length.is_none_or(|len| received < len) {
+            let n = match $socket.read(&mut buf).await {
+                Ok(n) => n,
+                Err(e) => {
+                    log::warn!("net: GET {}: read failed after {received} bytes: {e:?}", $url.path);
+                    0
+                }
+            };
+            if n == 0 {
+                break;
+            }
+            received += n as u32;
+            $sink.data(&buf[..n]).await.map_err(GetError::Sink)?;
+        }
+        Stream::shut(&mut $socket);
+        if let Some(expected) = head.content_length.filter(|&len| received != len) {
+            return Err(GetError::Truncated { received, expected });
+        }
+        Ok(())
+    }};
 }
 
 /// GETs `url` from byte `from` on (a `Range` request when `from > 0`): resumes an interrupted
@@ -527,51 +623,16 @@ pub async fn get_from<S: Sink>(
         .map_err(|_| GetError::Connect)?
         .map_err(|_| GetError::Connect)?;
 
-    let mut request = [0u8; 384];
-    let n = http::write_get(&url, from, &mut request).map_err(GetError::Url)?;
-    socket.write_all(&request[..n]).await.map_err(|_| GetError::Io)?;
-
-    // Head, possibly with the start of the body.
-    let mut buf = [0u8; 1024];
-    let mut filled = 0;
-    let head = loop {
-        let n = socket.read(&mut buf[filled..]).await.map_err(|_| GetError::Io)?;
-        if n == 0 {
-            return Err(GetError::BadResponse(http::Error::BadResponse));
-        }
-        filled += n;
-        match http::parse_response_head(&buf[..filled]).map_err(GetError::BadResponse)? {
-            Some(head) => break head,
-            None if filled == buf.len() => return Err(GetError::BadResponse(http::Error::BadResponse)),
-            None => {}
-        }
-    };
-    if head.status != if from > 0 { 206 } else { 200 } {
-        return Err(GetError::Status(head.status));
+    #[cfg(feature = "tls")]
+    if url.tls {
+        static BUFFERS: super::tls::SharedBuffers = super::tls::Buffers::shared();
+        let mut buffers = BUFFERS.lock().await;
+        let super::tls::Buffers { read, write } = &mut *buffers;
+        let mut socket = super::tls::open(socket, url.host, read, write).await.map_err(|e| {
+            log::warn!("net: TLS with {}: {e:?}", url.host);
+            GetError::Tls
+        })?;
+        return exchange!(socket, url, from, sink);
     }
-    sink.begin(head.content_length).map_err(GetError::Sink)?;
-
-    let mut received = (filled - head.len) as u32;
-    if received > 0 {
-        sink.data(&buf[head.len..filled]).await.map_err(GetError::Sink)?;
-    }
-    while head.content_length.is_none_or(|len| received < len) {
-        let n = match socket.read(&mut buf).await {
-            Ok(n) => n,
-            Err(e) => {
-                log::warn!("net: GET {}: read failed after {received} bytes: {e:?}", url.path);
-                0
-            }
-        };
-        if n == 0 {
-            break;
-        }
-        received += n as u32;
-        sink.data(&buf[..n]).await.map_err(GetError::Sink)?;
-    }
-    socket.close();
-    if let Some(expected) = head.content_length.filter(|&len| received != len) {
-        return Err(GetError::Truncated { received, expected });
-    }
-    Ok(())
+    exchange!(socket, url, from, sink)
 }

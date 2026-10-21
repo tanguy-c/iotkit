@@ -47,5 +47,5 @@ summary and keeps the running firmware.
 `cargo iotkit keygen` (run by `new`) writes `keys/ota.key`: keep it secret and backed up. Whoever
 has it can update your devices; without it, you cannot. The update endpoint (port 80) answers
 anyone on the network but installs only signed, newer images. Downloads and MQTT are plain HTTP
-and TCP for now. [SECURITY.md](https://github.com/tanguy-c/iotkit/blob/main/SECURITY.md) lists
+and TCP unless the firmware has the [`tls` feature](lean.md#tls). [SECURITY.md](https://github.com/tanguy-c/iotkit/blob/main/SECURITY.md) lists
 what iotkit protects and what it does not.

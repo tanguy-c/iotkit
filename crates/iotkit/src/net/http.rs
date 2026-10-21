@@ -1,7 +1,7 @@
-//! Just enough HTTP/1.1: `http://` URLs, response heads for a GET client, and request lines for
-//! a tiny server. Bodies are framed by `Content-Length` (or the connection closing); chunked
-//! transfer encoding is not supported. HTTPS comes later: a signed manifest makes plain HTTP safe
-//! for updates, though not private.
+//! Just enough HTTP/1.1: `http://` URLs (`https://` with the `tls` feature), response heads for a
+//! GET client, and request lines for a tiny server. Bodies are framed by `Content-Length` (or the
+//! connection closing); chunked transfer encoding is not supported. A signed manifest makes plain
+//! HTTP safe for updates, though not private.
 
 use core::fmt::Write;
 
@@ -15,7 +15,7 @@ pub const MAX_URL: usize = 256;
 pub enum Error {
     /// Not `http://host[:port]/path`.
     Url,
-    /// `https://`, or a chunked response.
+    /// `https://` without the `tls` feature, or a chunked response.
     Unsupported,
     /// Not an HTTP response head, or it is larger than the buffer.
     BadResponse,
@@ -30,28 +30,45 @@ pub struct Url<'a> {
     pub port: u16,
     /// Starts with `/`.
     pub path: &'a str,
+    /// `https://`.
+    #[cfg(feature = "tls")]
+    pub tls: bool,
 }
 
 impl<'a> Url<'a> {
-    /// Parses `http://host[:port]/path` (no `https`, no control characters).
+    /// Parses `http://host[:port]/path` (`https://` with the `tls` feature; no control characters).
     pub fn parse(url: &'a str) -> Result<Self, Error> {
         // Control characters would end up in the request head (CR/LF: an injected header).
         if url.bytes().any(|b| b < 0x20 || b == 0x7f) {
             return Err(Error::Url);
         }
-        if url.starts_with("https://") {
-            return Err(Error::Unsupported);
-        }
-        let rest = url.strip_prefix("http://").ok_or(Error::Url)?;
+        #[cfg(feature = "tls")]
+        let (rest, tls, default_port) = match url.strip_prefix("https://") {
+            Some(rest) => (rest, true, 443),
+            None => (url.strip_prefix("http://").ok_or(Error::Url)?, false, 80),
+        };
+        #[cfg(not(feature = "tls"))]
+        let (rest, default_port) = {
+            if url.starts_with("https://") {
+                return Err(Error::Unsupported);
+            }
+            (url.strip_prefix("http://").ok_or(Error::Url)?, 80)
+        };
         let (authority, path) = rest.find('/').map_or((rest, "/"), |i| rest.split_at(i));
         let (host, port) = match authority.rsplit_once(':') {
             Some((host, port)) => (host, port.parse().map_err(|_| Error::Url)?),
-            None => (authority, 80),
+            None => (authority, default_port),
         };
         if host.is_empty() || host.contains(['@', ' ', '?', '#']) || path.contains(' ') {
             return Err(Error::Url);
         }
-        Ok(Self { host, port, path })
+        Ok(Self {
+            host,
+            port,
+            path,
+            #[cfg(feature = "tls")]
+            tls,
+        })
     }
 
     /// `reference` resolved against this URL: absolute, absolute-path, or relative to this
@@ -63,6 +80,13 @@ impl<'a> Url<'a> {
             out.push_str(reference).map_err(|_| Error::Url)?;
             return Ok(out);
         }
+        #[cfg(feature = "tls")]
+        if self.tls {
+            write!(out, "https://{}:{}", self.host, self.port).map_err(|_| Error::Url)?;
+        } else {
+            write!(out, "http://{}:{}", self.host, self.port).map_err(|_| Error::Url)?;
+        }
+        #[cfg(not(feature = "tls"))]
         write!(out, "http://{}:{}", self.host, self.port).map_err(|_| Error::Url)?;
         if !reference.starts_with('/') {
             let path = self.path.split(['?', '#']).next().unwrap_or("/");

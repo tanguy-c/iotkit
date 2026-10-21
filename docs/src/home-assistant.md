@@ -7,6 +7,9 @@ Install the Mosquitto add-on and the MQTT integration, then point the device at 
 a login). The entities appear by themselves (MQTT discovery), and the device shows as unavailable
 when it goes offline (last will, or `offline` before a planned restart).
 
+With the [`tls` feature](lean.md#tls), a broker on port 8883 is reached over TLS 1.3
+(`mqtt 192.168.1.10:8883`).
+
 Topics: `iotkit/<host>/status` (`online` / `offline`), `iotkit/<host>/<entity>/state`,
 `iotkit/<host>/<entity>/set`, and discovery under `homeassistant/`. The `iotkit` prefix is
 `IOTKIT_TOPIC_PREFIX` ([names](lean.md#names)).

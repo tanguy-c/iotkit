@@ -1,0 +1,63 @@
+# Fuzzing the parsers that read what the network (or a serial client) sends: `cargo fuzz run <target>`
+# from this folder, on nightly. A project of its own, outside the firmware workspace.
+[package]
+name    = "iotkit-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+iotkit        = { path = "../crates/iotkit", default-features = false }
+iotkit-core   = { path = "../crates/iotkit-core" }
+critical-section = { version = "1.2", features = ["std"] }
+
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "mqtt"
+path = "fuzz_targets/mqtt.rs"
+test = false
+doc  = false
+bench = false
+
+[[bin]]
+name = "improv"
+path = "fuzz_targets/improv.rs"
+test = false
+doc  = false
+bench = false
+
+[[bin]]
+name = "dhcp_dns"
+path = "fuzz_targets/dhcp_dns.rs"
+test = false
+doc  = false
+bench = false
+
+[[bin]]
+name = "http"
+path = "fuzz_targets/http.rs"
+test = false
+doc  = false
+bench = false
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc  = false
+bench = false
+
+[[bin]]
+name = "ha_command"
+path = "fuzz_targets/ha_command.rs"
+test = false
+doc  = false
+bench = false

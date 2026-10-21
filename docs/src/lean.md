@@ -13,7 +13,7 @@ without it: `default-features = false`, then list the ones to keep.
 | `console` | the USB console | with `improv-serial` off too, the app keeps the USB port (no `Board::usb`) |
 | `ota-push` | updates pushed with `cargo iotkit ota push` | updates only from Home Assistant (`ha-update`), or none |
 
-Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`.
+Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`, `tls`.
 
 ```toml
 iotkit = { git = "https://github.com/tanguy-c/iotkit", default-features = false, features = ["esp32c6", "wifi", "improv-serial", "ota-push"] }
@@ -23,6 +23,22 @@ With no setup path left (`improv-ble`, `softap`, `improv-serial`), the build nee
 build time. `apps/lean` keeps `improv-serial` and `ota-push`: about 350 KB less flash than
 `apps/devkit`. Unused components and entity kinds are not linked either; the repository's
 `tools/link-check.sh` checks it.
+
+## TLS
+
+The `tls` feature encrypts MQTT on port 8883 and `https://` downloads (manifests, images) with
+TLS 1.3 (AES-128-GCM). The server's certificate (ECDSA P-256) must chain to one CA built into the
+firmware, and carry the name or address the device connects to:
+
+```toml
+[env]
+IOTKIT_TLS_CA = { value = "certs/ca.der", relative = true }   # the CA, DER
+```
+
+It costs about 125 KB of flash and 50 KB of RAM (each connection's record buffers). The device
+has no clock yet, so certificate expiry is not checked. The repository's
+`test-server/certs/make.sh` makes a test CA and certificate for its broker (8883) and update
+server (8443).
 
 ## Names
 

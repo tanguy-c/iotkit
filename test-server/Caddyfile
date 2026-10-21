@@ -1,0 +1,12 @@
+# Published updates (`cargo iotkit ota publish --to published`): HTTP on 8080, HTTPS on 8443 with
+# the certificates of certs/make.sh.
+:8080 {
+	root * /srv
+	file_server browse
+}
+
+:8443 {
+	tls /certs/server.crt /certs/server.key
+	root * /srv
+	file_server browse
+}

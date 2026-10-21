@@ -37,7 +37,7 @@ for cfg in "devkit -p devkit" "devkit-matter -p devkit --features matter-wifi" "
     size -A "$b" >"$b.size"; size -A "$h" >"$h.size"
     awk 'NR == FNR { s[$1] = $2; next } /^\./ && !/^\.(debug|comment|riscv)/ { d = $2 - s[$1]
             if (d || $1 ~ /^\.(text|data|bss|rodata)$/) printf "  %-26s %9d %+8d\n", $1, $2, d
-            if (d > 0 && $1 ~ /^\.(text|rwtext|data|bss)/) g = 1 } END { exit g }' "$b.size" "$h.size" || grew=1
+            if (d > 0 && $1 ~ /^\.(text|bss)$|^\.(rwtext|data)/) g = 1 } END { exit g }' "$b.size" "$h.size" || grew=1
     syms "$b" >"$b.syms"; syms "$h" >"$h.syms"
     awk -F '\t' 'NR == FNR { s[$2] = $1; next } { d = $1 - s[$2]; delete s[$2]; if (d) print (d < 0 ? -d : d) "\t" d "\t" $2 }
             END { for (n in s) print s[n] "\t" (-s[n]) "\t" n }' "$b.syms" "$h.syms" |

@@ -17,6 +17,8 @@ esp32c5 = ["esp-hal/esp32c5", "esp-rtos/esp32c5", "esp-hal-smartled/esp32c5", "i
 esp32s3 = ["esp-hal/esp32s3", "esp-rtos/esp32s3", "esp-hal-smartled/esp32s3", "iotkit/esp32s3"]
 ## Matter over Wi-Fi, next to MQTT.
 matter-wifi = ["iotkit/matter-wifi"]
+## TLS for MQTT (port 8883) and https:// updates; IOTKIT_TLS_CA names the CA (DER).
+tls = ["iotkit/tls"]
 
 [dependencies]
 iotkit = { workspace = true }
