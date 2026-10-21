@@ -13,7 +13,8 @@ without it: `default-features = false`, then list the ones to keep.
 | `console` | the USB console | with `improv-serial` off too, the app keeps the USB port (no `Board::usb`) |
 | `ota-push` | updates pushed with `cargo iotkit ota push` | updates only from Home Assistant (`ha-update`), or none |
 
-Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`, `tls`.
+Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`, `tls`,
+`esphome-api` ([ESPHome API](home-assistant.md#esphome-api)).
 
 ```toml
 iotkit = { git = "https://github.com/tanguy-c/iotkit", default-features = false, features = ["esp32c6", "wifi", "improv-serial", "ota-push"] }

@@ -18,7 +18,8 @@ export IOTKIT_TLS_CA="$PWD/$out/ca.der"
 builds='devkit;-p devkit
 showcase;-p showcase
 lean;-p lean
-devkit-tls;-p devkit --features tls'
+devkit-tls;-p devkit --features tls
+devkit-esphome;-p devkit --features esphome-api'
 
 # what;where (syms: `nm -C`, strings: string literals; inlined generics leave no symbol);pattern
 # (extended regex);absent from;present in
@@ -27,7 +28,8 @@ unused components;strings;rgb_light write failed;devkit;showcase
 no improv-ble: no Bluetooth stack;syms;r_ble_ll_|trouble_host;lean;devkit
 no console: no commands;strings;Type .help. and press Enter;lean;devkit
 no softap: no portal;syms;portal_task;lean;devkit
-no tls: no TLS code;strings;TLS with;devkit;devkit-tls'
+no tls: no TLS code;strings;TLS with;devkit;devkit-tls
+no esphome-api: no API server;syms;api_task|esphome;devkit;devkit-esphome'
 
 echo "$builds" | while IFS=';' read -r name args; do
     set -- $args

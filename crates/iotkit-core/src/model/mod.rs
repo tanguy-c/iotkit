@@ -1,4 +1,4 @@
-//! The device model: what the device is, described once. MQTT (and later Matter) are bindings
+//! The device model: what the device is, described once. MQTT, Matter and the ESPHome API are bindings
 //! that read it.
 //!
 //! Entities are `static`s; any task updates them or waits for their commands:
@@ -324,6 +324,8 @@ impl Device {
 }
 
 /// A transport that publishes the entities. Each has its own dirty flags and wake-up.
+///
+/// A transport outside iotkit takes one with [`Binding::allocate`] (`extra-bindings` feature).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding(u8);
 
@@ -333,15 +335,27 @@ impl Binding {
     /// Matter.
     pub const MATTER: Binding = Binding(1);
 
+    /// A binding of its own, for another transport: call it once, at start. `None` once the
+    /// six there can be are taken.
+    #[cfg(feature = "extra-bindings")]
+    pub fn allocate() -> Option<Binding> {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        (usize::from(n) < BINDINGS).then_some(Binding(n))
+    }
+
     const fn bit(self) -> u8 {
         1 << self.0
     }
 }
 
-/// Bindings there can be.
-const BINDINGS: usize = 2;
+/// Bindings there can be: one bit each in [`Dirty`].
+const BINDINGS: usize = if cfg!(feature = "extra-bindings") { 8 } else { 2 };
 
-static CHANGED: [Signal<CriticalSectionRawMutex, ()>; BINDINGS] = [Signal::new(), Signal::new()];
+/// The next binding [`Binding::allocate`] hands out.
+#[cfg(feature = "extra-bindings")]
+static NEXT: AtomicU8 = AtomicU8::new(2);
+
+static CHANGED: [Signal<CriticalSectionRawMutex, ()>; BINDINGS] = [const { Signal::new() }; BINDINGS];
 
 /// Waits until some entity changed for `binding` (check [`Entity::take_dirty`] after).
 pub async fn changed(binding: Binding) {

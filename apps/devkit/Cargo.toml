@@ -20,6 +20,7 @@ esp32   = ["esp-hal/esp32", "esp-rtos/esp32", "esp-hal-smartled/esp32", "iotkit/
 matter-wifi = ["iotkit/matter-wifi"]
 ## TLS for MQTT (port 8883) and https:// updates; IOTKIT_TLS_CA names the CA (DER).
 tls = ["iotkit/tls"]
+esphome-api = ["iotkit/esphome-api"]
 
 [dependencies]
 # A path, not `workspace = true`: older cargo cannot turn the default features off over it.

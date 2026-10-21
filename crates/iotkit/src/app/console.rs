@@ -49,6 +49,10 @@ const MATTER_HELP: &str = "
 #[cfg(not(feature = "matter-wifi"))]
 const MATTER_HELP: &str = "";
 
+#[cfg(feature = "esphome-api")]
+const ESPHOME_HELP: &str = "  api-key        the ESPHome API's encryption key, for Home Assistant
+  api-key KEY    set it (base64, 32 bytes; then restarts)";
+
 #[cfg(feature = "ha-update")]
 const UPDATE_HELP: &str = "
   update-url [URL]  the manifest Home Assistant's updates come from (set: checks it now)";
@@ -116,6 +120,9 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
         "" => {}
         "help" => {
             println!("{HELP}{UPDATE_HELP}{MATTER_HELP}{TEST_HELP}");
+            // Its own line: builds without it print as before.
+            #[cfg(feature = "esphome-api")]
+            println!("{ESPHOME_HELP}");
             if let Some(ext) = config.console {
                 println!("{}", ext.help);
             }
@@ -187,6 +194,19 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
                 None => println!("usage: mqtt HOST[:PORT] [USER PASSWORD]"),
             }
         }
+        #[cfg(feature = "esphome-api")]
+        "api-key" => println!("{}", crate::esphome::esp::key(store).await.to_text()),
+        #[cfg(feature = "esphome-api")]
+        _ if cmd.starts_with("api-key ") => match crate::esphome::ApiKey::parse(cmd["api-key ".len()..].trim()) {
+            Some(key) => match store.lock().await.save(&key).await {
+                Ok(()) => {
+                    println!("key saved, restarting");
+                    crate::diag::esp::restart().await;
+                }
+                Err(e) => println!("could not save: {e}"),
+            },
+            None => println!("usage: api-key KEY (base64 of 32 bytes, as Home Assistant shows it)"),
+        },
         #[cfg(feature = "ha-update")]
         "update-url" => match super::update::source(store).await {
             Some(url) => println!("updates from {url}"),

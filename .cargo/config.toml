@@ -28,7 +28,7 @@ target = "riscv32imac-unknown-none-elf"
 # Host tooling: build, sign, flash, OTA (see xtask/).
 xtask = "run --quiet --manifest-path xtask/Cargo.toml --target host-tuple --bin cargo-iotkit --"
 # Host unit tests of the hardware-independent crates.
-test-host = "test -p iotkit-core -p iotkit --target host-tuple --no-default-features --features iotkit-core/sign,iotkit/smartled"
+test-host = "test -p iotkit-core -p iotkit --target host-tuple --no-default-features --features iotkit-core/sign,iotkit/smartled,iotkit/esphome-api"
 
 [env]
 # C code of Matter over Thread (OpenThread, mbedtls) is built with the host's clang.

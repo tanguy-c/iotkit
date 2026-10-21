@@ -18,6 +18,9 @@ iotkit is not released yet: the API and the settings' flash layout may still cha
 - `cargo iotkit new`: `TODO(<id>)` hints, optional `AGENTS.md` for AI coding agents.
 - `tls`: TLS 1.3 for MQTT (port 8883) and `https://` downloads, with the server checked against a
   built-in CA.
+- `esphome-api`: Home Assistant's ESPHome integration over the native API (TCP 6053, Noise
+  encryption, mDNS discovery), every entity kind, no broker. `model::Binding::allocate`
+  (`extra-bindings`) for transports outside iotkit.
 - The original ESP32 (MQTT, console and Improv over UART0; no Bluetooth setup or deep sleep yet).
 - Fuzz targets for the network-facing parsers (`fuzz/`), and `tools/hil/run.py`, a hardware test
   (flash, healthy, OTA kept, OTA rolled back) with a nightly workflow for a self-hosted runner.

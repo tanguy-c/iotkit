@@ -380,6 +380,8 @@ async fn start_services(
             HEALTH.pass(BROKER);
         }
     }
+    #[cfg(feature = "esphome-api")]
+    spawn(spawner, crate::esphome::esp::api_task(net, device, crate::esphome::esp::key(store).await));
     #[cfg(feature = "ota-push")]
     spawn(spawner, crate::ota::esp::serve_task(net, store, config.firmware));
     #[cfg(feature = "ha-update")]

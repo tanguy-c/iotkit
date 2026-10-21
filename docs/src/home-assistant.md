@@ -14,6 +14,22 @@ Topics: `iotkit/<host>/status` (`online` / `offline`), `iotkit/<host>/<entity>/s
 `iotkit/<host>/<entity>/set`, and discovery under `homeassistant/`. The `iotkit` prefix is
 `IOTKIT_TOPIC_PREFIX` ([names](lean.md#names)).
 
+## ESPHome API
+
+With the `esphome-api` feature, Home Assistant's ESPHome integration finds the device by itself
+(*Settings > Devices*, discovered) and controls it directly, without a broker. It asks for the
+encryption key: `api-key` on the console shows it (made at first start; `ESPHOME_API_KEY` at
+build time sets it instead, `api-key KEY` changes it). Every entity kind is served.
+
+- Use the API or MQTT, not both: Home Assistant would show the device twice. Without a broker
+  set, MQTT stays off.
+- One client at a time (Home Assistant's), on TCP port 6053; logs, services and Bluetooth proxy
+  are not served.
+- With `matter-wifi`, Matter's mDNS does not advertise the API: add the device by its address.
+
+Another transport can be added outside iotkit the same way: `model::Binding::allocate`
+(`iotkit-core`'s `extra-bindings` feature) gives it its own change flags.
+
 ## Matter over Wi-Fi
 
 Feature `matter-wifi` (ESP32-C6, 8 MB flash), next to MQTT. The device's pairing code is in the
@@ -43,7 +59,8 @@ untested end to end (it needs a Thread border router).
 ## A test setup on the PC
 
 `test-server/compose.yaml` runs a broker, a Home Assistant (`http://localhost:8123`) and a Matter
-controller:
+controller. Its container does not see mDNS: add an ESPHome API device by its address
+(*Add integration > ESPHome*).
 
 ```bash
 docker compose -f test-server/compose.yaml up -d mosquitto

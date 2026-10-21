@@ -1,5 +1,6 @@
 //! Minimal mDNS responder: answers A queries for `<hostname>.local` (RFC 6762), enough for
-//! `ping iotkit-xxxx.local` and `cargo xtask ota push --host iotkit-xxxx.local`.
+//! `ping iotkit-xxxx.local` and `cargo xtask ota push --host iotkit-xxxx.local`; and a
+//! [`Service`] for discovery (DNS-SD), as the ESPHome API's.
 
 /// mDNS multicast group and port.
 pub const GROUP: [u8; 4] = [224, 0, 0, 251];
@@ -54,6 +55,83 @@ pub fn announcement(host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<usize> {
     Some(w.len)
 }
 
+/// A DNS-SD service (RFC 6763) answered next to the host name: `<host>.<name>._tcp.local`.
+pub struct Service {
+    /// `_esphomelib`.
+    pub name: &'static str,
+    /// Its TCP port.
+    pub port: u16,
+    /// Its TXT record, encoded: length-prefixed `key=value` strings.
+    txt: heapless::Vec<u8, 192>,
+}
+
+const TYPE_PTR: u16 = 12;
+const TYPE_TXT: u16 = 16;
+const TYPE_SRV: u16 = 33;
+
+impl Service {
+    /// `None` if the TXT entries do not fit.
+    pub fn new(name: &'static str, port: u16, txt: &[&str]) -> Option<Self> {
+        let mut record = heapless::Vec::new();
+        for entry in txt {
+            record.push(u8::try_from(entry.len()).ok()?).ok()?;
+            record.extend_from_slice(entry.as_bytes()).ok()?;
+        }
+        Some(Self { name, port, txt: record })
+    }
+
+    /// If `query` asks for the service, or this device's instance of it, writes the answer
+    /// (PTR, SRV, TXT, and the address) into `out` and returns its length.
+    pub fn answer(&self, query: &[u8], host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<usize> {
+        let asked = questions(query, |msg, pos| {
+            let (browse, next) = name_eq(msg, pos, &[self.name.as_bytes(), b"_tcp", b"local"])?;
+            let (instance, _) = name_eq(msg, pos, &[host.as_bytes(), self.name.as_bytes(), b"_tcp", b"local"])?;
+            let qtype = u16::from_be_bytes([*msg.get(next)?, *msg.get(next + 1)?]);
+            let matches = (browse && matches!(qtype, TYPE_PTR | TYPE_ANY))
+                || (instance && matches!(qtype, TYPE_SRV | TYPE_TXT | TYPE_ANY));
+            Some((matches, next))
+        })?;
+        if asked { self.announcement(host, ip, out) } else { None }
+    }
+
+    /// An unsolicited response with the service, to send when the address is set.
+    pub fn announcement(&self, host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<usize> {
+        let service = [self.name, "_tcp", "local"];
+        let instance = [host, self.name, "_tcp", "local"];
+        let target = [host, "local"];
+        let mut w = Writer { out, len: 0 };
+        // id 0, flags: response + authoritative; 0 questions, 4 answers.
+        w.put(&[0, 0, 0x84, 0, 0, 0, 0, 4, 0, 0, 0, 0])?;
+        // The PTR is shared (other devices answer it too): no cache flush.
+        w.record(&service, TYPE_PTR, CLASS_IN, |w| w.name(&instance))?;
+        w.record(&instance, TYPE_SRV, CLASS_IN | CACHE_FLUSH, |w| {
+            w.put(&[0, 0, 0, 0])?; // priority, weight
+            w.put(&self.port.to_be_bytes())?;
+            w.name(&target)
+        })?;
+        w.record(&instance, TYPE_TXT, CLASS_IN | CACHE_FLUSH, |w| w.put(&self.txt))?;
+        w.record(&target, TYPE_A, CLASS_IN | CACHE_FLUSH, |w| w.put(&ip))?;
+        Some(w.len)
+    }
+}
+
+/// Runs `question` on each question of `query` (`None` if it is not a query), and returns
+/// whether one matched. ([`answer`] keeps its own loop: the C6 build stays as it was.)
+fn questions(query: &[u8], mut question: impl FnMut(&[u8], usize) -> Option<(bool, usize)>) -> Option<bool> {
+    if query.len() < 12 || query[2] & 0x80 != 0 {
+        return None; // too short, or a response
+    }
+    let mut pos = 12;
+    let mut asked = false;
+    for _ in 0..u16::from_be_bytes([query[4], query[5]]) {
+        let (matches, next) = question(query, pos)?;
+        let qclass = u16::from_be_bytes([*query.get(next + 2)?, *query.get(next + 3)?]) & !CACHE_FLUSH;
+        asked |= matches && qclass == CLASS_IN;
+        pos = next + 4;
+    }
+    Some(asked)
+}
+
 struct Writer<'a> {
     out: &'a mut [u8],
     len: usize,
@@ -65,12 +143,47 @@ impl Writer<'_> {
         self.len += bytes.len();
         Some(())
     }
+
+    fn name(&mut self, labels: &[&str]) -> Option<()> {
+        for label in labels {
+            if label.is_empty() || label.len() > 63 {
+                return None;
+            }
+            self.put(&[label.len() as u8])?;
+            self.put(label.as_bytes())?;
+        }
+        self.put(&[0])
+    }
+
+    /// A resource record, its data written by `data`.
+    fn record(
+        &mut self,
+        name: &[&str],
+        rtype: u16,
+        class: u16,
+        data: impl FnOnce(&mut Self) -> Option<()>,
+    ) -> Option<()> {
+        self.name(name)?;
+        self.put(&rtype.to_be_bytes())?;
+        self.put(&class.to_be_bytes())?;
+        self.put(&TTL_S.to_be_bytes())?;
+        let at = self.len;
+        self.put(&[0, 0])?;
+        data(self)?;
+        let len = u16::try_from(self.len - at - 2).ok()?;
+        self.out[at..at + 2].copy_from_slice(&len.to_be_bytes());
+        Some(())
+    }
 }
 
 /// Whether the name at `pos` is `<host>.local` (any case), and the position after it.
+fn name_is(msg: &[u8], pos: usize, host: &str) -> Option<(bool, usize)> {
+    name_eq(msg, pos, &[host.as_bytes(), b"local"])
+}
+
+/// Whether the name at `pos` is the `expected` labels (any case), and the position after it.
 /// Follows compression pointers (at most 8, against loops).
-fn name_is(msg: &[u8], mut pos: usize, host: &str) -> Option<(bool, usize)> {
-    let expected = [host.as_bytes(), b"local"];
+fn name_eq(msg: &[u8], mut pos: usize, expected: &[&[u8]]) -> Option<(bool, usize)> {
     let mut label = 0;
     let mut matches = true;
     let mut end = None;
@@ -167,6 +280,36 @@ mod tests {
         q[at] = 0xc0;
         q[at + 1] = at as u8;
         assert_eq!(answer(&q, "iotkit-aefc", IP, &mut [0; 128]), None);
+    }
+
+    #[test]
+    fn answers_the_service() {
+        let service = Service::new("_esphomelib", 6053, &["mac=aabbccddeeff", "version=0.8"]).unwrap();
+        let mut out = [0; 512];
+        for (name, qtype) in [
+            (&["_esphomelib", "_tcp", "local"][..], TYPE_PTR),
+            (&["iotkit-aefc", "_esphomelib", "_tcp", "local"][..], TYPE_SRV),
+            (&["IOTKIT-AEFC", "_esphomelib", "_tcp", "local"][..], TYPE_TXT),
+        ] {
+            let (q, n) = query(name, qtype, CLASS_IN);
+            let len = service.answer(&q[..n], "iotkit-aefc", IP, &mut out).unwrap();
+            let answer = &out[..len];
+            assert_eq!(answer[7], 4, "PTR, SRV, TXT, A");
+            let srv = b"\x00\x21\x80\x01\x00\x00\x00\x78\x00\x19\x00\x00\x00\x00\x17\xa5\x0biotkit-aefc\x05local\x00";
+            assert!(answer.windows(srv.len()).any(|w| w == srv), "SRV: port 6053 on iotkit-aefc.local");
+            assert!(answer.windows(17).any(|w| w == b"\x10mac=aabbccddeeff"));
+            assert!(answer.ends_with(&IP));
+        }
+        for (name, qtype) in [
+            (&["_esphomelib", "_tcp", "local"][..], TYPE_A),
+            (&["_http", "_tcp", "local"][..], TYPE_PTR),
+            (&["other", "_esphomelib", "_tcp", "local"][..], TYPE_SRV),
+            (&["iotkit-aefc", "local"][..], TYPE_A),
+        ] {
+            let (q, n) = query(name, qtype, CLASS_IN);
+            assert_eq!(service.answer(&q[..n], "iotkit-aefc", IP, &mut out), None, "{name:?} {qtype}");
+        }
+        assert!(Service::new("_x", 1, &[core::str::from_utf8(&[b'a'; 200]).unwrap()]).is_none(), "TXT too long");
     }
 
     fn vec_query() -> heapless::Vec<u8, 128> {

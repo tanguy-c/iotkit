@@ -11,6 +11,8 @@ publish.workspace      = true
 [features]
 ## Atomics for chips without compare-and-swap (ESP32-C3); turned on by `iotkit`'s `esp32c3`.
 portable-atomic = ["dep:portable-atomic"]
+## Bindings beyond MQTT and Matter (`model::Binding::allocate`): for other transports.
+extra-bindings = []
 ## Signing images and manifests (the CLI; never in firmware).
 sign = ["iotkit-image/sign"]
 

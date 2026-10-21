@@ -50,6 +50,8 @@ pub mod keys {
     pub const MQTT_BROKER: u16 = 0x0040;
     /// `iotkit::matter`: the setup code (passcode and discriminator).
     pub const MATTER_SETUP: u16 = 0x0050;
+    /// `iotkit::esphome`: the ESPHome API's encryption key.
+    pub const ESPHOME_API_KEY: u16 = 0x0060;
 }
 
 /// Largest encoded setting, version byte included.

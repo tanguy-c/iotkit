@@ -8,10 +8,11 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 - `crates/iotkit-core`: no chip, host-tested: `model`, `config` (the store), `image` (signed
   updates; the CLI signs with it), `runtime` (health check).
 - `crates/iotkit`: what apps depend on. Modules `config::esp`, `diag`, `net`, `ota`, `provision`,
-  `mqtt` (Home Assistant discovery, `ha.rs`), `matter`, `components` (ready-made parts over
-  embedded-hal); `app.rs` (`start`, `Board`, `Config`, `init!`), re-exported at the root. Each
-  module's chip code is in its `esp.rs`, behind `feature = "_esp"` or, on the Wi-Fi side,
-  `cfg(esp_wifi)` (a chip and `wifi`, set by `build.rs`); the rest builds on the host.
+  `mqtt` (Home Assistant discovery, `ha.rs`), `esphome` (the ESPHome native API, `api.rs`),
+  `matter`, `components` (ready-made parts over embedded-hal); `app.rs` (`start`, `Board`,
+  `Config`, `init!`), re-exported at the root. Each module's chip code is in its `esp.rs`, behind
+  `feature = "_esp"` or, on the Wi-Fi side, `cfg(esp_wifi)` (a chip and `wifi`, set by
+  `build.rs`); the rest builds on the host.
 - `crates/iotkit-build`: the apps' build.rs helper.
 - `docs/`: the user guide. User-facing explanations live there, once; the README stays a short
   landing page.

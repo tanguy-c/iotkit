@@ -32,7 +32,7 @@ code you own.
 | --- | --- | --- |
 | A device is | YAML, C++ lambdas | Rust: entities as `static`s, async tasks |
 | Parts | hundreds of components | [ready-made parts](components.md), and any embedded-hal driver crate |
-| Home Assistant | native API | MQTT discovery; Matter |
+| Home Assistant | native API | native API (`esphome-api`), MQTT discovery; Matter |
 | Updates | OTA with a password | Ed25519-signed, rolled back if the new firmware is not healthy |
 | Setup | captive portal, Improv | setup access point, Improv over Bluetooth and USB |
 | Chips | the ESP32 family and more | ESP32-C6 (reference), C3, C5, S3; H2 for Thread |
@@ -47,8 +47,8 @@ Early, not released yet: the API and the settings' flash layout may still change
 - Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and serial),
   signed OTA with rollback, MQTT with Home Assistant, Matter over Wi-Fi with Home Assistant's
   Matter server, deep sleep, updates from Home Assistant, installing from the browser.
-- Built but not tested on hardware: the other chips, the BOOT button gestures, most entity kinds
-  over Matter, Matter over Thread end to end (no border router tried yet).
+- Built but not tested on hardware: the other chips, the ESPHome API, the BOOT button gestures,
+  most entity kinds over Matter, Matter over Thread end to end (no border router tried yet).
 - Matter uses the test attestation credentials: for development, not for selling devices.
 
 ## Chips

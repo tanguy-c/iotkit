@@ -12,7 +12,7 @@ Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `io
 - [Install from the browser](https://tanguy-c.github.io/iotkit/install-from-browser.html): ESP Web Tools page from `cargo iotkit build`
 - [Entities and settings](https://tanguy-c.github.io/iotkit/entities.html): entity kinds, DeviceClass, Unit, Config, Setting
 - [Components and drivers](https://tanguy-c.github.io/iotkit/components.html): relay, binary_input, button, dimmer, fan, rgb_light, poll, filters, any embedded-hal driver
-- [Home Assistant and Matter](https://tanguy-c.github.io/iotkit/home-assistant.html): MQTT discovery, topics, Matter device types
+- [Home Assistant and Matter](https://tanguy-c.github.io/iotkit/home-assistant.html): the ESPHome API, MQTT discovery and topics, Matter device types
 - [Updates](https://tanguy-c.github.io/iotkit/updates.html): signed OTA, rollback, updates from Home Assistant, keys
 - [Battery devices](https://tanguy-c.github.io/iotkit/battery.html): deep sleep with `start_sleepy`
 - [Only what the device uses](https://tanguy-c.github.io/iotkit/lean.html): opt-out features, IOTKIT_HOSTNAME, IOTKIT_TOPIC_PREFIX

@@ -24,6 +24,11 @@ certificate must chain to the CA built into the firmware (`IOTKIT_TLS_CA`) and c
 or address the device connects to. The device has no clock yet: an expired certificate is still
 accepted. The OTA push endpoint (port 80) stays plain: it only takes signed images.
 
+**The ESPHome API (`esphome-api`) is encrypted with one key per device.** Whoever has it, or the
+device's console, can read the states and send commands. The key is made at first start from the
+hardware random generator and kept in flash with the other settings; `api-key` on the console
+shows it.
+
 **The setup window is open.** While it is open (first boot, BOOT held 3 s, or `provision` on the
 console), anyone in range can give the device a Wi-Fi network: the setup access point has no
 password, and Improv asks for no button press. Open it only when you need it; opened by hand,

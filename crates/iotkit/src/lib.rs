@@ -71,6 +71,8 @@ compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-S3's internal RA
 #[cfg(all(feature = "esp32c3", feature = "matter-wifi"))]
 compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQTT, or a C6/C5/S3)");
 
+#[cfg(all(feature = "esphome-api", feature = "_esp", not(feature = "wifi")))]
+compile_error!("iotkit: `esphome-api` needs `wifi`");
 #[cfg(all(feature = "esp32h2", feature = "wifi"))]
 compile_error!("iotkit: the ESP32-H2 has no Wi-Fi: `default-features = false` with `matter-thread`");
 
@@ -95,6 +97,8 @@ pub use iotkit_core::{image, model, runtime};
 pub mod components;
 pub mod config;
 pub mod diag;
+#[cfg(feature = "esphome-api")]
+pub mod esphome;
 #[cfg(feature = "_matter")]
 pub mod matter;
 pub mod mqtt;

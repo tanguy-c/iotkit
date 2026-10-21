@@ -28,8 +28,8 @@ use static_cell::StaticCell;
 use crate::net::{WifiCredentials, backoff::Backoff, http, mdns};
 
 /// DHCP, DNS, mDNS, an HTTP client, an HTTP server, one spare; with Matter, its UDP transport
-/// (2 sockets) and its mDNS replace ours.
-const SOCKETS: usize = if cfg!(feature = "matter-wifi") { 8 } else { 6 };
+/// (2 sockets) and its mDNS replace ours; the ESPHome API's server.
+const SOCKETS: usize = if cfg!(feature = "matter-wifi") { 8 } else { 6 } + cfg!(feature = "esphome-api") as usize;
 /// On the access point: DHCP server, DNS server, the portal, embassy-net's own DNS client, one
 /// spare. Too few panics in smoltcp at the first `bind`.
 const AP_SOCKETS: usize = 5;
@@ -416,11 +416,24 @@ async fn try_join(w: &mut Wifi, new: &WifiCredentials) -> bool {
     }
 }
 
-/// Answers `<hostname>.local`, and announces it whenever the address changes.
+/// The DNS-SD service answered next to the host name (`esphome-api`).
+#[cfg(feature = "esphome-api")]
+static SERVICE: embassy_sync::once_lock::OnceLock<mdns::Service> = embassy_sync::once_lock::OnceLock::new();
+
+/// Answers `service` over mDNS from now on (once: a second one is ignored). Without Matter's
+/// mDNS, which does not take it.
+#[cfg(feature = "esphome-api")]
+pub(crate) fn advertise(service: mdns::Service) {
+    let _ = SERVICE.init(service);
+}
+
+/// Answers `<hostname>.local` (and the [`advertise`]d service), and announces it whenever the
+/// address changes.
 #[embassy_executor::task]
 async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
     let (mut rx_meta, mut tx_meta) = ([PacketMetadata::EMPTY; 4], [PacketMetadata::EMPTY; 4]);
-    let (mut rx, mut tx, mut out) = ([0u8; 512], [0u8; 512], [0u8; 128]);
+    let (mut rx, mut tx) = ([0u8; 512], [0u8; 512]);
+    let mut out = [0u8; if cfg!(feature = "esphome-api") { 512 } else { 128 }];
     let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
     if let Err(e) = socket.bind(mdns::PORT) {
         log::error!("net: mDNS bind failed: {e:?}");
@@ -438,11 +451,19 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
         if let Some(n) = mdns::announcement(hostname, ip, &mut out) {
             let _ = socket.send_to(&out[..n], group).await;
         }
+        #[cfg(feature = "esphome-api")]
+        if let Some(n) = SERVICE.try_get().and_then(|s| s.announcement(hostname, ip, &mut out)) {
+            let _ = socket.send_to(&out[..n], group).await;
+        }
         // Serve until the address goes away.
         loop {
             match select(socket.recv_from(&mut buf), stack.wait_config_down()).await {
                 Either::First(Ok((n, _from))) => {
                     if let Some(len) = mdns::answer(&buf[..n], hostname, ip, &mut out) {
+                        let _ = socket.send_to(&out[..len], group).await;
+                    }
+                    #[cfg(feature = "esphome-api")]
+                    if let Some(len) = SERVICE.try_get().and_then(|s| s.answer(&buf[..n], hostname, ip, &mut out)) {
                         let _ = socket.send_to(&out[..len], group).await;
                     }
                 }

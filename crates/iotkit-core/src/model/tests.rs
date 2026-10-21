@@ -24,6 +24,16 @@ fn metadata() {
     assert!(DEVICE.entity("nope").is_none());
 }
 
+#[cfg(feature = "extra-bindings")]
+#[test]
+fn extra_bindings_have_their_own_flags() {
+    static S: Sensor = Sensor::new("s", "S");
+    let first = Binding::allocate().unwrap();
+    assert!((0..5).all(|_| Binding::allocate().is_some()) && Binding::allocate().is_none(), "six in all");
+    S.set(1.0);
+    assert!(S.take_dirty(first) && !S.take_dirty(first) && S.take_dirty(Binding::MQTT));
+}
+
 #[test]
 fn sensors_report_changes_only() {
     static S: Sensor = Sensor::new("s", "S");
