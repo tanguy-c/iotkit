@@ -1,0 +1,27 @@
+name: Bug
+description: Something does not work as the guide says.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: "1. cargo iotkit new ... 2. ..."
+  - type: input
+    id: setup
+    attributes:
+      label: Board, chip, iotkit version (or commit) and features
+      placeholder: "ESP32-C6-DevKitC-1, esp32c6, main@abc1234, default + tls"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Console output
+      description: "The boot log and the error (`cargo run` or `espflash monitor`; `info` on the console shows the last crash). Remove Wi-Fi and broker passwords."
+      render: text

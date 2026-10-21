@@ -2,7 +2,7 @@
 
 | Path | What |
 | --- | --- |
-| `crates/iotkit` | what a device depends on: `start` and the modules (`net`, `ota`, `provision`, `mqtt`, `matter`, `components`, `diag`, `config`) |
+| `crates/iotkit` | what a device depends on: `start` and the modules (`net`, `ota`, `provision`, `mqtt`, `esphome`, `matter`, `components`, `diag`, `config`) |
 | `crates/iotkit-core` | the chip-independent part, re-exported by `iotkit`: `model`, `config` (the store), `image` (signed updates), `runtime` (health) |
 | `crates/iotkit-build` | the apps' `build.rs` helper |
 | `apps/` | the [examples](examples.md); `cargo xtask ...` here is `cargo iotkit` |
@@ -21,3 +21,5 @@ cargo build -p devkit        # one app at a time
 esp-radio build. [AGENTS.md](https://github.com/tanguy-c/iotkit/blob/main/AGENTS.md) has the
 rules (the ESP32-C6 build must not change for another chip or feature), the size and link checks,
 and the hardware gotchas; the CI workflow is the reference for every check.
+[CONTRIBUTING.md](https://github.com/tanguy-c/iotkit/blob/main/CONTRIBUTING.md) covers issues
+and pull requests.

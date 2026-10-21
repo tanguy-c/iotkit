@@ -1,0 +1,21 @@
+name: Component
+description: A ready-made part (sensor, actuator, input) for `iotkit::components` and the wizard.
+labels: [component]
+body:
+  - type: input
+    id: part
+    attributes:
+      label: The part
+      placeholder: "SHT40 temperature and humidity sensor (I2C)"
+    validations:
+      required: true
+  - type: input
+    id: driver
+    attributes:
+      label: An embedded-hal driver crate, if there is one
+      placeholder: "sht4x 0.2 (no_std, embedded-hal 1.0)"
+  - type: textarea
+    id: entities
+    attributes:
+      label: The entities it would drive
+      placeholder: "Sensor::temperature, Sensor::humidity, every 30 s"

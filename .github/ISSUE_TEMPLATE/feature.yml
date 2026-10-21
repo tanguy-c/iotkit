@@ -1,0 +1,15 @@
+name: Idea
+description: Something iotkit should do.
+body:
+  - type: textarea
+    id: device
+    attributes:
+      label: The device you are building, and what is missing
+    validations:
+      required: true
+  - type: textarea
+    id: esphome
+    attributes:
+      label: How ESPHome does it, if it does
+      description: The YAML, or a link to its docs.
+      render: yaml

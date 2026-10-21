@@ -1,8 +1,8 @@
 # iotkit
 
 Rust firmware for ESP32 smart devices: Wi-Fi setup from a phone, signed OTA updates with
-automatic rollback, Home Assistant over MQTT and Matter, deep sleep. A `no_std` kit on esp-hal and
-Embassy for when ESPHome's YAML gets in the way.
+automatic rollback, Home Assistant over its ESPHome API, MQTT or Matter, deep sleep. A `no_std`
+kit on esp-hal and Embassy for when ESPHome's YAML gets in the way.
 
 **[Guide](https://tanguy-c.github.io/iotkit/)** ·
 [Coming from ESPHome](https://tanguy-c.github.io/iotkit/coming-from-esphome.html) ·
@@ -47,7 +47,12 @@ on the console: the board's LED shows up in Home Assistant. `cargo iotkit new` w
 
 Early, not released yet: the API and the settings' flash layout may still change. Tested on an
 ESP32-C6-DevKitC-1; the C3, C5, S3, ESP32 and H2 are build-tested ([chips](https://tanguy-c.github.io/iotkit/introduction.html#chips)).
-Matter uses test attestation credentials: for development, not for selling devices.
+Matter uses test attestation credentials: for development, not for selling devices. What comes
+next: the [roadmap](docs/src/roadmap.md).
+
+## Contributing
+
+Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

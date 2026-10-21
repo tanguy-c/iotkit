@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/tanguy-c/iotkit/security/advisories/new
+    about: Report it privately (see SECURITY.md), not in an issue.
