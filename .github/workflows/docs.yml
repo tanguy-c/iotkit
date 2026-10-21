@@ -15,19 +15,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
- Links between pages and their anchors; the web is not checked (flaky).- uses: actions/checkout@v4
- Links between pages and their anchors; the web is not checked (flaky).- uses: taiki-e/install-action@v2
- Links between pages and their anchors; the web is not checked (flaky).  with:
- Links between pages and their anchors; the web is not checked (flaky).    tool: mdbook
- Links between pages and their anchors; the web is not checked (flaky).- run: mdbook build docs
- Links between pages and their anchors; the web is not checked (flaky).# Links between pages and their anchors; the web is not checked (flaky).
- Links between pages and their anchors; the web is not checked (flaky).- uses: lycheeverse/lychee-action@v2
- Links between pages and their anchors; the web is not checked (flaky).  with:
- Links between pages and their anchors; the web is not checked (flaky).    args: --offline --include-fragments --no-progress --exclude-path docs/book/404.html docs/book
- Links between pages and their anchors; the web is not checked (flaky).    fail: true
- Links between pages and their anchors; the web is not checked (flaky).- uses: actions/upload-pages-artifact@v3
- Links between pages and their anchors; the web is not checked (flaky).  with:
- Links between pages and their anchors; the web is not checked (flaky).    path: docs/book
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - run: mdbook build docs
+      # Links between pages and their anchors; the web is not checked (flaky). 404.html has the
+      # site-root link from book.toml.
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --include-fragments --no-progress --exclude-path docs/book/404.html docs/book
+          fail: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
 
   # Settings > Pages > Source: GitHub Actions.
   deploy:
@@ -35,11 +36,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
- Links between pages and their anchors; the web is not checked (flaky).pages: write
- Links between pages and their anchors; the web is not checked (flaky).id-token: write
+      pages: write
+      id-token: write
     environment:
- Links between pages and their anchors; the web is not checked (flaky).name: github-pages
- Links between pages and their anchors; the web is not checked (flaky).url: ${{ steps.deployment.outputs.page_url }}
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
- Links between pages and their anchors; the web is not checked (flaky).- id: deployment
- Links between pages and their anchors; the web is not checked (flaky).  uses: actions/deploy-pages@v4
+      - id: deployment
+        uses: actions/deploy-pages@v4
