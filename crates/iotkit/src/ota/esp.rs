@@ -9,7 +9,7 @@ use crate::net::{
     esp::{GetError, Net, Sink, get, get_from},
     http,
 };
-#[cfg(not(feature = "ha-update"))]
+#[cfg(any(not(feature = "ha-update"), not(feature = "ota-push")))]
 use embassy_futures::select::{Either, select};
 #[cfg(feature = "ha-update")]
 use embassy_futures::select::{Either3, select3};
@@ -310,15 +310,15 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 pub fn installing() -> bool {
     BUSY.load(Ordering::Acquire) || REQUEST.signaled()
 }
-/// An install asked for by [`request_install`], run by [`serve_task`].
+/// An install asked for by [`request_install`], run by [`serve_task`] (or `install_task`).
 static REQUEST: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
 static RESULT: Signal<CriticalSectionRawMutex, Result<Version, OtaError>> = Signal::new();
 /// One [`request_install`] at a time.
 static REQUESTING: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
-/// Has [`serve_task`] (which must run) install the update whose manifest is at `manifest_url`.
-/// On success the new firmware is selected: restart to boot it (on trial). Only `serve_task`
-/// runs an install, so its large buffers exist once.
+/// Has [`serve_task`] or `install_task` (one must run) install the update whose manifest is at
+/// `manifest_url`. On success the new firmware is selected: restart to boot it (on trial). Only
+/// that task runs an install, so its large buffers exist once.
 pub async fn request_install(manifest_url: &str) -> Result<Version, OtaError> {
     let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
     if BUSY.load(Ordering::Acquire) {
@@ -342,14 +342,14 @@ pub struct Release {
     pub release_url: String<{ crate::image::MAX_RELEASE_URL_LEN }>,
 }
 
-/// A check asked for by [`request_check`], run by [`serve_task`].
+/// A check asked for by [`request_check`], run by [`serve_task`] (or `install_task`).
 #[cfg(feature = "ha-update")]
 static CHECK: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
 #[cfg(feature = "ha-update")]
 static CHECKED: Signal<CriticalSectionRawMutex, Result<Option<Release>, OtaError>> = Signal::new();
 
-/// Has [`serve_task`] fetch and verify the manifest at `manifest_url`: the release if it is an
-/// update for this firmware, `None` if it is not newer.
+/// Has [`serve_task`] or `install_task` fetch and verify the manifest at `manifest_url`: the
+/// release if it is an update for this firmware, `None` if it is not newer.
 #[cfg(feature = "ha-update")]
 pub async fn request_check(manifest_url: &str) -> Result<Option<Release>, OtaError> {
     let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
@@ -738,6 +738,19 @@ pub async fn serve_task(net: Net, store: &'static SharedStore, fw: Firmware) {
             // Let the reply leave first.
             Timer::after_millis(500).await;
             crate::diag::esp::restart().await;
+        }
+    }
+}
+
+/// The installs and checks of [`request_install`] and [`request_check`] without the port-80
+/// endpoint: `ha-update` without `ota-push`.
+#[cfg(all(feature = "ha-update", not(feature = "ota-push")))]
+#[embassy_executor::task]
+pub async fn install_task(net: Net, store: &'static SharedStore, fw: Firmware) {
+    loop {
+        match select(REQUEST.wait(), CHECK.wait()).await {
+            Either::First(url) => RESULT.signal(install(net, store, fw, &url).await),
+            Either::Second(url) => CHECKED.signal(check(net, fw, &url).await),
         }
     }
 }

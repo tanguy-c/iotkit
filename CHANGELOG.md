@@ -2,6 +2,11 @@
 
 The API and the settings' flash layout may still change before 1.0.
 
+## 0.1.1 (2026-10-21)
+
+- `ha-update` without `ota-push`: updates from Home Assistant now install (they waited forever);
+  the console's `ota URL` says when no update feature is built in.
+
 ## 0.1.0 (2026-10-21)
 
 The first release. Install from git (not on

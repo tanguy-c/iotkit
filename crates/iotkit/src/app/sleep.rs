@@ -402,6 +402,8 @@ async fn start_services(
     }
     #[cfg(feature = "ota-push")]
     spawn(spawner, crate::ota::esp::serve_task(net, store, config.firmware));
+    #[cfg(all(feature = "ha-update", not(feature = "ota-push")))]
+    spawn(spawner, crate::ota::esp::install_task(net, store, config.firmware));
     #[cfg(feature = "ha-update")]
     spawn(spawner, super::update::update_task(net, store, config.firmware));
     super::spawn_provisioning(spawner, bt, super::provisioner(net, store, config), unprovisioned);
