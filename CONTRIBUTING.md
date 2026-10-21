@@ -17,8 +17,9 @@ ESP32-C6-DevKitC-1 is the reference board; other boards help most by testing on 
 
 [AGENTS.md](AGENTS.md) is written for coding agents and holds the project's rules for everyone,
 once: the ESP32-C6 build does not change for another chip or feature, nothing is linked unless
-the app uses it, the size and link checks, the style, and the hardware gotchas. The CI workflow
-runs every check.
+the app uses it, the size and link checks, the style, and the hardware gotchas. The quick CI
+runs on every pull request; the other chips and generated projects run nightly (`full.yml`), or on
+your pull request with the `full-ci` label.
 
 The skills in [`.claude/skills/`](.claude/skills) are step lists for the common changes, as
 useful to read as to hand to an agent:

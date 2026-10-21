@@ -1,9 +1,18 @@
 name: CI
 
+# The quick checks, on every push and pull request. The other chips, the generated projects, fuzzing
+# and advisories are in full.yml (nightly, on request, or with the `full-ci` label).
 on:
   push:
     branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +26,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target\nxtask -> target"
+      - run: ./template/check-sync.sh
       - run: cargo fmt --all --check
       - run: cargo fmt --all --check --manifest-path xtask/Cargo.toml
       - run: cargo test-host
@@ -63,8 +73,6 @@ jobs:
           name: devkit
           path: dist/
 
-  # The C6 builds must not grow (see AGENTS.md). Growth meant by the PR: add the `size-ok` label
-  # and re-run.
   size:
     name: C6 size against the PR base
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'size-ok')
@@ -79,22 +87,6 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: tools/size-check.sh ${{ github.event.pull_request.base.sha }}
 
-  fuzz:
-    name: Fuzz the parsers (short)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: fuzz
-      # 30 s each; longer runs: `cargo +nightly fuzz run <target> -- -max_total_time=3600`.
-      - run: for t in $(cargo +nightly fuzz list); do cargo +nightly fuzz run "$t" -- -max_total_time=30; done
-        working-directory: fuzz
-
   links:
     name: Unused code is not linked
     runs-on: ubuntu-latest
@@ -105,116 +97,21 @@ jobs:
           key: links
       - run: tools/link-check.sh
 
-  # The other chips: build-tested only (the C6 job above is the one tested on hardware).
-  chips-riscv:
-    name: Firmware (${{ matrix.chip }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { chip: esp32c3, app: devkit, target: riscv32imc-unknown-none-elf }
-          - { chip: esp32c5, app: devkit, target: riscv32imac-unknown-none-elf }
-          - { chip: esp32h2, app: thread-light, target: riscv32imac-unknown-none-elf }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.chip }}
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: espflash
-      - run: cargo xtask keygen
-      - if: matrix.app == 'thread-light'
-        run: sudo apt-get update && sudo apt-get install -y clang cmake
-      - run: cargo clippy -p ${{ matrix.app }} --no-default-features --features ${{ matrix.chip }} --target ${{ matrix.target }} -- -D warnings
-      # Deep sleep (Wi-Fi chips only).
-      - if: matrix.app == 'devkit'
-        run: cargo clippy -p iotkit --features iotkit/${{ matrix.chip }},iotkit/deep-sleep,iotkit/esphome-api --target ${{ matrix.target }} -- -D warnings
-      - if: matrix.app == 'devkit'
-        run: cargo xtask build --release --chip ${{ matrix.chip }} && cargo xtask verify
-
-  xtensa:
-    name: Firmware (${{ matrix.chip }}, Xtensa)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - chip: esp32s3
-            answers: s3
-            iotkit: iotkit/default,iotkit/esp32s3,iotkit/deep-sleep,iotkit/esphome-api
-            build: ""
-          # MQTT only: no Bluetooth setup (`improv-ble`) on the original ESP32 yet.
-          - chip: esp32
-            answers: esp32
-            iotkit: iotkit/esp32,iotkit/wifi,iotkit/softap,iotkit/improv-serial,iotkit/console,iotkit/ota-push,iotkit/tls,iotkit/esphome-api
-            build: --flash-size 4mb
-    env:
-      TARGET: xtensa-${{ matrix.chip }}-none-elf
-    steps:
-      - uses: actions/checkout@v4
-      # 1.98.1.0: 1.99 fails to link esp-hal 1.2.2 ("dangerous relocation: l32r").
-      - uses: esp-rs/xtensa-toolchain@v1.7
-        with:
-          default: false
-          buildtargets: ${{ matrix.chip }}
-          ldproxy: false
-          version: "1.98.1.0"
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.chip }}
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: espflash
-      - run: cargo xtask keygen
-      # A throw-away CA for the `tls` lint.
-      - run: |
-          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj /CN=ci -days 1 -keyout /dev/null -outform DER -out "$RUNNER_TEMP/ca.der"
-          echo "IOTKIT_TLS_CA=$RUNNER_TEMP/ca.der" >> "$GITHUB_ENV"
-      - run: cargo +esp clippy -p devkit --no-default-features --features ${{ matrix.chip }} --target $TARGET -Zbuild-std=core,alloc -- -D warnings
-      - run: cargo +esp clippy -p iotkit --no-default-features --features ${{ matrix.iotkit }} --target $TARGET -Zbuild-std=core,alloc -- -D warnings
-      - run: cargo xtask build --release --chip ${{ matrix.chip }} ${{ matrix.build }} && cargo xtask verify
-      # `cargo iotkit new` (its project uses the esp toolchain).
-      - run: cargo install --locked --path xtask
-      - run: cargo iotkit new "$RUNNER_TEMP/new" --answers xtask/answers/${{ matrix.answers }}.toml --iotkit-path "$GITHUB_WORKSPACE"
-      - run: cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify
-        working-directory: ${{ runner.temp }}/new
-
-  template:
-    name: Template
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: ./template/check-sync.sh
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-generate
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: espflash
-      # The generated project depends on this checkout's crates, and gets `cargo iotkit`.
-      - run: cargo install --locked --path xtask
-      - run: cargo generate --path template --name ci-device --destination "$RUNNER_TEMP" --silent --define chip=esp32c6 --define "iotkit_path=$GITHUB_WORKSPACE"
-      - run: cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify
-        working-directory: ${{ runner.temp }}/ci-device
-      # The RISC-V chips too (the Xtensa templates need the esp toolchain: see the xtensa job).
-      - run: |
-          for chip in esp32c3 esp32c5; do
-            cargo generate --path template --name "ci-$chip" --destination "$RUNNER_TEMP" --silent --define chip=$chip --define "iotkit_path=$GITHUB_WORKSPACE"
-            (cd "$RUNNER_TEMP/ci-$chip" && cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify)
-          done
-      # `cargo iotkit new` from answers files: every part kind with Matter on the C6, a battery C3,
-      # a C6 over the ESPHome API.
-      - run: |
-          for c in c6 c3 esphome; do
-            cargo iotkit new "$RUNNER_TEMP/new-$c" --answers xtask/answers/$c.toml --iotkit-path "$GITHUB_WORKSPACE"
-            (cd "$RUNNER_TEMP/new-$c" && cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify)
-          done
-
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Advisories change without a commit: full.yml checks them nightly.
       - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
+
+  # The one check to require: it passes when every job above passed or was skipped (`size` is).
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs: [host, firmware, size, links, deny]
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = false

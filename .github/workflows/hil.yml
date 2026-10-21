@@ -10,6 +10,8 @@ on:
 
 jobs:
   c6:
+    # Set the repository variable HIL_ENABLED=true once the runner is registered.
+    if: vars.HIL_ENABLED == 'true'
     runs-on: [self-hosted, iotkit-c6]
     timeout-minutes: 40
     env:

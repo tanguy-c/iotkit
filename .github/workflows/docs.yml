@@ -3,7 +3,13 @@ name: Guide
 on:
   push:
     branches: [main]
+    paths: [docs/**, .github/workflows/docs.yml]
   pull_request:
+    paths: [docs/**, .github/workflows/docs.yml]
+
+concurrency:
+  group: guide-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:

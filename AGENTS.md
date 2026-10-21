@@ -29,8 +29,9 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
   build.
 - Host tests: `cargo test-host` (`iotkit-core`, and `iotkit` without a chip);
   CLI: `cargo test --manifest-path xtask/Cargo.toml --target host-tuple`.
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for clippy, per-chip builds
-  and template checks: run the matching lines before pushing.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) (quick) and
+  [full.yml](.github/workflows/full.yml) (other chips, templates, fuzz; nightly or the `full-ci`
+  label) are the reference for clippy, per-chip builds and template checks: run the matching lines before pushing.
 - `tools/size-check.sh [base]` before committing anything that touches the C6 build.
 - `tools/link-check.sh`: code an app does not use must not be linked (no registries, no lists of
   every component, no `#[used]`). A new opt-in feature adds a rule there.
