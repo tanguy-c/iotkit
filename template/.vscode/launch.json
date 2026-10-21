@@ -17,7 +17,7 @@
       "coreConfigs": [
         {
           "coreIndex": 0,
-          "programBinary": "target/{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp32c3" %}riscv32imc-unknown-none-elf{% else %}riscv32imac-unknown-none-elf{% endif %}/debug/{{project-name}}"
+          "programBinary": "target/{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp32" %}xtensa-esp32-none-elf{% elsif chip == "esp32c3" %}riscv32imc-unknown-none-elf{% else %}riscv32imac-unknown-none-elf{% endif %}/debug/{{project-name}}"
         }
       ]
     },
@@ -30,7 +30,7 @@
       "coreConfigs": [
         {
           "coreIndex": 0,
-          "programBinary": "target/{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp32c3" %}riscv32imc-unknown-none-elf{% else %}riscv32imac-unknown-none-elf{% endif %}/debug/{{project-name}}"
+          "programBinary": "target/{% if chip == "esp32s3" %}xtensa-esp32s3-none-elf{% elsif chip == "esp32" %}xtensa-esp32-none-elf{% elsif chip == "esp32c3" %}riscv32imc-unknown-none-elf{% else %}riscv32imac-unknown-none-elf{% endif %}/debug/{{project-name}}"
         }
       ]
     }

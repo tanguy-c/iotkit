@@ -63,7 +63,9 @@ impl Bus {
                 )
             }
             Bus::Adc => {
-                format!("ADC: `config.enable_pin({pin}, Attenuation::_11dB)`, `Adc::new(p.ADC1, config).into_async()`")
+                format!(
+                    "ADC: `config.enable_pin({pin}, Attenuation::_11dB)`, `Adc::new(p.ADC1, config).into_async()` (ESP32: blocking)"
+                )
             }
             Bus::I2c => {
                 format!("I²C: `I2c::new(p.I2C0, Default::default()).unwrap().with_sda({pin}).with_scl(…).into_async()`")
@@ -99,6 +101,20 @@ pub enum Component {
     Button,
     /// `components::poll` on an ADC1 pin, calibrated to 0-100 %.
     Analog,
+}
+
+impl Kind {
+    /// What it does with its pin.
+    pub fn pin_use(&self) -> super::boards::PinUse {
+        use super::boards::PinUse;
+        if self.analog {
+            PinUse::Analog
+        } else if self.buses.iter().any(|b| matches!(b, Bus::GpioOut | Bus::Ledc | Bus::Rmt)) {
+            PinUse::Output
+        } else {
+            PinUse::Input
+        }
+    }
 }
 
 pub struct Kind {

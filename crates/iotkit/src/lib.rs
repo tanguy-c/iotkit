@@ -30,16 +30,20 @@
 
 #[cfg(all(
     feature = "wifi",
-    not(any(feature = "esp32c6", feature = "esp32c3", feature = "esp32c5", feature = "esp32s3"))
+    not(any(feature = "esp32c6", feature = "esp32c3", feature = "esp32c5", feature = "esp32s3", feature = "esp32"))
 ))]
 compile_error!(
-    "iotkit: enable one chip feature: esp32c6, esp32c3, esp32c5 or esp32s3 (esp32h2: Thread only, without `wifi`)"
+    "iotkit: enable one chip feature: esp32c6, esp32c3, esp32c5, esp32s3 or esp32 (esp32h2: Thread only, without `wifi`)"
 );
 #[cfg(any(
     all(feature = "esp32c6", any(feature = "esp32c3", feature = "esp32c5", feature = "esp32s3", feature = "esp32h2")),
     all(feature = "esp32c3", any(feature = "esp32c5", feature = "esp32s3", feature = "esp32h2")),
     all(feature = "esp32c5", any(feature = "esp32s3", feature = "esp32h2")),
     all(feature = "esp32s3", feature = "esp32h2"),
+    all(
+        feature = "esp32",
+        any(feature = "esp32c6", feature = "esp32c3", feature = "esp32c5", feature = "esp32s3", feature = "esp32h2")
+    ),
 ))]
 compile_error!("iotkit: enable only one chip feature");
 #[cfg(all(feature = "esp32c5", feature = "matter-wifi"))]
@@ -49,6 +53,18 @@ compile_error!("iotkit: `matter-wifi` is not supported on the ESP32-C5 yet (no T
 compile_error!("iotkit: `deep-sleep` is for MQTT devices; not with `matter-wifi`");
 // Matter over Wi-Fi needs about 21 KB more internal RAM than the ESP32-S3 has left (PSRAM
 // support would fix it; not done yet).
+// Not tried on the original ESP32: Matter (RAM, rs-matter support) and deep sleep (its code
+// reads the USB-Serial-JTAG peripheral the ESP32 does not have).
+#[cfg(all(feature = "esp32", any(feature = "matter-wifi", feature = "matter-thread")))]
+compile_error!("iotkit: Matter is not supported on the original ESP32 (use MQTT, or a C6)");
+// esp-radio 1.0.0-beta.1's ESP32 Bluetooth controller needs ROM symbols no linker script
+// provides yet.
+#[cfg(all(feature = "esp32", feature = "improv-ble"))]
+compile_error!(
+    "iotkit: `improv-ble` does not link on the original ESP32 yet: `default-features = false`, then the features to keep"
+);
+#[cfg(all(feature = "esp32", feature = "deep-sleep"))]
+compile_error!("iotkit: `deep-sleep` is not supported on the original ESP32 yet");
 #[cfg(all(feature = "esp32s3", feature = "matter-wifi"))]
 compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-S3's internal RAM yet (use MQTT, or a C6)");
 // Matter over Wi-Fi needs about 24 KB more static RAM than the ESP32-C3 has.

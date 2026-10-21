@@ -24,11 +24,11 @@ static UPTIME: Sensor = Sensor::new("uptime", "Uptime").unit(Unit::SECOND).devic
 
 static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .manufacturer("Me")
-    .model("{% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% elsif chip == "esp32c3" %}ESP32-C3-DevKitM-1{% elsif chip == "esp32c5" %}ESP32-C5-DevKitC-1{% else %}ESP32-S3-DevKitC-1{% endif %}")
+    .model("{% if chip == "esp32c6" %}ESP32-C6-DevKitC-1{% elsif chip == "esp32c3" %}ESP32-C3-DevKitM-1{% elsif chip == "esp32c5" %}ESP32-C5-DevKitC-1{% elsif chip == "esp32" %}ESP32-DevKitC{% else %}ESP32-S3-DevKitC-1{% endif %}")
     .product_name("{{project-name}}")
     .entities(&[&LED, &UPTIME]);
 
-/// The DevKit's WS2812 LED on {% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}, driven by an RMT channel.
+/// {% if chip == "esp32" %}A WS2812 LED wired to GPIO2 (the ESP32-DevKitC has none){% else %}The DevKit's WS2812 LED on {% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}{% endif %}, driven by an RMT channel.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
 #[esp_rtos::main]
@@ -38,15 +38,19 @@ async fn main(spawner: Spawner) -> ! {
     let board = Board {
         flash: p.FLASH,
         wifi: p.WIFI,
-        bt: p.BT,
+{% if chip == "esp32" %}        timg1: p.TIMG1,
+        uart: p.UART0,
+        uart_rx: p.GPIO3.into(),
+{% else %}        bt: p.BT,
         timg1: p.TIMG1,
         usb: p.USB_DEVICE,
-        boot_button: Some(p.{% if chip == "esp32s3" %}GPIO0{% elsif chip == "esp32c5" %}GPIO28{% else %}GPIO9{% endif %}.into()),
+{% endif %}
+        boot_button: Some(p.{% if chip == "esp32s3" or chip == "esp32" %}GPIO0{% elsif chip == "esp32c5" %}GPIO28{% else %}GPIO9{% endif %}.into()),
     };
     iotkit::start(spawner, board, &CONFIG).await;
 
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
-    let led = Led::new(WS2812_TIMING, rmt.channel0, p.{% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% else %}GPIO8{% endif %}, Rate::from_mhz(80)).unwrap();
+    let led = Led::new(WS2812_TIMING, rmt.channel0, p.{% if chip == "esp32s3" %}GPIO38{% elsif chip == "esp32c5" %}GPIO27{% elsif chip == "esp32" %}GPIO2{% else %}GPIO8{% endif %}, Rate::from_mhz(80)).unwrap();
     spawner.spawn(led_task(led).unwrap());
 
     let mut ticker = Ticker::every(Duration::from_secs(60));

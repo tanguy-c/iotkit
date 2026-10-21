@@ -16,6 +16,8 @@ esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-println/esp32c6", "esp-alloc/esp32c6"
 esp32c3 = ["_esp", "portable-atomic", "esp-hal/esp32c3", "esp-println/esp32c3", "esp-alloc/esp32c3", "esp-rtos/esp32c3", "esp-bootloader-esp-idf/esp32c3", "esp-storage/esp32c3", "esp-backtrace/esp32c3", "esp-radio?/esp32c3"]
 esp32c5 = ["_esp", "esp-hal/esp32c5", "esp-println/esp32c5", "esp-alloc/esp32c5", "esp-rtos/esp32c5", "esp-bootloader-esp-idf/esp32c5", "esp-storage/esp32c5", "esp-backtrace/esp32c5", "esp-radio?/esp32c5"]
 esp32s3 = ["_esp", "esp-hal/esp32s3", "esp-println/esp32s3", "esp-alloc/esp32s3", "esp-rtos/esp32s3", "esp-bootloader-esp-idf/esp32s3", "esp-storage/esp32s3", "esp-backtrace/esp32s3", "esp-radio?/esp32s3"]
+## The original ESP32 (WROOM-32): MQTT, no Matter or deep sleep; the console on UART0.
+esp32 = ["_esp", "esp-hal/esp32", "esp-println/esp32", "esp-alloc/esp32", "esp-rtos/esp32", "esp-bootloader-esp-idf/esp32", "esp-storage/esp32", "esp-backtrace/esp32", "esp-radio?/esp32"]
 ## Thread only (no Wi-Fi): `default-features = false` with `matter-thread`.
 esp32h2 = ["_esp", "esp-hal/esp32h2", "esp-println/esp32h2", "esp-alloc/esp32h2", "esp-rtos/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-storage/esp32h2", "esp-backtrace/esp32h2", "esp-radio?/esp32h2"]
 

@@ -59,6 +59,7 @@ Early, not released yet: the API and the settings' flash layout may still change
 | ESP32-C3 | yes | no: Matter needs about 24 KB more RAM than the C3 has | build only |
 | ESP32-C5 | yes | no: esp-hal 1.2 has no true RNG on the C5 yet | build only |
 | ESP32-S3 | yes | no: does not fit in internal RAM (PSRAM support later) | build only |
+| ESP32 | yes, except setup over Bluetooth; console and Improv on UART0; no deep sleep yet | no: does not fit in RAM | build only |
 | ESP32-H2 | no Wi-Fi | Thread (`matter-thread`) | build only |
 
 The ESP32-C6 is the reference: support for other chips is added without changing it.

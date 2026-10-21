@@ -1954,6 +1954,7 @@ dependencies = [
  "document-features",
  "embassy-embedded-hal",
  "embassy-futures",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
  "embassy-usb-driver",
  "embassy-usb-synopsys-otg",
@@ -1971,7 +1972,7 @@ dependencies = [
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
- "esp32",
+ "esp32 0.41.0",
  "esp32c2",
  "esp32c3 0.33.0",
  "esp32c5 0.3.0",
@@ -1993,6 +1994,8 @@ dependencies = [
  "rand_core 0.9.5",
  "riscv",
  "sdio",
+ "sha1",
+ "sha2 0.11.1",
  "somni-template",
  "static_cell",
  "strum 0.27.2",
@@ -2069,11 +2072,13 @@ dependencies = [
  "esp-hal",
  "esp-metadata-generated",
  "esp-sync",
+ "esp-wifi-sys-esp32",
  "esp-wifi-sys-esp32c3",
  "esp-wifi-sys-esp32c5",
  "esp-wifi-sys-esp32c6",
  "esp-wifi-sys-esp32h2",
  "esp-wifi-sys-esp32s3",
+ "esp32 0.42.0",
  "esp32c3 0.34.0",
  "esp32c5 0.4.0",
  "esp32c6 0.25.0",
@@ -2132,6 +2137,7 @@ dependencies = [
  "esp-wifi-sys-esp32s2",
  "esp-wifi-sys-esp32s3",
  "esp-wifi-sys-esp32s31",
+ "esp32 0.42.0",
  "esp32c3 0.34.0",
  "esp32c5 0.4.0",
  "esp32c6 0.25.0",
@@ -2178,6 +2184,7 @@ checksum = "e933ff78374b763b65998b64ad671b4890ed4ba13a80deff9f53afe95ede289d"
 dependencies = [
  "document-features",
  "esp-metadata-generated",
+ "esp32 0.41.0",
  "esp32c3 0.33.0",
  "esp32c5 0.3.0",
  "esp32c6 0.24.0",
@@ -2225,6 +2232,7 @@ dependencies = [
  "esp-metadata-generated",
  "esp-rom-sys",
  "esp-sync",
+ "esp32 0.41.0",
  "esp32c3 0.33.0",
  "esp32c5 0.3.0",
  "esp32c6 0.24.0",
@@ -2330,6 +2338,15 @@ name = "esp32"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2f9714c79477940e5c7848b3832af89cd3bcd79abf4067e6938ae90de187a45"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e31e10b4c4f5fc2445896b46a7dabd689572d1e52dada21703659d97a373aa4"
 dependencies = [
  "vcell",
 ]

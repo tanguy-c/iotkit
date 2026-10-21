@@ -104,6 +104,22 @@ fn cause(reason: SocResetReason) -> ResetCause {
     }
 }
 
+/// The original ESP32: two cores, no USB.
+#[cfg(feature = "esp32")]
+fn cause(reason: SocResetReason) -> ResetCause {
+    use SocResetReason as R;
+    match reason {
+        R::ChipPowerOn => ResetCause::PowerOn,
+        R::CoreSw | R::Cpu0Sw => ResetCause::Software,
+        R::CoreMwdt0 | R::CoreMwdt1 | R::CoreRtcWdt | R::CpuMwdt0 | R::Cpu0RtcWdt | R::SysRtcWdt => {
+            ResetCause::Watchdog
+        }
+        R::SysBrownOut => ResetCause::BrownOut,
+        R::CoreDeepSleep => ResetCause::DeepSleep,
+        other => ResetCause::Other(other as u8),
+    }
+}
+
 /// A planned restart: lets the links say goodbye ([`crate::runtime::shutdown`], at most 2 s),
 /// then resets.
 pub async fn restart() -> ! {

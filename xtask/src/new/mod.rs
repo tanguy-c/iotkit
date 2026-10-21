@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use boards::{BOARDS, Board, PinCheck, check_pin};
+use boards::{BOARDS, Board, PinCheck, PinUse, check_pin};
 use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text, validator::Validation};
 use parts::{Group, KINDS, Kind, slug};
 use serde::{Deserialize, Serialize};
@@ -177,6 +177,9 @@ impl Project {
             ensure!(!battery, "Matter devices stay awake: choose `power = \"plugged\"` or no Matter");
             ensure!(flash == "8mb", "Matter needs 8 MB of flash");
         }
+        if board.chip == "esp32" {
+            ensure!(!battery, "deep sleep is not supported on the ESP32 yet: choose `power = \"plugged\"`");
+        }
         ensure!((1..=24 * 60).contains(&answers.report_every_min), "report_every_min: 1 to 1440");
 
         let mut warnings = Vec::new();
@@ -185,8 +188,8 @@ impl Project {
         if let (true, Some(pin)) = (led, board.rgb_led) {
             taken.push(pin);
         }
-        let take = |pin: u8, analog: bool, what: &str, taken: &mut Vec<u8>, warnings: &mut Vec<String>| -> Result<()> {
-            match check_pin(board, pin, analog, taken) {
+        let take = |pin: u8, kind: PinUse, what: &str, taken: &mut Vec<u8>, warnings: &mut Vec<String>| -> Result<()> {
+            match check_pin(board, pin, kind, taken) {
                 PinCheck::Ok => {}
                 PinCheck::Warn(w) => warnings.push(format!("{what}: {w}")),
                 PinCheck::Refused(why) => bail!("{what}: {why}"),
@@ -195,7 +198,7 @@ impl Project {
             Ok(())
         };
         if battery && let Some(pin) = answers.battery_pin {
-            take(pin, true, "Battery level", &mut taken, &mut warnings)?;
+            take(pin, PinUse::Analog, "Battery level", &mut taken, &mut warnings)?;
         }
         let mut ids: Vec<String> = vec!["firmware".into(), "status_led".into(), "battery".into()];
         let mut parts = Vec::new();
@@ -215,7 +218,7 @@ impl Project {
             }
             ids.push(id.clone());
             if let Some(pin) = a.pin {
-                take(pin, kind.analog, &name, &mut taken, &mut warnings)?;
+                take(pin, kind.pin_use(), &name, &mut taken, &mut warnings)?;
             }
             if battery && !kind.is_reading() {
                 warnings.push(format!("{name}: on a battery device, commands apply at the next wake-up"));
@@ -346,7 +349,7 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
 
 /// The flash size the template's Liquid picks for a chip.
 fn default_flash(chip: &str) -> &'static str {
-    if chip == "esp32c3" { "4mb" } else { "8mb" }
+    if matches!(chip, "esp32c3" | "esp32") { "4mb" } else { "8mb" }
 }
 
 fn table(flash: &str) -> &'static str {
@@ -370,7 +373,7 @@ fn report(p: &Project, dir: &Path) {
     {
         println!("\nMatter pairing code {} (also in matter-pairing.svg):\n{qr}", setup.manual_code_pretty());
     }
-    let flash = if p.board.xtensa() { "  (ESP32-S3: run `. ~/export-esp.sh` first)" } else { "" };
+    let flash = if p.board.xtensa() { "  (Xtensa: run `. ~/export-esp.sh` first)" } else { "" };
     println!(
         "\nNext:\n  cd {}\n  cargo iotkit flash --release{flash}\n\nWiring and setup: README.md. Each part's code is a TODO in src/main.rs.",
         dir.display()
@@ -449,7 +452,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
             .with_help_message("Needs two resistors from the battery to an analog pin")
             .prompt()?
         {
-            a.battery_pin = ask_pin(board, "Analog pin for the battery level?", true, &[], false)?;
+            a.battery_pin = ask_pin(board, "Analog pin for the battery level?", PinUse::Analog, &[], false)?;
             let curve =
                 Select::new("Which battery?", vec!["LiPo / Li-ion cell (3.0–4.2 V)", "2 × AA alkaline (2.0–3.2 V)"])
                     .prompt()?;
@@ -554,7 +557,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         let pin = if kind.wiring.starts_with("(none") {
             None
         } else {
-            ask_pin(board, &format!("Which GPIO for {name}? ({})", kind.wiring), kind.analog, &taken, true)?
+            ask_pin(board, &format!("Which GPIO for {name}? ({})", kind.wiring), kind.pin_use(), &taken, true)?
         };
         taken.extend(pin);
         a.parts.push(PartAnswer { kind: kind.id.into(), name: Some(name), pin });
@@ -579,7 +582,7 @@ fn non_empty(s: &str) -> Result<Validation, inquire::CustomUserError> {
 }
 
 /// A GPIO number, checked for the chip (refused pins are asked again, warnings shown).
-fn ask_pin(board: &'static Board, question: &str, analog: bool, taken: &[u8], optional: bool) -> Result<Option<u8>> {
+fn ask_pin(board: &'static Board, question: &str, kind: PinUse, taken: &[u8], optional: bool) -> Result<Option<u8>> {
     let taken = taken.to_vec();
     let help = if optional { "A GPIO number, or empty to decide later" } else { "A GPIO number" };
     let answer = Text::new(question)
@@ -595,7 +598,7 @@ fn ask_pin(board: &'static Board, question: &str, analog: bool, taken: &[u8], op
                 return Ok(if optional { Validation::Valid } else { Validation::Invalid("a GPIO number".into()) });
             }
             let Ok(pin) = s.parse::<u8>() else { return Ok(Validation::Invalid("a GPIO number, e.g. 4".into())) };
-            Ok(match check_pin(board, pin, analog, &taken) {
+            Ok(match check_pin(board, pin, kind, &taken) {
                 PinCheck::Refused(why) => Validation::Invalid(why.into()),
                 _ => Validation::Valid,
             })
@@ -606,7 +609,7 @@ fn ask_pin(board: &'static Board, question: &str, analog: bool, taken: &[u8], op
         return Ok(None);
     }
     let pin: u8 = digits.parse()?;
-    if let PinCheck::Warn(w) = check_pin(board, pin, analog, &[]) {
+    if let PinCheck::Warn(w) = check_pin(board, pin, kind, &[]) {
         println!("  note: {w}");
     }
     Ok(Some(pin))
@@ -644,7 +647,7 @@ fn summary(p: &Project) {
 
 impl Board {
     fn xtensa(&self) -> bool {
-        self.chip == "esp32s3"
+        matches!(self.chip, "esp32s3" | "esp32")
     }
 }
 

@@ -28,6 +28,7 @@ const CHIPS: &[Chip] = &[
     Chip { name: "esp32c5", family: "ESP32-C5", target: "riscv32imac-unknown-none-elf", id: app::ESP32C5 },
     Chip { name: "esp32h2", family: "ESP32-H2", target: "riscv32imac-unknown-none-elf", id: app::ESP32H2 },
     Chip { name: "esp32s3", family: "ESP32-S3", target: "xtensa-esp32s3-none-elf", id: app::ESP32S3 },
+    Chip { name: "esp32", family: "ESP32", target: "xtensa-esp32-none-elf", id: app::ESP32 },
 ];
 /// Chip and flash size when neither `--chip` nor `[package.metadata.iotkit]` says.
 const DEFAULT_CHIP: &str = "esp32c6";

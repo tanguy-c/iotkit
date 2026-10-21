@@ -10,8 +10,13 @@ use crate::provision::esp::Provisioner;
 #[cfg(feature = "improv-serial")]
 use crate::provision::esp::Serial;
 use embassy_time::Instant;
+#[cfg(not(feature = "esp32"))]
 use embedded_io_async::Read;
-use esp_hal::{Async, usb::usb_serial_jtag::UsbSerialJtagRx};
+use esp_hal::Async;
+#[cfg(feature = "esp32")]
+use esp_hal::uart::UartRx as Rx;
+#[cfg(not(feature = "esp32"))]
+use esp_hal::usb::usb_serial_jtag::UsbSerialJtagRx as Rx;
 use esp_println::{print, println};
 use heapless::String;
 
@@ -58,7 +63,7 @@ const TEST_HELP: &str = "
 
 #[embassy_executor::task]
 pub(crate) async fn console_task(
-    mut rx: UsbSerialJtagRx<'static, Async>,
+    mut rx: Rx<'static, Async>,
     store: &'static SharedStore,
     provisioner: Option<Provisioner>,
     config: &'static Config,
@@ -72,7 +77,11 @@ pub(crate) async fn console_task(
     #[cfg(feature = "console")]
     println!("Type 'help' and press Enter.");
     loop {
+        #[cfg(not(feature = "esp32"))]
         let Ok(n) = rx.read(&mut buf).await;
+        // A UART can report framing or overrun errors: skip them.
+        #[cfg(feature = "esp32")]
+        let Ok(n) = rx.read_async(&mut buf).await else { continue };
         for &byte in &buf[..n] {
             // Improv frames (ESP Web Tools, improv-wifi.com) share the port.
             #[cfg(feature = "improv-serial")]

@@ -130,30 +130,49 @@ jobs:
       - if: matrix.app == 'devkit'
         run: cargo xtask build --release --chip ${{ matrix.chip }} && cargo xtask verify
 
-  chip-s3:
-    name: Firmware (esp32s3, Xtensa)
+  xtensa:
+    name: Firmware (${{ matrix.chip }}, Xtensa)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chip: esp32s3
+            answers: s3
+            iotkit: iotkit/default,iotkit/esp32s3,iotkit/deep-sleep
+            build: ""
+          # MQTT only: no Bluetooth setup (`improv-ble`) on the original ESP32 yet.
+          - chip: esp32
+            answers: esp32
+            iotkit: iotkit/esp32,iotkit/wifi,iotkit/softap,iotkit/improv-serial,iotkit/console,iotkit/ota-push,iotkit/tls
+            build: --flash-size 4mb
+    env:
+      TARGET: xtensa-${{ matrix.chip }}-none-elf
     steps:
       - uses: actions/checkout@v4
       # 1.98.1.0: 1.99 fails to link esp-hal 1.2.2 ("dangerous relocation: l32r").
       - uses: esp-rs/xtensa-toolchain@v1.7
         with:
           default: false
-          buildtargets: esp32s3
+          buildtargets: ${{ matrix.chip }}
           ldproxy: false
           version: "1.98.1.0"
       - uses: Swatinem/rust-cache@v2
         with:
-          key: esp32s3
+          key: ${{ matrix.chip }}
       - run: cargo xtask keygen
-      - run: cargo +esp clippy -p devkit --no-default-features --features esp32s3 --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
-      - run: cargo +esp clippy -p iotkit --features iotkit/esp32s3,iotkit/deep-sleep --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc -- -D warnings
-      - run: cargo xtask build --release --chip esp32s3 && cargo xtask verify
-      # `cargo iotkit new` for the S3 (its project uses the esp toolchain).
+      # A throw-away CA for the `tls` lint.
+      - run: |
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj /CN=ci -days 1 -keyout /dev/null -outform DER -out "$RUNNER_TEMP/ca.der"
+          echo "IOTKIT_TLS_CA=$RUNNER_TEMP/ca.der" >> "$GITHUB_ENV"
+      - run: cargo +esp clippy -p devkit --no-default-features --features ${{ matrix.chip }} --target $TARGET -Zbuild-std=core,alloc -- -D warnings
+      - run: cargo +esp clippy -p iotkit --no-default-features --features ${{ matrix.iotkit }} --target $TARGET -Zbuild-std=core,alloc -- -D warnings
+      - run: cargo xtask build --release --chip ${{ matrix.chip }} ${{ matrix.build }} && cargo xtask verify
+      # `cargo iotkit new` (its project uses the esp toolchain).
       - run: cargo install --locked --path xtask
-      - run: cargo iotkit new "$RUNNER_TEMP/new-s3" --answers xtask/answers/s3.toml --iotkit-path "$GITHUB_WORKSPACE"
+      - run: cargo iotkit new "$RUNNER_TEMP/new" --answers xtask/answers/${{ matrix.answers }}.toml --iotkit-path "$GITHUB_WORKSPACE"
       - run: cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify
-        working-directory: ${{ runner.temp }}/new-s3
+        working-directory: ${{ runner.temp }}/new
 
   template:
     name: Template
@@ -172,7 +191,7 @@ jobs:
       - run: cargo generate --path template --name ci-device --destination "$RUNNER_TEMP" --silent --define chip=esp32c6 --define "iotkit_path=$GITHUB_WORKSPACE"
       - run: cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify
         working-directory: ${{ runner.temp }}/ci-device
-      # The RISC-V chips too (the S3 template needs the esp toolchain: see the chip-s3 job).
+      # The RISC-V chips too (the Xtensa templates need the esp toolchain: see the xtensa job).
       - run: |
           for chip in esp32c3 esp32c5; do
             cargo generate --path template --name "ci-$chip" --destination "$RUNNER_TEMP" --silent --define chip=$chip --define "iotkit_path=$GITHUB_WORKSPACE"

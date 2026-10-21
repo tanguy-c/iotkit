@@ -42,6 +42,8 @@ const CHIP_ID: u16 = app::ESP32C3;
 const CHIP_ID: u16 = app::ESP32C5;
 #[cfg(feature = "esp32s3")]
 const CHIP_ID: u16 = app::ESP32S3;
+#[cfg(feature = "esp32")]
+const CHIP_ID: u16 = app::ESP32;
 
 /// Raw subtype of `ota_0`; `ota_n` is this plus n.
 const OTA_SUBTYPE: u8 = 0x10;

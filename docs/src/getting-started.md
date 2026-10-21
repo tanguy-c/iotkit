@@ -8,7 +8,7 @@ cargo install espflash
 cargo install --locked --git https://github.com/tanguy-c/iotkit iotkit-cli   # `cargo iotkit`
 ```
 
-- ESP32-S3 (Xtensa): Espressif's toolchain, `cargo install espup && espup install
+- ESP32-S3 and ESP32 (Xtensa): Espressif's toolchain, `cargo install espup && espup install
   --toolchain-version 1.98.1.0` (1.99 fails to link esp-hal 1.2.2), then `. ~/export-esp.sh` in
   each shell.
 - Linux: `sudo usermod -aG dialout $USER`, then log out and in, for the serial port.

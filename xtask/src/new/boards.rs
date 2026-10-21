@@ -99,6 +99,26 @@ pub const BOARDS: &[Board] = &[
         boot_pin: 0,
         rgb_led: None,
     },
+    Board {
+        id: "esp32-devkitc",
+        label: "ESP32-DevKitC (WROOM-32: the original ESP32; no Matter, no Bluetooth setup yet)",
+        chip: "esp32",
+        model: "ESP32-DevKitC",
+        chip_label: "ESP32",
+        flash: Some("4mb"),
+        boot_pin: 0,
+        rgb_led: None,
+    },
+    Board {
+        id: "other-esp32",
+        label: "Another board with an ESP32 (WROOM-32, WROVER)",
+        chip: "esp32",
+        model: "ESP32 board",
+        chip_label: "ESP32",
+        flash: None,
+        boot_pin: 0,
+        rgb_led: None,
+    },
 ];
 
 pub fn board(id: &str) -> Option<&'static Board> {
@@ -112,6 +132,17 @@ impl Board {
     }
 }
 
+/// What a part does with its pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinUse {
+    /// Reads a level (a contact, a button).
+    Input,
+    /// Reads a voltage with the ADC.
+    Analog,
+    /// Drives it (a relay, LEDs, PWM).
+    Output,
+}
+
 /// Pins of a chip a part must not or should not use.
 struct Pins {
     /// Highest GPIO number.
@@ -122,6 +153,8 @@ struct Pins {
     warn: &'static [(RangeInclusive<u8>, &'static str)],
     /// ADC1 (analog readings; ADC2 is taken by Wi-Fi).
     adc1: RangeInclusive<u8>,
+    /// Pins that cannot drive anything.
+    input_only: Option<RangeInclusive<u8>>,
 }
 
 fn pins(chip: &str) -> Pins {
@@ -131,6 +164,7 @@ fn pins(chip: &str) -> Pins {
             reserved: &[(11..=17, "used by the flash"), (18..=19, "the USB port (console, flashing)")],
             warn: &[(2..=2, "a strapping pin"), (8..=9, "a strapping pin (BOOT, the LED)")],
             adc1: 0..=4,
+            input_only: None,
         },
         "esp32c5" => Pins {
             max: 28,
@@ -142,6 +176,7 @@ fn pins(chip: &str) -> Pins {
                 (25..=28, "a strapping pin (BOOT, the LED)"),
             ],
             adc1: 1..=6,
+            input_only: None,
         },
         "esp32s3" => Pins {
             max: 48,
@@ -157,6 +192,27 @@ fn pins(chip: &str) -> Pins {
                 (45..=46, "a strapping pin"),
             ],
             adc1: 1..=10,
+            input_only: None,
+        },
+        "esp32" => Pins {
+            max: 39,
+            reserved: &[
+                (1..=1, "the console's TX (UART0)"),
+                (3..=3, "the console's RX (UART0)"),
+                (6..=11, "used by the flash"),
+                (20..=20, "not on the chip"),
+                (24..=24, "not on the chip"),
+                (28..=31, "not on the chip"),
+            ],
+            warn: &[
+                (0..=0, "a strapping pin (BOOT)"),
+                (2..=2, "a strapping pin"),
+                (5..=5, "a strapping pin"),
+                (12..=12, "a strapping pin (the flash voltage: keep it low at reset)"),
+                (15..=15, "a strapping pin"),
+            ],
+            adc1: 32..=39,
+            input_only: Some(34..=39),
         },
         // esp32c6
         _ => Pins {
@@ -168,6 +224,7 @@ fn pins(chip: &str) -> Pins {
                 (15..=15, "a strapping pin"),
             ],
             adc1: 0..=6,
+            input_only: None,
         },
     }
 }
@@ -179,8 +236,8 @@ pub enum PinCheck {
     Refused(String),
 }
 
-/// Whether `pin` suits a part (`analog`: read with the ADC) next to the pins already `taken`.
-pub fn check_pin(board: &Board, pin: u8, analog: bool, taken: &[u8]) -> PinCheck {
+/// Whether `pin` suits a part using it as `kind`, next to the pins already `taken`.
+pub fn check_pin(board: &Board, pin: u8, kind: PinUse, taken: &[u8]) -> PinCheck {
     let p = pins(board.chip);
     if pin > p.max {
         return PinCheck::Refused(format!("the {} has no GPIO{pin} (up to GPIO{})", board.chip_label, p.max));
@@ -191,7 +248,10 @@ pub fn check_pin(board: &Board, pin: u8, analog: bool, taken: &[u8]) -> PinCheck
     if taken.contains(&pin) {
         return PinCheck::Refused(format!("GPIO{pin} is already used by another part"));
     }
-    if analog && !p.adc1.contains(&pin) {
+    if kind == PinUse::Output && p.input_only.as_ref().is_some_and(|r| r.contains(&pin)) {
+        return PinCheck::Refused(format!("GPIO{pin} is input only: a sensor or a button can use it"));
+    }
+    if kind == PinUse::Analog && !p.adc1.contains(&pin) {
         return PinCheck::Refused(format!(
             "analog readings need an ADC1 pin: GPIO{} to GPIO{} on the {}",
             p.adc1.start(),
@@ -220,19 +280,19 @@ mod tests {
     #[test]
     fn c6_pins() {
         let c6 = board("esp32c6-devkitc-1").unwrap();
-        assert_eq!(check_pin(c6, 4, false, &[]), PinCheck::Warn(check_pin_text(c6, 4)));
-        assert_eq!(check_pin(c6, 2, true, &[]), PinCheck::Ok);
-        assert!(matches!(check_pin(c6, 12, false, &[]), PinCheck::Refused(_)), "USB");
-        assert!(matches!(check_pin(c6, 26, false, &[]), PinCheck::Refused(_)), "flash");
-        assert!(matches!(check_pin(c6, 31, false, &[]), PinCheck::Refused(_)));
-        assert!(matches!(check_pin(c6, 10, true, &[]), PinCheck::Refused(_)), "not ADC1");
-        assert!(matches!(check_pin(c6, 2, false, &[2]), PinCheck::Refused(_)), "taken");
-        assert!(matches!(check_pin(c6, 8, false, &[]), PinCheck::Warn(_)), "LED");
-        assert_eq!(check_pin(c6, 18, false, &[]), PinCheck::Ok);
+        assert_eq!(check_pin(c6, 4, PinUse::Input, &[]), PinCheck::Warn(check_pin_text(c6, 4)));
+        assert_eq!(check_pin(c6, 2, PinUse::Analog, &[]), PinCheck::Ok);
+        assert!(matches!(check_pin(c6, 12, PinUse::Input, &[]), PinCheck::Refused(_)), "USB");
+        assert!(matches!(check_pin(c6, 26, PinUse::Input, &[]), PinCheck::Refused(_)), "flash");
+        assert!(matches!(check_pin(c6, 31, PinUse::Input, &[]), PinCheck::Refused(_)));
+        assert!(matches!(check_pin(c6, 10, PinUse::Analog, &[]), PinCheck::Refused(_)), "not ADC1");
+        assert!(matches!(check_pin(c6, 2, PinUse::Input, &[2]), PinCheck::Refused(_)), "taken");
+        assert!(matches!(check_pin(c6, 8, PinUse::Input, &[]), PinCheck::Warn(_)), "LED");
+        assert_eq!(check_pin(c6, 18, PinUse::Input, &[]), PinCheck::Ok);
     }
 
     fn check_pin_text(board: &Board, pin: u8) -> String {
-        match check_pin(board, pin, false, &[]) {
+        match check_pin(board, pin, PinUse::Input, &[]) {
             PinCheck::Warn(w) => w,
             other => panic!("{other:?}"),
         }
@@ -241,12 +301,18 @@ mod tests {
     #[test]
     fn other_chips() {
         let c3 = board("esp32c3-devkitm-1").unwrap();
-        assert!(matches!(check_pin(c3, 18, false, &[]), PinCheck::Refused(_)));
-        assert_eq!(check_pin(c3, 3, true, &[]), PinCheck::Ok);
+        assert!(matches!(check_pin(c3, 18, PinUse::Input, &[]), PinCheck::Refused(_)));
+        assert_eq!(check_pin(c3, 3, PinUse::Analog, &[]), PinCheck::Ok);
         let s3 = board("esp32s3-devkitc-1").unwrap();
-        assert!(matches!(check_pin(s3, 23, false, &[]), PinCheck::Refused(_)));
-        assert_eq!(check_pin(s3, 40, false, &[]), PinCheck::Ok);
-        assert!(matches!(check_pin(s3, 38, false, &[]), PinCheck::Warn(_)), "LED");
+        assert!(matches!(check_pin(s3, 23, PinUse::Input, &[]), PinCheck::Refused(_)));
+        assert_eq!(check_pin(s3, 40, PinUse::Input, &[]), PinCheck::Ok);
+        assert!(matches!(check_pin(s3, 38, PinUse::Input, &[]), PinCheck::Warn(_)), "LED");
+        let esp32 = board("esp32-devkitc").unwrap();
+        assert!(matches!(check_pin(esp32, 7, PinUse::Input, &[]), PinCheck::Refused(_)), "flash");
+        assert!(matches!(check_pin(esp32, 3, PinUse::Input, &[]), PinCheck::Refused(_)), "console");
+        assert!(matches!(check_pin(esp32, 35, PinUse::Output, &[]), PinCheck::Refused(_)), "input only");
+        assert_eq!(check_pin(esp32, 35, PinUse::Analog, &[]), PinCheck::Ok);
+        assert!(matches!(check_pin(esp32, 25, PinUse::Analog, &[]), PinCheck::Refused(_)), "ADC2");
         for b in BOARDS {
             assert!(crate::CHIPS.iter().any(|c| c.name == b.chip), "{}", b.id);
         }

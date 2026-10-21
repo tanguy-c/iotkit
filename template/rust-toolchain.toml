@@ -1,9 +1,9 @@
-{% if chip == "esp32s3" %}# The ESP32-S3 (Xtensa) needs Espressif's toolchain: `espup install`, then `. ~/export-esp.sh`.
+{% if chip == "esp32s3" or chip == "esp32" %}# The Xtensa chips (ESP32-S3, ESP32) need Espressif's toolchain: `espup install`, then `. ~/export-esp.sh`.
 [toolchain]
 channel = "esp"
 {% else %}[toolchain]
 channel    = "stable"
 components = ["rust-src", "rustfmt", "clippy"]
-# ESP32-C6/H2, then ESP32-C3. The Xtensa chips (S3) use the `esp` toolchain instead.
+# ESP32-C6/H2, then ESP32-C3. The Xtensa chips (S3, ESP32) use the `esp` toolchain instead.
 targets    = ["riscv32imac-unknown-none-elf", "riscv32imc-unknown-none-elf"]
 {% endif %}

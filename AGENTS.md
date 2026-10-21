@@ -59,8 +59,10 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 - esp-radio's `sta_disconnected_pm` starves BLE: keep it off (Improv setup over BLE,
   `crates/iotkit/src/net/esp.rs`).
 - The USB serial port disappears during deep sleep: wait for it to come back before espflash.
-- ESP32-S3 (Xtensa): esp toolchain 1.98.1.0 (`espup install --toolchain-version 1.98.1.0`); 1.99
-  fails to link esp-hal 1.2.2.
+- ESP32-S3 and ESP32 (Xtensa): esp toolchain 1.98.1.0 (`espup install --toolchain-version 1.98.1.0`);
+  1.99 fails to link esp-hal 1.2.2.
+- The original ESP32 has no USB serial: the console and Improv use UART0 (`Board::uart`), and
+  `improv-ble` does not link yet (esp-radio's BT ROM symbols), so it builds without default features.
 
 ## Style
 

@@ -329,6 +329,8 @@ pub mod app {
     /// `ESP_APP_DESC_MAGIC_WORD`, first in the first segment (`esp_app_desc!`).
     const DESC_MAGIC: u32 = 0xabcd_5432;
     // Chip ids in the image header (espflash's `Chip::id`).
+    /// ESP32.
+    pub const ESP32: u16 = 0;
     /// ESP32-C3.
     pub const ESP32C3: u16 = 5;
     /// ESP32-S3.

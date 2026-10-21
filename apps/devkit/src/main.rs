@@ -58,6 +58,16 @@ macro_rules! pin {
         $p.GPIO0
     };
 }
+// ESP32-DevKitC: no RGB LED; a WS2812 wired to GPIO2 shows the light.
+#[cfg(feature = "esp32")]
+macro_rules! pin {
+    ($p:ident, led) => {
+        $p.GPIO2
+    };
+    ($p:ident, boot) => {
+        $p.GPIO0
+    };
+}
 
 /// The DevKit's WS2812 RGB LED, driven by an RMT channel.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
@@ -136,9 +146,15 @@ async fn main(spawner: Spawner) -> ! {
     let board = Board {
         flash: p.FLASH,
         wifi: p.WIFI,
+        #[cfg(not(feature = "esp32"))]
         bt: p.BT,
         timg1: p.TIMG1,
+        #[cfg(not(feature = "esp32"))]
         usb: p.USB_DEVICE,
+        #[cfg(feature = "esp32")]
+        uart: p.UART0,
+        #[cfg(feature = "esp32")]
+        uart_rx: p.GPIO3.into(),
         boot_button: Some(pin!(p, boot).into()),
     };
     let app = iotkit::start(spawner, board, &CONFIG).await;

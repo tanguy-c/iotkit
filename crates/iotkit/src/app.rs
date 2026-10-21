@@ -21,7 +21,9 @@ use esp_hal::{
     peripherals::{FLASH, TIMG1, WIFI},
     timer::timg::TimerGroup,
 };
-#[cfg(any(feature = "console", feature = "improv-serial"))]
+#[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
+use esp_hal::{peripherals::UART0, uart::Uart};
+#[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
 use esp_hal::{peripherals::USB_DEVICE, usb::usb_serial_jtag::UsbSerialJtag};
 use log::{error, info, warn};
 
@@ -54,8 +56,15 @@ pub struct Board {
     /// Its watchdog backs the task watchdog.
     pub timg1: TIMG1<'static>,
     /// The USB serial port: console and Improv (`console`, `improv-serial`).
-    #[cfg(any(feature = "console", feature = "improv-serial"))]
+    #[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
     pub usb: USB_DEVICE<'static>,
+    /// The ESP32's console port (UART0, behind the board's USB bridge), for the console and
+    /// Improv (`console`, `improv-serial`).
+    #[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
+    pub uart: UART0<'static>,
+    /// UART0's RX pin: GPIO3.
+    #[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
+    pub uart_rx: AnyPin<'static>,
     /// The BOOT button (active low; GPIO9 on the ESP32-C6-DevKitC-1): the setup window and
     /// factory reset ([`provision::gesture`]); a short press goes to the app
     /// ([`provision::esp::wait_press`]).
@@ -150,6 +159,8 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
     "ESP32-C3"
 } else if cfg!(feature = "esp32c5") {
     "ESP32-C5"
+} else if cfg!(feature = "esp32") {
+    "ESP32"
 } else {
     "ESP32-S3"
 };
@@ -163,6 +174,7 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
 /// iotkit_app::init!(p);
 /// iotkit_app::init!(mut p, heap: 128 * 1024);   // `mut`: to reborrow peripherals
 /// ```
+#[cfg(not(feature = "esp32"))]
 #[macro_export]
 macro_rules! init {
     (mut $p:ident $(, heap: $heap:expr)?) => {
@@ -182,6 +194,33 @@ macro_rules! init {
         );
         $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: 64 * 1024);
         $crate::__private::esp_alloc::heap_allocator!(size: $heap);
+        let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
+        $crate::__private::esp_rtos::start(timg0.timer0, $p.FROM_CPU_INTR0);
+    };
+}
+
+/// [`init!`] for the original ESP32: the heap is the 96 KB the bootloader leaves (`heap` sets
+/// it, at most 96 KB).
+#[cfg(feature = "esp32")]
+#[macro_export]
+macro_rules! init {
+    (mut $p:ident $(, heap: $heap:expr)?) => {
+        $crate::init!(@go [mut] $p, $($heap)?);
+    };
+    ($p:ident $(, heap: $heap:expr)?) => {
+        $crate::init!(@go [] $p, $($heap)?);
+    };
+    (@go [$($mut:tt)?] $p:ident,) => {
+        $crate::init!(@go [$($mut)?] $p, 96 * 1024);
+    };
+    (@go [$($mut:tt)?] $p:ident, $heap:expr) => {
+        $crate::__private::esp_bootloader_esp_idf::esp_app_desc!();
+        let $($mut)? $p = $crate::__private::esp_hal::init(
+            $crate::__private::esp_hal::Config::default()
+                .with_cpu_clock($crate::__private::esp_hal::clock::CpuClock::max()),
+        );
+        // The ESP32's data RAM is small: the heap is the RAM the bootloader leaves (`dram2`).
+        $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: $heap);
         let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
         $crate::__private::esp_rtos::start(timg0.timer0, $p.FROM_CPU_INTR0);
     };
@@ -290,8 +329,10 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
         spawn(spawner, crate::provision::esp::button_task(button, store));
     }
-    #[cfg(any(feature = "console", feature = "improv-serial"))]
+    #[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
     spawn_console(spawner, board.usb, store, provisioner, config);
+    #[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
+    spawn_console(spawner, (board.uart, board.uart_rx), store, provisioner, config);
 
     App { store, net: provisioner.map(|p| p.net), stats }
 }
@@ -384,17 +425,30 @@ fn spawn_provisioning(spawner: Spawner, bt: Ble, p: crate::provision::esp::Provi
     }
 }
 
-/// The USB serial port: console commands and Improv frames.
+/// The port the console reads: USB-Serial-JTAG, or the ESP32's UART0 and its RX pin.
+#[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
+type ConsolePort = USB_DEVICE<'static>;
+#[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
+type ConsolePort = (UART0<'static>, AnyPin<'static>);
+
+/// The console's serial port: console commands and Improv frames.
 #[cfg(any(feature = "console", feature = "improv-serial"))]
 fn spawn_console(
     spawner: Spawner,
-    usb: USB_DEVICE<'static>,
+    port: ConsolePort,
     store: &'static SharedStore,
     p: Option<crate::provision::esp::Provisioner>,
     config: &'static Config,
 ) {
-    let (usb_rx, _usb_tx) = UsbSerialJtag::new(usb).into_async().split();
-    spawn(spawner, console::console_task(usb_rx, store, p, config));
+    #[cfg(not(feature = "esp32"))]
+    let (rx, _tx) = UsbSerialJtag::new(port).into_async().split();
+    // The bootloader set UART0 up at 115 200 baud; esp-println writes to it directly.
+    #[cfg(feature = "esp32")]
+    let (rx, _tx) = match Uart::new(port.0, esp_hal::uart::Config::default()) {
+        Ok(uart) => uart.with_rx(port.1).into_async().split(),
+        Err(e) => return log::error!("console: UART0: {e:?}"),
+    };
+    spawn(spawner, console::console_task(rx, store, p, config));
 }
 
 /// Spawns a kit task; each runs once, so a failure is a bug.

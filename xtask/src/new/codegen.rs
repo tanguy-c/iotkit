@@ -58,11 +58,11 @@ pub fn main_rs(p: &Project) -> String {
 
         let doc_extra = if battery { " Commands sent while the device sleeps arrive at its next wake-up." } else { "" };
         let task = format!("{}_task", part.id);
-        if let (false, Some(comp), Some(pin)) = (battery, k.component, part.pin)
+        if let (false, Some(comp), Some(_)) = (battery, k.component, part.pin)
             && !(comp == Component::Analog && adc_taken)
         {
             adc_taken |= comp == Component::Analog;
-            let (param, arg, body) = component(comp, part, pin, &mut iotkit, &mut hal, &mut time, &mut setup);
+            let (param, arg, body) = component(comp, part, p.board.chip, &mut iotkit, &mut hal, &mut time, &mut setup);
             let _ = writeln!(spawns, "    spawner.spawn({task}({arg}).unwrap());");
             task_fn(&mut tasks, part, &on_pin, doc_extra, &task, &param, &body);
             continue;
@@ -328,12 +328,15 @@ async fn main(spawner: Spawner) -> ! {{
     let board = Board {{
         flash: p.FLASH,
         wifi: p.WIFI,
-        bt: p.BT,
-        timg1: p.TIMG1,
-        usb: p.USB_DEVICE,
-        boot_button: Some(p.GPIO{}.into()),
+{}        boot_button: Some(p.GPIO{}.into()),
     }};
 ",
+        // The ESP32: no Bluetooth setup, and the console on UART0.
+        if p.board.chip == "esp32" {
+            "        timg1: p.TIMG1,\n        uart: p.UART0,\n        uart_rx: p.GPIO3.into(),\n"
+        } else {
+            "        bt: p.BT,\n        timg1: p.TIMG1,\n        usb: p.USB_DEVICE,\n"
+        },
         p.board.boot_pin
     );
     if battery {
@@ -542,18 +545,19 @@ async fn {task}({param}) {{
     );
 }
 
-/// A ready-made part on GPIO`pin`: the task's parameters, the spawn argument and the task's
+/// A ready-made part on its pin: the task's parameters, the spawn argument and the task's
 /// body. Adds the imports it needs, and its ADC set-up to `setup`.
 fn component<'a>(
     comp: Component,
     part: &Part,
-    pin: u8,
+    chip: &str,
     iotkit: &mut BTreeSet<&'a str>,
     hal: &mut BTreeSet<&'a str>,
     time: &mut BTreeSet<&'a str>,
     setup: &mut String,
 ) -> (String, String, String) {
     let (c, id) = (&part.konst, &part.id);
+    let pin = part.pin.expect("ready-made parts have a pin");
     iotkit.insert("components");
     match comp {
         Component::Relay => {
@@ -591,8 +595,11 @@ fn component<'a>(
         }
         Component::Analog => {
             iotkit.extend(["components::filter::Clamp", "components::filter::Filter", "components::filter::Linear"]);
+            // The ESP32's ADC has no async mode: a reading takes microseconds, so it is polled.
+            let blocking = chip == "esp32";
+            let mode = if blocking { "Blocking" } else { "Async" };
+            hal.insert(mode);
             hal.extend([
-                "Async",
                 "analog::adc::Adc",
                 "analog::adc::AdcConfig",
                 "analog::adc::AdcPin",
@@ -605,16 +612,21 @@ fn component<'a>(
             );
             (
                 format!(
-                    "\n    mut adc: Adc<'static, esp_hal::peripherals::ADC1<'static>, Async>,\n    mut pin: AdcPin<esp_hal::peripherals::GPIO{pin}<'static>, esp_hal::peripherals::ADC1<'static>>,\n"
+                    "\n    mut adc: Adc<'static, esp_hal::peripherals::ADC1<'static>, {mode}>,\n    mut pin: AdcPin<esp_hal::peripherals::GPIO{pin}<'static>, esp_hal::peripherals::ADC1<'static>>,\n"
                 ),
-                format!("Adc::new(p.ADC1, adc_config).into_async(), {id}_pin"),
+                format!("Adc::new(p.ADC1, adc_config){}, {id}_pin", if blocking { "" } else { ".into_async()" }),
                 format!(
                     "    // TODO({id}): calibrate: the raw readings dry (0 %) and in water (100 %).
     let percent = Linear::new((3000.0, 0.0), (1200.0, 100.0)).then(Clamp::new(0.0, 100.0));
     components::poll(&{c}, Duration::from_secs(30), percent, async || {{
-        Some(f32::from(adc.read_oneshot(&mut pin).await))
+        {read}
     }})
-    .await"
+    .await",
+                    read = if blocking {
+                        "loop {\n            if let Ok(raw) = adc.read_oneshot(&mut pin) {\n                break Some(f32::from(raw));\n            }\n        }"
+                    } else {
+                        "Some(f32::from(adc.read_oneshot(&mut pin).await))"
+                    }
                 ),
             )
         }
@@ -630,8 +642,15 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
         path => format!("path = {:?}", format!("{path}/crates/iotkit")),
     };
+    // The ESP32 builds without `improv-ble`, which does not link on it yet.
+    let defaults = if p.board.chip == "esp32" {
+        app_features.extend(["wifi", "softap", "improv-serial", "console", "ota-push"]);
+        "default-features = false, "
+    } else {
+        ""
+    };
     let line = format!(
-        "iotkit = {{ {source}, features = [{}] }}",
+        "iotkit = {{ {source}, {defaults}features = [{}] }}",
         app_features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
     );
     let mut out = String::new();
@@ -820,7 +839,7 @@ Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>
         s.push_str("Matter (`matter-wifi` feature) needs the 8 MB partition table.\n");
     }
     if p.board.xtensa() {
-        s.push_str("ESP32-S3 (Xtensa): the `esp` toolchain; run `. ~/export-esp.sh` in each new shell before cargo.\n");
+        s.push_str("Xtensa chip: the `esp` toolchain; run `. ~/export-esp.sh` in each new shell before cargo.\n");
     }
     let source = match p.iotkit_path.as_str() {
         "" => "`~/.cargo/git/checkouts/iotkit-*/crates/`".to_string(),
