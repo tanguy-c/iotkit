@@ -142,8 +142,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
+      # The target is explicit: install-action's cargo-fuzz is a musl build, which defaults to musl.
       # 30 s each; longer runs: `cargo +nightly fuzz run <target> -- -max_total_time=3600`.
-      - run: for t in $(cargo +nightly fuzz list); do cargo +nightly fuzz run "$t" -- -max_total_time=30; done
+      - run: for t in $(cargo +nightly fuzz list); do cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$t" -- -max_total_time=30; done
         working-directory: fuzz
 
   advisories:
