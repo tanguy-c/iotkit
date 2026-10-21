@@ -235,6 +235,10 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
                 println!("Wi-Fi not started");
                 return;
             }
+            // No task would run the install.
+            #[cfg(not(any(feature = "ota-push", feature = "ha-update")))]
+            println!("updates not built in (features `ota-push`, `ha-update`)");
+            #[cfg(any(feature = "ota-push", feature = "ha-update"))]
             match crate::ota::esp::request_install(cmd["ota ".len()..].trim()).await {
                 Ok(v) => {
                     println!("installed {v}, restarting");

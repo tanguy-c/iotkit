@@ -386,6 +386,8 @@ async fn start_services(
     spawn(spawner, crate::esphome::esp::api_task(net, device, crate::esphome::esp::key(store).await));
     #[cfg(feature = "ota-push")]
     spawn(spawner, crate::ota::esp::serve_task(net, store, config.firmware));
+    #[cfg(all(feature = "ha-update", not(feature = "ota-push")))]
+    spawn(spawner, crate::ota::esp::install_task(net, store, config.firmware));
     #[cfg(feature = "ha-update")]
     spawn(spawner, update::update_task(net, store, config.firmware));
     let provisioner = provisioner(net, store, config);
