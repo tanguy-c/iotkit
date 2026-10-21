@@ -19,7 +19,7 @@ jobs:
       WIFI_PASS: ${{ secrets.HIL_WIFI_PASS }}
       MQTT_HOST: ${{ secrets.HIL_MQTT_HOST }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # A key of the run's own: the board is flashed over USB with it first.
       - run: cargo xtask keygen --force
       - run: tools/hil/run.py

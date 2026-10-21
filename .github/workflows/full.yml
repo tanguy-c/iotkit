@@ -32,7 +32,7 @@ jobs:
           - { chip: esp32c5, app: devkit, target: riscv32imac-unknown-none-elf }
           - { chip: esp32h2, app: thread-light, target: riscv32imac-unknown-none-elf }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.chip }}
@@ -69,7 +69,7 @@ jobs:
     env:
       TARGET: xtensa-${{ matrix.chip }}-none-elf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 1.98.1.0: 1.99 fails to link esp-hal 1.2.2 ("dangerous relocation: l32r").
       - uses: esp-rs/xtensa-toolchain@v1.7
         with:
@@ -102,7 +102,7 @@ jobs:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./template/check-sync.sh
       - uses: taiki-e/install-action@v2
         with:
@@ -134,7 +134,7 @@ jobs:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@v2
         with:
@@ -152,7 +152,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories
