@@ -68,7 +68,7 @@ jobs:
       # Signed build, then check it like a device would.
       - run: cargo xtask build --release
       - run: cargo xtask verify dist/devkit/manifest.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: devkit
           path: dist/
