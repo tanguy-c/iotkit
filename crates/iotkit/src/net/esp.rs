@@ -636,8 +636,21 @@ pub async fn get_from<S: Sink>(
     };
 
     // A large window keeps data coming while the caller writes flash.
+    #[cfg(not(feature = "tls"))]
     let (mut rx, mut tx) = ([0u8; 16 * 1024], [0u8; 512]);
+    #[cfg(not(feature = "tls"))]
     let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
+    // With TLS, in a static: in the future, it is copied through the OTA task's stack frame with
+    // the handshake's futures, which then overflows the stack.
+    #[cfg(feature = "tls")]
+    static WINDOW: embassy_sync::mutex::Mutex<CriticalSectionRawMutex, ([u8; 16 * 1024], [u8; 512])> =
+        embassy_sync::mutex::Mutex::new(([0; 16 * 1024], [0; 512]));
+    #[cfg(feature = "tls")]
+    let mut window = WINDOW.lock().await;
+    #[cfg(feature = "tls")]
+    let (rx, tx) = &mut *window;
+    #[cfg(feature = "tls")]
+    let mut socket = TcpSocket::new(stack, rx, tx);
     socket.set_timeout(Some(HTTP_TIMEOUT));
     with_timeout(HTTP_TIMEOUT, socket.connect((ip, url.port)))
         .await
