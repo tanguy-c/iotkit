@@ -1,0 +1,15 @@
+# `cargo iotkit new --answers answers/esphome.toml`: a plugged-in ESP32-C6 for Home Assistant's
+# ESPHome integration (no broker), with one encryption key built in. CI generates and builds it.
+name = "Desk light"
+maker = "CI"
+board = "esp32c6-devkitc-1"
+esphome = "fixed"
+
+[[parts]]
+kind = "relay"
+name = "Lamp"
+pin = 6
+
+[[parts]]
+kind = "button"
+pin = 7

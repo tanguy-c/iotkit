@@ -25,9 +25,10 @@ It asks, in plain words:
 - **the board** (ESP32-C6, C3, C5 or S3 DevKit, or another board with one of these chips);
 - **the power**: plugged in, or on battery (wakes up, reports, sleeps; with the battery level if
   you want);
-- **connectivity**: your Wi-Fi now or later from a phone, Home Assistant's MQTT broker, Matter
-  (C6) with one fixed pairing code printed as a QR label (or a code per device), where you
-  publish updates;
+- **connectivity**: your Wi-Fi now or later from a phone; how Home Assistant reaches it, over
+  its MQTT broker or the ESPHome API (no broker; one encryption key built in, or a key per
+  device); Matter (C6) with one fixed pairing code printed as a QR label (or a code per device);
+  where you publish updates;
 - **the parts**, each with its pin: temperature, humidity, pressure, light level, CO2, fine dust,
   soil moisture; motion, door, leak, smoke; relay, light, blind, valve, lock, fan, thermostat,
   settings; push buttons. Pins are checked for the chip (no flash or USB pin, an ADC pin for

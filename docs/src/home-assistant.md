@@ -20,6 +20,8 @@ With the `esphome-api` feature, Home Assistant's ESPHome integration finds the d
 (*Settings > Devices*, discovered) and controls it directly, without a broker. It asks for the
 encryption key: `api-key` on the console shows it (made at first start; `ESPHOME_API_KEY` at
 build time sets it instead, `api-key KEY` changes it). Every entity kind is served.
+`cargo iotkit new` sets this up when you answer "ESPHome API" (`esphome = "fixed"` or
+`"per-device"` in an answers file).
 
 - Use the API or MQTT, not both: Home Assistant would show the device twice. Without a broker
   set, MQTT stays off.

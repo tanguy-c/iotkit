@@ -376,6 +376,8 @@ async fn start_services(
             spawn(spawner, broker_check_task());
         }
         None => {
+            // With the ESPHome API, no broker is the normal setup: nothing to say.
+            #[cfg(not(feature = "esphome-api"))]
             warn!("no MQTT broker: set one with `mqtt HOST[:PORT]` on the console");
             HEALTH.pass(BROKER);
         }

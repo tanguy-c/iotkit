@@ -44,6 +44,10 @@ pub struct Answers {
     pub mqtt_host: Option<String>,
     pub mqtt_user: Option<String>,
     pub mqtt_password: Option<String>,
+    /// Home Assistant's ESPHome integration instead of MQTT.
+    pub esphome: EsphomeMode,
+    /// A fixed key to reuse (base64, as Home Assistant shows it; else drawn); with `esphome = "fixed"`.
+    pub esphome_key: Option<String>,
     pub matter: MatterMode,
     /// A fixed code to reuse (else drawn); with `matter = "fixed"`.
     pub matter_passcode: Option<u32>,
@@ -73,6 +77,8 @@ impl Default for Answers {
             mqtt_host: None,
             mqtt_user: None,
             mqtt_password: None,
+            esphome: EsphomeMode::Off,
+            esphome_key: None,
             matter: MatterMode::Off,
             matter_passcode: None,
             matter_discriminator: None,
@@ -108,6 +114,18 @@ pub enum MatterMode {
     PerDevice,
 }
 
+/// The ESPHome native API (`esphome-api`): Home Assistant connects to the device, no broker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EsphomeMode {
+    /// MQTT.
+    Off,
+    /// One encryption key for the project, built in: shown now.
+    Fixed,
+    /// Each device makes its own at its first boot (`api-key` on the console).
+    PerDevice,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartAnswer {
@@ -126,6 +144,8 @@ pub struct Project {
     pub flash: String,
     pub parts: Vec<Part>,
     pub matter_setup: Option<matter::Setup>,
+    /// The built-in ESPHome API key (base64).
+    pub esphome_key: Option<String>,
     /// A local checkout; empty for the git repository.
     pub iotkit_path: String,
     pub warnings: Vec<String>,
@@ -144,6 +164,15 @@ pub struct Part {
 impl Project {
     pub fn battery(&self) -> bool {
         self.answers.power == Power::Battery
+    }
+
+    pub fn esphome(&self) -> bool {
+        self.answers.esphome != EsphomeMode::Off
+    }
+
+    /// How Home Assistant reaches it, for summaries.
+    pub fn ha_link(&self) -> &'static str {
+        if self.esphome() { "Home Assistant (ESPHome API)" } else { "Home Assistant (MQTT)" }
     }
 
     pub fn status_led(&self) -> bool {
@@ -177,12 +206,27 @@ impl Project {
             ensure!(!battery, "Matter devices stay awake: choose `power = \"plugged\"` or no Matter");
             ensure!(flash == "8mb", "Matter needs 8 MB of flash");
         }
+        if answers.esphome != EsphomeMode::Off {
+            ensure!(
+                !battery,
+                "the ESPHome API needs the device awake: choose `power = \"plugged\"`, or MQTT (the broker keeps commands while it sleeps)"
+            );
+            ensure!(
+                answers.mqtt_host.is_none(),
+                "the ESPHome API or MQTT, not both (Home Assistant would show the device twice): remove `mqtt_host`"
+            );
+        }
         if board.chip == "esp32" {
             ensure!(!battery, "deep sleep is not supported on the ESP32 yet: choose `power = \"plugged\"`");
         }
         ensure!((1..=24 * 60).contains(&answers.report_every_min), "report_every_min: 1 to 1440");
 
         let mut warnings = Vec::new();
+        if answers.esphome != EsphomeMode::Off && answers.matter != MatterMode::Off {
+            warnings.push(
+                "with Matter, Home Assistant does not discover the ESPHome API: add the device by its address".into(),
+            );
+        }
         let mut taken: Vec<u8> = Vec::new();
         let led = answers.status_led && !battery;
         if let (true, Some(pin)) = (led, board.rgb_led) {
@@ -237,8 +281,45 @@ impl Project {
             }),
             _ => None,
         };
-        Ok(Self { answers, board, package, flash, parts, matter_setup, iotkit_path, warnings })
+        let esphome_key = match (answers.esphome, &answers.esphome_key) {
+            (EsphomeMode::Fixed, Some(key)) => {
+                ensure!(valid_key(key), "esphome_key: 32 bytes in base64 (44 characters, ending with `=`)");
+                Some(key.clone())
+            }
+            (EsphomeMode::Fixed, None) => Some(random_key()?),
+            _ => None,
+        };
+        Ok(Self { answers, board, package, flash, parts, matter_setup, esphome_key, iotkit_path, warnings })
     }
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// A new ESPHome API key, in base64 as `iotkit::esphome::ApiKey::parse` reads it.
+fn random_key() -> Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no random numbers: {e}"))?;
+    Ok(base64(&bytes))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    let mut s = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            s.push(if i <= chunk.len() { char::from(BASE64[(n >> (18 - 6 * i) & 63) as usize]) } else { '=' });
+        }
+    }
+    s
+}
+
+/// 32 bytes in base64, as the firmware takes it (the last character's 2 low bits unused).
+fn valid_key(key: &str) -> bool {
+    let b = key.as_bytes();
+    b.len() == 44
+        && b[43] == b'='
+        && b[..43].iter().all(|c| BASE64.contains(c))
+        && BASE64.iter().position(|&c| c == b[42]).is_some_and(|v| v & 3 == 0)
 }
 
 /// Where projects get iotkit from, unless `--iotkit-path` names a local checkout.
@@ -310,7 +391,8 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
         let mut text = render::render(path, source, &p.package, p.board.chip, &p.iotkit_path)?;
         match *path {
             "Cargo.toml" => text = codegen::cargo_toml(&text, p)?,
-            "src/main.rs" if !p.parts.is_empty() || p.battery() || !p.status_led() => text = codegen::main_rs(p),
+            // Always generated: the template's has its placeholder maker and entity ids.
+            "src/main.rs" => text = codegen::main_rs(p),
             ".cargo/config.toml" if p.flash != default_flash(p.board.chip) => {
                 text = text.replace(
                     &format!(
@@ -373,10 +455,14 @@ fn report(p: &Project, dir: &Path) {
     {
         println!("\nMatter pairing code {} (also in matter-pairing.svg):\n{qr}", setup.manual_code_pretty());
     }
+    if let Some(key) = &p.esphome_key {
+        println!("\nESPHome encryption key (Home Assistant asks for it; also in .cargo/secrets.toml):\n  {key}");
+    }
     let flash = if p.board.xtensa() { "  (Xtensa: run `. ~/export-esp.sh` first)" } else { "" };
     println!(
-        "\nNext:\n  cd {}\n  cargo iotkit flash --release{flash}\n\nWiring and setup: README.md. Each part's code is a TODO in src/main.rs.",
-        dir.display()
+        "\nNext:\n  cd {}\n  cargo iotkit flash --release{flash}\n\nWiring and setup: README.md. {}",
+        dir.display(),
+        if p.parts.is_empty() { "Add entities in src/main.rs." } else { "Each part's code is a TODO in src/main.rs." }
     );
     if p.answers.ai_agents {
         println!("AI coding agents: AGENTS.md.");
@@ -477,11 +563,40 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
                 .prompt()?,
         );
     }
-    let broker = Text::new("Home Assistant's MQTT broker (IP or host name)?")
-        .with_help_message(
-            "The Mosquitto add-on: Home Assistant's address. Leave empty to set it later on the console (`mqtt HOST`).",
+    a.esphome = EsphomeMode::Off;
+    if battery {
+        println!("  (Home Assistant: battery devices use MQTT, as the broker keeps commands while they sleep)");
+    } else if Select::new(
+        "How does Home Assistant reach it?",
+        vec![
+            "MQTT, through a broker (the Mosquitto add-on)",
+            "ESPHome API: Home Assistant's ESPHome integration, no broker",
+        ],
+    )
+    .with_help_message(
+        "Both show the same entities. ESPHome: Home Assistant finds the device and connects to it directly.",
+    )
+    .prompt()?
+    .starts_with("ESPHome")
+    {
+        let fixed = Select::new(
+            "Which encryption key?",
+            vec!["One key built in: shown now", "A new key made by each device at its first boot"],
         )
-        .prompt()?;
+        .with_help_message("Home Assistant asks for it when adding the device; `api-key` on the console shows it")
+        .prompt()?
+        .starts_with("One");
+        a.esphome = if fixed { EsphomeMode::Fixed } else { EsphomeMode::PerDevice };
+    }
+    let broker = if a.esphome != EsphomeMode::Off {
+        String::new()
+    } else {
+        Text::new("Home Assistant's MQTT broker (IP or host name)?")
+            .with_help_message(
+                "The Mosquitto add-on: Home Assistant's address. Leave empty to set it later on the console (`mqtt HOST`).",
+            )
+            .prompt()?
+    };
     if !broker.trim().is_empty() {
         a.mqtt_host = Some(broker.trim().into());
         let user =
@@ -493,12 +608,12 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     }
     a.matter = MatterMode::Off;
     if !board.matter() {
-        println!("  (Matter: not on the {} yet, Home Assistant over MQTT only)", board.chip_label);
+        println!("  (Matter: not on the {} yet)", board.chip_label);
     } else if battery {
-        println!("  (Matter: battery devices use MQTT only, as Matter devices stay awake)");
+        println!("  (Matter: not on battery devices, as Matter devices stay awake)");
     } else if Confirm::new("Also work with Matter (Apple Home, Google Home, Alexa, Home Assistant)?")
         .with_default(false)
-        .with_help_message("Next to MQTT. Paired with a code; uses about 2 MB of flash and more RAM.")
+        .with_help_message("Next to Home Assistant's link. Paired with a code; uses about 2 MB of flash and more RAM.")
         .prompt()?
     {
         let fixed = Select::new(
@@ -624,7 +739,7 @@ fn summary(p: &Project) {
     } else {
         println!("  power    plugged in");
     }
-    let mut links = vec!["Home Assistant (MQTT)"];
+    let mut links = vec![p.ha_link()];
     match a.matter {
         MatterMode::Fixed => links.push("Matter (fixed code)"),
         MatterMode::PerDevice => links.push("Matter (code per device)"),
@@ -743,6 +858,51 @@ mod tests {
                 assert!(main.contains("with_sda(p.GPIO4)") && main.contains("Input::new(p.GPIO5"), "{main}");
             }
         }
+    }
+
+    /// The ESPHome API instead of MQTT: its feature, a built-in key, and the combinations refused.
+    #[test]
+    fn esphome() {
+        let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
+        assert!(err("esphome = \"fixed\"\npower = \"battery\"").contains("awake"));
+        assert!(err("esphome = \"per-device\"\nmqtt_host = \"10.0.0.1\"").contains("not both"));
+        assert!(err("esphome = \"fixed\"\nesphome_key = \"abc=\"").contains("base64"));
+
+        let p = project(include_str!("../../answers/esphome.toml"));
+        let key = p.esphome_key.clone().unwrap();
+        assert!(valid_key(&key), "{key}");
+        assert!(codegen::secrets(&p).unwrap().contains(&format!("ESPHOME_API_KEY = \"{key}\"")));
+        assert!(!codegen::secrets(&p).unwrap().contains("MQTT_HOST"));
+        let cargo = codegen::cargo_toml(
+            &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c6", "/opt/iotkit").unwrap(),
+            &p,
+        )
+        .unwrap();
+        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"esphome-api\"]"), "{cargo}");
+        let readme = codegen::readme(&p);
+        assert!(
+            readme.contains("ESPHOME_API_KEY") && !readme.contains(&key) && !readme.contains("mqtt 192"),
+            "{readme}"
+        );
+
+        let p = project("esphome = \"per-device\"\nmatter = \"fixed\"");
+        assert!(p.esphome_key.is_none() && codegen::readme(&p).contains("`api-key`"));
+        assert!(p.warnings.iter().any(|w| w.contains("by its address")));
+        // A given key is kept; the firmware's own encoding of 32 zero bytes.
+        let zero = format!("{}=", "A".repeat(43));
+        assert_eq!(base64(&[0; 32]), zero);
+        assert_eq!(project(&format!("esphome = \"fixed\"\nesphome_key = \"{zero}\"")).esphome_key, Some(zero));
+        assert!(!valid_key(&format!("{}B=", "A".repeat(42))), "unused bits set");
+    }
+
+    /// No parts: still the answers' maker, name and LED id (as the README), not the template's.
+    #[test]
+    fn no_parts_main() {
+        let p = project("name = \"C6 devkit\"\nmaker = \"Tanguy\"");
+        let main = codegen::main_rs(&p);
+        assert!(main.contains(".manufacturer(\"Tanguy\")") && main.contains(".product_name(\"C6 devkit\")"), "{main}");
+        assert!(main.contains("Light::new(\"status_led\"") && codegen::readme(&p).contains("`status_led`"));
+        assert!(!main.contains("TODO(") && main.contains("entities.html"), "{main}");
     }
 
     /// AGENTS.md only when asked for, with the lines that apply to the device.

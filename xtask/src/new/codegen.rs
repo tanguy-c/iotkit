@@ -224,10 +224,15 @@ pub fn main_rs(p: &Project) -> String {
         );
         let _ = writeln!(s, "//! crash records, the watchdog and the USB console (`help`).");
     }
-    s.push_str(
-        "//! Each part's code is below: look for `TODO(<entity id>)`. The drivers named there are `no_std`\n\
-         //! and embedded-hal 1.0; prefer their async mode.\n\n#![no_std]\n#![no_main]\n\n",
-    );
+    if p.parts.is_empty() {
+        s.push_str("//! No parts yet: add entities below (https://tanguy-c.github.io/iotkit/entities.html).\n");
+    } else {
+        s.push_str(
+            "//! Each part's code is below: look for `TODO(<entity id>)`. The drivers named there are `no_std`\n\
+             //! and embedded-hal 1.0; prefer their async mode.\n",
+        );
+    }
+    s.push_str("\n#![no_std]\n#![no_main]\n\n");
 
     // Imports.
     s.push_str("use embassy_executor::Spawner;\n");
@@ -526,6 +531,9 @@ pub fn secrets(p: &Project) -> Option<String> {
         set("MATTER_PASSCODE", &setup.passcode.to_string());
         set("MATTER_DISCRIMINATOR", &setup.discriminator.to_string());
     }
+    if let Some(key) = &p.esphome_key {
+        set("ESPHOME_API_KEY", key);
+    }
     (s.len() > before).then_some(s)
 }
 
@@ -638,6 +646,9 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     if p.battery() {
         app_features.push("deep-sleep");
     }
+    if p.esphome() {
+        app_features.push("esphome-api");
+    }
     let source = match p.iotkit_path.as_str() {
         "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
         path => format!("path = {:?}", format!("{path}/crates/iotkit")),
@@ -662,7 +673,8 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
             if in_features {
                 out.push_str("[features]\n");
                 if p.board.matter() {
-                    out.push_str("## Matter over Wi-Fi, next to MQTT (needs the 8 MB partition table).\n");
+                    let link = if p.esphome() { "the ESPHome API" } else { "MQTT" };
+                    let _ = writeln!(out, "## Matter over Wi-Fi, next to {link} (needs the 8 MB partition table).");
                     out.push_str("matter-wifi = [\"iotkit/matter-wifi\"]\n");
                     if p.answers.matter != MatterMode::Off {
                         out.push_str("default     = [\"matter-wifi\"]\n");
@@ -695,7 +707,7 @@ fn summary(p: &Project) -> String {
     } else {
         "plugged in".into()
     };
-    let link = if a.matter != MatterMode::Off { "Home Assistant (MQTT) and Matter" } else { "Home Assistant (MQTT)" };
+    let link = if a.matter != MatterMode::Off { format!("{} and Matter", p.ha_link()) } else { p.ha_link().into() };
     format!("A smart device on an {}, {power}, for {link}.", p.board.model)
 }
 
@@ -711,7 +723,7 @@ pub fn readme(p: &Project) -> String {
         let pin = part.pin.map_or("to choose".into(), |n| format!("GPIO{n}"));
         let matter = match (a.matter != MatterMode::Off, part.kind.matter) {
             (true, Some(m)) => m,
-            (true, None) => "MQTT only",
+            (true, None) => "Home Assistant only",
             (false, _) => "-",
         };
         let _ = writeln!(
@@ -764,6 +776,14 @@ pub fn readme(p: &Project) -> String {
         );
     }
     match &a.mqtt_host {
+        _ if p.esphome() => {
+            s.push_str("Home Assistant reaches it over the ESPHome API, with no broker: *Settings > Devices* shows it as\ndiscovered (or *Add integration > ESPHome* with its address, port 6053). ");
+            match &p.esphome_key {
+                // Not the key itself: the README is committed, secrets.toml is not.
+                Some(_) => s.push_str("It asks for the encryption key:\n`ESPHOME_API_KEY` in `.cargo/secrets.toml`, the same on every device flashed from this project.\n"),
+                None => s.push_str("It asks for the encryption key:\neach device makes its own at its first boot, and `api-key` on the USB console shows it.\n"),
+            }
+        }
         Some(host) => {
             let _ = writeln!(s, "It connects to the MQTT broker at `{host}`; Home Assistant finds it by itself.");
         }
@@ -824,10 +844,15 @@ Instructions for AI coding agents. Humans: see README.md.
 ## Device
 
 {}. {}
-Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>)` in `src/main.rs`.
+Pins and wiring: the table in README.md. {}
 ",
         a.name,
-        summary(p)
+        summary(p),
+        if p.parts.is_empty() {
+            "No parts yet: entities are added in `src/main.rs`."
+        } else {
+            "Each part's code is a `TODO(<entity id>)` in `src/main.rs`."
+        }
     );
     if p.battery() {
         s.push_str(
@@ -837,6 +862,11 @@ Pins and wiring: the table in README.md. Each part's code is a `TODO(<entity id>
     }
     if a.matter != MatterMode::Off {
         s.push_str("Matter (`matter-wifi` feature) needs the 8 MB partition table.\n");
+    }
+    if p.esphome() {
+        s.push_str(
+            "Home Assistant over the ESPHome API (`esphome-api` feature), not MQTT: never set a broker as well.\n",
+        );
     }
     if p.board.xtensa() {
         s.push_str("Xtensa chip: the `esp` toolchain; run `. ~/export-esp.sh` in each new shell before cargo.\n");

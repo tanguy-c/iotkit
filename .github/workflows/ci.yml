@@ -198,9 +198,10 @@ jobs:
             cargo generate --path template --name "ci-$chip" --destination "$RUNNER_TEMP" --silent --define chip=$chip --define "iotkit_path=$GITHUB_WORKSPACE"
             (cd "$RUNNER_TEMP/ci-$chip" && cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify)
           done
-      # `cargo iotkit new` from answers files: every part kind with Matter on the C6, a battery C3.
+      # `cargo iotkit new` from answers files: every part kind with Matter on the C6, a battery C3,
+      # a C6 over the ESPHome API.
       - run: |
-          for c in c6 c3; do
+          for c in c6 c3 esphome; do
             cargo iotkit new "$RUNNER_TEMP/new-$c" --answers xtask/answers/$c.toml --iotkit-path "$GITHUB_WORKSPACE"
             (cd "$RUNNER_TEMP/new-$c" && cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify)
           done

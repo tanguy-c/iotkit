@@ -1,7 +1,7 @@
 //! The ESPHome API server on the chip: one client at a time on TCP 6053, encrypted; entity
 //! states out, commands in.
 
-use core::fmt::Write as _;
+use core::fmt::{self, Write as _};
 
 use crate::config::esp::SharedStore;
 use crate::esphome::{
@@ -13,10 +13,22 @@ use crate::esphome::{
 use crate::model::{Binding, Device};
 use crate::net::{esp::Net, mdns::Service};
 use embassy_futures::select::{Either3, select3};
-use embassy_net::tcp::TcpSocket;
+use embassy_net::{IpEndpoint, tcp::TcpSocket};
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::Write;
 use heapless::String;
+
+/// A client's address as `ip:port`.
+struct Peer(Option<IpEndpoint>);
+
+impl fmt::Display for Peer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(endpoint) => write!(f, "{endpoint}"),
+            None => f.write_str("a client"),
+        }
+    }
+}
 
 /// The API's port.
 pub const PORT: u16 = 6053;
@@ -97,11 +109,14 @@ pub async fn api_task(net: Net, device: &'static Device, key: ApiKey) {
         if socket.accept(PORT).await.is_err() {
             continue;
         }
-        let peer = socket.remote_endpoint();
+        let peer = Peer(socket.remote_endpoint());
         let result = session(&mut socket, net, device, &key, &mac, binding, party.as_mut()).await;
         match result {
-            Err(Error::Closed) | Ok(()) => log::info!("esphome: {peer:?} disconnected"),
-            Err(e) => log::warn!("esphome: {peer:?}: {e:?}"),
+            Err(Error::Closed) | Ok(()) => log::info!("esphome: {peer} disconnected"),
+            // How Home Assistant adds a device: it tries without encryption, then asks for the key.
+            Err(Error::Plaintext) => log::info!("esphome: {peer}: no encryption, told it to use the key"),
+            Err(Error::Key) => log::info!("esphome: {peer}: wrong or no key"),
+            Err(e) => log::warn!("esphome: {peer}: {e:?}"),
         }
         // What was sent goes out, then the port listens again at once: waiting for the client's
         // FIN would refuse its reconnection (Home Assistant reconnects right after a key check).
