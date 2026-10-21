@@ -78,7 +78,7 @@ bt-hci                 = { version = "0.10", optional = true }
 embassy-embedded-hal   = { version = "0.6", optional = true, default-features = false }
 embassy-executor       = { workspace = true, optional = true }
 embassy-net            = { version = "0.9.1", optional = true, features = ["dhcpv4", "dhcpv4-hostname", "dns", "log", "medium-ethernet", "multicast", "proto-ipv4", "tcp", "udp"] }
-chacha20poly1305       = { version = "0.10", optional = true, default-features = false }
+chacha20poly1305       = { version = "0.11", optional = true, default-features = false }
 ed25519-compact        = { version = "2.6", optional = true, default-features = false, features = ["opt_size", "x25519"] }  # opt_size: the X25519 ladder once, not inlined (80 KB)
 embedded-storage       = { version = "0.3", optional = true }
 embedded-tls           = { version = "0.19", optional = true, default-features = false, features = ["log", "rustpki"] }
