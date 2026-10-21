@@ -91,7 +91,7 @@ esp-radio              = { version = "1.0.0-beta.1", optional = true, features =
 esp-rtos               = { workspace = true, optional = true }
 esp-storage            = { version = "0.10", optional = true, features = ["embedded-storage"] }
 hkdf                   = { version = "0.13", optional = true }
-rand_core              = { version = "0.6", optional = true }
+rand_core              = { version = "0.10", optional = true }
 sha2                   = { version = "0.11", optional = true, default-features = false }  # as iotkit-image: one SHA-256
 smoltcp                = { version = "0.13", optional = true, default-features = false, features = ["auto-icmp-echo-reply"] }
 static_cell            = { workspace = true, optional = true }

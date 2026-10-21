@@ -3175,7 +3175,7 @@ dependencies = [
  "log",
  "portable-atomic",
  "postcard",
- "rand_core 0.6.4",
+ "rand_core 0.10.1",
  "rs-matter-embassy",
  "serde",
  "serde-json-core",
