@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  # Firmware workspace and the host CLI are separate cargo projects.
+  - package-ecosystem: cargo
+    directories: [/, /xtask]
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+    # esp-hal and friends move together: update them by hand.
+    ignore:
+      - dependency-name: "esp-*"
+      - dependency-name: "embassy-*"
