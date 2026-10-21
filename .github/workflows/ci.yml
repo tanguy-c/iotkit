@@ -81,11 +81,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
+      # Only what goes into the firmware can change its size: not docs, workflows, xtask or Actions
+      # bumps (Dependabot). The job still passes, so it can stay required.
+      - id: changed
+        run: |
+          if git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD |
+              grep -qE '^(crates|apps)/|^Cargo\.(toml|lock)$|^\.cargo/|^partitions|^rust-toolchain|^tools/size-check\.sh$'; then
+            echo run=true >> "$GITHUB_OUTPUT"
+          else
+            echo "No firmware input changed: nothing to compare."
+          fi
+      - if: steps.changed.outputs.run == 'true'
+        uses: Swatinem/rust-cache@v2
         with:
           key: size
-      - run: sudo apt-get update && sudo apt-get install -y clang cmake
-      - run: tools/size-check.sh ${{ github.event.pull_request.base.sha }}
+      - if: steps.changed.outputs.run == 'true'
+        run: sudo apt-get update && sudo apt-get install -y clang cmake
+      - if: steps.changed.outputs.run == 'true'
+        run: tools/size-check.sh ${{ github.event.pull_request.base.sha }}
 
   links:
     name: Unused code is not linked
