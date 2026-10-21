@@ -12,6 +12,7 @@
 | `ota URL` | install the update whose manifest is at URL |
 | `mqtt [HOST[:PORT] [USER PASS]]` | the broker, or set it (then restarts) |
 | `update-url [URL]` | where updates from Home Assistant come from (`ha-update`) |
+| `api-key [KEY]` | the ESPHome API's encryption key, or set it (then restarts) (`esphome-api`) |
 | `matter [pair \| reset]` | pairing codes, a pairing window, forget pairings (`matter-wifi`) |
 | `panic`, `hang`, `reboot`, `factory-reset` | failures on purpose, restart, erase everything |
 
@@ -25,9 +26,10 @@ builds compile out debug and trace logs (they would cost RAM): for those, build 
 
 ## VS Code
 
-Accept the recommended extensions (rust-analyzer, probe-rs, Even Better TOML, Error Lens). Tasks
-(`Ctrl+Shift+B`): *Flash USB*, *Monitor*, *Build signed*, *OTA push*. Debugging (`F5`) uses
-probe-rs over the chip's built-in USB-JTAG.
+Accept the recommended extensions (rust-analyzer, probe-rs, Even Better TOML, Error Lens,
+Dependi). Tasks (`Ctrl+Shift+B`): *Flash USB*, *Monitor*, *Build signed*, *OTA push*, *Build
+debug*. Debugging (`F5`) uses probe-rs over the chip's built-in USB-JTAG (not on the original
+ESP32, which has none).
 
 ## AI coding agents
 

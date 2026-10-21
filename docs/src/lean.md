@@ -14,7 +14,7 @@ without it: `default-features = false`, then list the ones to keep.
 | `ota-push` | updates pushed with `cargo iotkit ota push` | updates only from Home Assistant (`ha-update`), or none |
 
 Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`, `tls`,
-`esphome-api` ([ESPHome API](home-assistant.md#esphome-api)).
+`esphome-api` ([ESPHome API](home-assistant.md#esphome-api)), `panic-handler`.
 
 ```toml
 iotkit = { git = "https://github.com/tanguy-c/iotkit", default-features = false, features = ["esp32c6", "wifi", "improv-serial", "ota-push"] }
@@ -36,7 +36,7 @@ firmware, and carry the name or address the device connects to:
 IOTKIT_TLS_CA = { value = "certs/ca.der", relative = true }   # the CA, DER
 ```
 
-It costs about 125 KB of flash and 50 KB of RAM (each connection's record buffers). The device
+It costs about 125 KB of flash and 21 KB of RAM per connection (MQTT, downloads). The device
 has no clock yet, so certificate expiry is not checked. The repository's
 `test-server/certs/make.sh` makes a test CA and certificate for its broker (8883) and update
 server (8443).
@@ -58,4 +58,4 @@ of the MAC address make each device's name unique.
 
 The modules work on their own: `iotkit::ota` for signed updates with rollback, `iotkit::config`
 for settings, `iotkit::provision` for Improv, `iotkit::diag` for crash records. `apps/thread-light`
-builds its firmware from them (`default-features = false`, `matter-thread`).
+builds its firmware from them (`default-features = false`, `matter-thread`, `panic-handler`).

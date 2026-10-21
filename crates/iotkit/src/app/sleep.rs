@@ -2,7 +2,7 @@
 //!
 //! ```ignore
 //! static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(300), max_awake: Duration::from_secs(30) };
-//! let app = iotkit_app::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
+//! let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
 //! TEMPERATURE.set(read());
 //! app.sleep().await // sends the states, disconnects, sleeps `interval`
 //! ```

@@ -5,8 +5,10 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 
 ## Layout
 
-- `crates/iotkit-core`: no chip, host-tested: `model`, `config` (the store), `image` (signed
-  updates; the CLI signs with it), `runtime` (health check).
+- `crates/iotkit-core`: no chip, host-tested: `model`, `config` (the store), `image` (the
+  re-exported `iotkit-image`), `runtime` (health check).
+- `crates/iotkit-image`: signed update images and manifests, shared by the device and the CLI
+  (which signs with it).
 - `crates/iotkit`: what apps depend on. Modules `config::esp`, `diag`, `net`, `ota`, `provision`,
   `mqtt` (Home Assistant discovery, `ha.rs`), `esphome` (the ESPHome native API, `api.rs`),
   `matter`, `components` (ready-made parts over embedded-hal); `app.rs` (`start`, `Board`,
@@ -16,10 +18,11 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 - `crates/iotkit-build`: the apps' build.rs helper.
 - `docs/`: the user guide. User-facing explanations live there, once; the README stays a short
   landing page.
-- `apps/`: `devkit` (reference firmware, the default member), `showcase` (one entity of each kind),
+- `apps/`: `devkit` (reference firmware, the default member), `showcase` (most entity kinds),
   `sleepy` (deep sleep), `lean` (opt-out features), `thread-light` (Matter over Thread, uses the crates directly).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
-  its `new` wizard in `xtask/src/new/`; `test-server/`: Home Assistant and Mosquitto in compose.
+  its `new` wizard in `xtask/src/new/`; `test-server/`: Home Assistant, Mosquitto, an update server
+  and a Matter controller in compose.
 
 ## Commands
 
@@ -27,7 +30,7 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 - One app at a time: `cargo build -p devkit`, `cargo build -p thread-light` (needs clang, cmake).
   Never `--workspace`: devkit's Wi-Fi and thread-light's 802.15.4 would unify into one esp-radio
   build.
-- Host tests: `cargo test-host` (`iotkit-core`, and `iotkit` without a chip);
+- Host tests: `cargo test-host` (`iotkit-image`, `iotkit-core`, and `iotkit` without a chip);
   CLI: `cargo test --manifest-path xtask/Cargo.toml --target host-tuple`.
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) (quick) and
   [full.yml](.github/workflows/full.yml) (other chips, templates, fuzz; nightly or the `full-ci`
@@ -45,7 +48,7 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
   [crates/iotkit/src/lib.rs](crates/iotkit/src/lib.rs).
 - The C3 has no atomics: `portable-atomic` is an opt-in feature its `esp32c3` features enable; the
   C6 keeps core atomics.
-- No heap growth: `iotkit::init!`'s heap (64 + 96 KB) stays as is; use
+- No heap growth: `iotkit::init!`'s heap (64 + 96 KB; ESP32: 96 KB) stays as is; use
   static or stack buffers (`heapless`, `static_cell`).
 - `template/check-sync.sh` fails when the template's copies drift from the root files.
 - `xtask/answers/*.toml` are CI inputs: a new part kind or board option belongs in them.

@@ -22,16 +22,17 @@ cargo iotkit new garden-sensor
 It asks, in plain words:
 
 - **what it is** (its name in Home Assistant) and your name or brand;
-- **the board** (ESP32-C6, C3, C5 or S3 DevKit, or another board with one of these chips);
+- **the board** (ESP32-C6, C3, C5 or S3 DevKit, an ESP32-DevKitC, or another board with one of
+  these chips);
 - **the power**: plugged in, or on battery (wakes up, reports, sleeps; with the battery level if
   you want);
 - **connectivity**: your Wi-Fi now or later from a phone; how Home Assistant reaches it, over
   its MQTT broker or the ESPHome API (no broker; one encryption key built in, or a key per
   device); Matter (C6) with one fixed pairing code printed as a QR label (or a code per device);
-  where you publish updates;
+  where you publish updates. Battery devices use MQTT, without Matter;
 - **the parts**, each with its pin: temperature, humidity, pressure, light level, CO2, fine dust,
   soil moisture; motion, door, leak, smoke; relay, light, blind, valve, lock, fan, thermostat,
-  settings; push buttons. Pins are checked for the chip (no flash or USB pin, an ADC pin for
+  settings; push buttons; any other reading or mode. Pins are checked for the chip (no flash or USB pin, an ADC pin for
   analog parts);
 - whether to add an `AGENTS.md` for AI coding agents.
 
@@ -70,14 +71,14 @@ With no network stored, the device opens a setup window. Give it your network an
 - **USB (Improv):** ESP Web Tools, or improv-wifi.com with Web Serial.
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
-characters. To change it later, hold **BOOT** 3 s (the DevKit's LED turns blue), or type
-`provision` on the USB console; the window stays open 10 minutes. Hold **BOOT** 10 s (red) to
-erase every setting and Matter pairing.
+characters. To change it later, hold **BOOT** 3 s, or type `provision` on the USB console;
+the window stays open 10 minutes. Hold **BOOT** 10 s to erase every setting and Matter pairing.
 
 > During a setup window anyone in range can give the device a network. Open it only when you
 > need it.
 
 For development, `.cargo/secrets.toml` (git-ignored) can set `WIFI_SSID`, `WIFI_PASS` and
-`MQTT_HOST`: the first boot stores them and skips the window.
+`MQTT_HOST`: the first boot stores them and skips the window. `secrets.toml.example` lists the
+other keys (broker login, update URL, Matter code, ESPHome API key).
 
 Then [connect it to Home Assistant](home-assistant.md).

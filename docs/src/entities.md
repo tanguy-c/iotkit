@@ -31,7 +31,8 @@ RELAY.set(on);                         // report what the device did
 | `Fan` | on, speed, preset, oscillation, direction | the same |
 | `Climate` | mode, target, current temperature | mode, target |
 
-Ids are `[a-z0-9_]`, checked when building. `apps/showcase` has one of each.
+With `ha-update`, the kit adds an `Update` entity of its own ([updates](updates.md)). Ids are
+`[a-z0-9_]`, checked when building. `apps/showcase` has most of them.
 
 ## Device classes, units, shortcuts
 
@@ -73,5 +74,5 @@ app.save(&Brightness(200)).await;   // written only when it changed
 ```
 
 Keys from `0x1000` are the app's. Bump `VERSION` when the type changes, and convert old values in
-`Setting::migrate`. `SaveLater` writes a value a while after its last change (a dragged slider
-writes the flash once).
+`Setting::migrate`. `SaveLater` tells when to save, a while after the last change (a dragged
+slider writes the flash once).

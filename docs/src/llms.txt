@@ -1,8 +1,8 @@
 # iotkit
 
-> A no_std Rust firmware kit for ESP32 smart devices (esp-hal 1.2, Embassy): Wi-Fi setup, signed OTA updates with automatic rollback, Home Assistant over MQTT, Matter over Wi-Fi and Thread, deep sleep. A device's main lists its entities and calls `iotkit::start`. Not released yet; depend on the git repository.
+> A no_std Rust firmware kit for ESP32 smart devices (esp-hal 1.2, Embassy): Wi-Fi setup, signed OTA updates with automatic rollback, Home Assistant over the ESPHome API or MQTT, Matter over Wi-Fi and Thread, deep sleep. A device's main lists its entities and calls `iotkit::start`. 0.1 is released from git (not on crates.io yet); depend on the git repository.
 
-Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `iotkit-core` (chip-independent, re-exported by `iotkit`). CLI: `cargo iotkit` (`new`, `build`, `flash`, `ota push`, `ota publish`, `web`). API docs: `cargo doc -p iotkit --open` in a project.
+Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `iotkit-core` (chip-independent, re-exported by `iotkit`), `iotkit-build` (the project's build-dependency). CLI: `cargo iotkit` (`new`, `keygen`, `build`, `verify`, `flash`, `ota push`, `ota publish`, `web`). API docs: `cargo doc -p iotkit --open` in a project.
 
 ## Guide
 
@@ -18,8 +18,11 @@ Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `io
 - [Only what the device uses](https://tanguy-c.github.io/iotkit/lean.html): opt-out features, IOTKIT_HOSTNAME, IOTKIT_TOPIC_PREFIX
 - [Console, logs, editor](https://tanguy-c.github.io/iotkit/console.html): USB console commands, ESP_LOG
 - [Troubleshooting](https://tanguy-c.github.io/iotkit/troubleshooting.html)
+- [Examples](https://tanguy-c.github.io/iotkit/examples.html): devkit, showcase, sleepy, lean, thread-light
+- [Working on iotkit](https://tanguy-c.github.io/iotkit/contributing.html): repository layout, first commands
+- [Roadmap](https://tanguy-c.github.io/iotkit/roadmap.html)
 
 ## Code
 
-- [Examples](https://github.com/tanguy-c/iotkit/tree/main/apps): devkit, showcase, sleepy, lean, thread-light
+- [Examples' source](https://github.com/tanguy-c/iotkit/tree/main/apps)
 - [AGENTS.md](https://github.com/tanguy-c/iotkit/blob/main/AGENTS.md): working on iotkit itself

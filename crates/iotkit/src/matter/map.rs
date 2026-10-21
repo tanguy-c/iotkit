@@ -1,5 +1,4 @@
 //! Value and unit conversions between the model and Matter's attributes (host-tested).
-//! Ported from esp-ha's `esp_ha_core::matter`.
 
 use crate::model::{
     CoverState, DeviceClass, FanCommand, FanDirection, FanState, HvacAction, HvacMode, LockCommand, LockState, Unit,

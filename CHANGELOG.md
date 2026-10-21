@@ -4,11 +4,12 @@ The API and the settings' flash layout may still change before 1.0.
 
 ## 0.1.0 (2026-10-21)
 
-The first release: a rewrite of the earlier esp-ha firmware as a kit. Install from git (not on
+The first release. Install from git (not on
 crates.io yet, see the [roadmap](docs/src/roadmap.md)); tested on an ESP32-C6-DevKitC-1.
 
 - One crate for devices, `iotkit` (was `iotkit-app` and ten layer crates), plus `iotkit-core`
-  (chip-independent, host-tested) and `iotkit-build`. Paths: `iotkit_app::` is `iotkit::`, the
+  (chip-independent, host-tested), `iotkit-image` (signed images, shared with the CLI) and
+  `iotkit-build`. Paths: `iotkit_app::` is `iotkit::`, the
   layers are modules (`iotkit::net`, `iotkit::ota`, `iotkit::mqtt` (was `iotkit_link_mqtt`),
   `iotkit::matter` (was `iotkit_link_matter`), ...). Matter over Thread: `matter-thread` with
   `default-features = false`.
@@ -16,7 +17,7 @@ crates.io yet, see the [roadmap](docs/src/roadmap.md)); tested on an ESP32-C6-De
 - Opt-out features (`improv-ble`, `softap`, `improv-serial`, `console`, `ota-push`), and
   `IOTKIT_HOSTNAME` / `IOTKIT_TOPIC_PREFIX`.
 - `components`: ready-made parts (relay, binary input, button, dimmer, fan, RGB light, polled
-  sensors with filters), used by `cargo iotkit new`.
+  sensors with filters); `cargo iotkit new` uses the relay, input, button and polled ones.
 - `init!`, `Config::new` with builders, typed `DeviceClass` / `Unit`, sensor shortcuts.
 - `cargo iotkit new`: `TODO(<id>)` hints, optional `AGENTS.md` for AI coding agents.
 - `tls`: TLS 1.3 for MQTT (port 8883) and `https://` downloads, with the server checked against a
