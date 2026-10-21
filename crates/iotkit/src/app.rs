@@ -71,16 +71,16 @@ pub struct Board {
     pub boot_button: Option<AnyPin<'static>>,
 }
 
-/// What the device is: `Config::new(iotkit_app::firmware!(&OTA_KEY))`, then the builders.
+/// What the device is: `Config::new(iotkit::firmware!(&OTA_KEY))`, then the builders.
 ///
 /// ```ignore
-/// static CONFIG: Config = Config::new(iotkit_app::firmware!(&OTA_KEY))
+/// static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
 ///     .manufacturer("Me")
 ///     .entities(&[&LED, &TEMPERATURE]);
 /// ```
 #[non_exhaustive]
 pub struct Config {
-    /// `iotkit_app::firmware!(&OTA_KEY)`: package name, version, update key.
+    /// `iotkit::firmware!(&OTA_KEY)`: package name, version, update key.
     pub firmware: Firmware,
     /// Shown in Home Assistant (default `"iotkit"`).
     pub manufacturer: &'static str,
@@ -171,8 +171,8 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
 /// (`TIMG0` and `FROM_CPU_INTR0` are taken).
 ///
 /// ```ignore
-/// iotkit_app::init!(p);
-/// iotkit_app::init!(mut p, heap: 128 * 1024);   // `mut`: to reborrow peripherals
+/// iotkit::init!(p);
+/// iotkit::init!(mut p, heap: 128 * 1024);   // `mut`: to reborrow peripherals
 /// ```
 #[cfg(not(feature = "esp32"))]
 #[macro_export]

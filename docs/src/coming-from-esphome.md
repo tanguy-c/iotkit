@@ -88,7 +88,7 @@ is set once on the console (`mqtt 192.168.1.10`) or at build time (`MQTT_HOST`).
 
 | ESPHome | iotkit |
 | --- | --- |
-| `esphome: name:` | the package name; the host name prefix is `IOTKIT_HOSTNAME` ([names](lean.md#names)) |
+| `esphome: name:` | `IOTKIT_HOSTNAME`, the host name prefix and the device in Home Assistant ([names](lean.md#names)); the package name for updates and Matter |
 | `esp32: board:` | the board question of `cargo iotkit new`; a chip feature (`esp32c6`, ...) |
 | `wifi:`, `ap:`, `captive_portal:` | the setup window of `start` (feature `softap`) |
 | `esp32_improv:`, `improv_serial:` | features `improv-ble`, `improv-serial` |
@@ -100,7 +100,7 @@ is set once on the console (`mqtt 192.168.1.10`) or at build time (`MQTT_HOST`).
 | `binary_sensor: platform: gpio` | `components::binary_input` (debounced) |
 | `binary_sensor:` `on_multi_click:` | `components::button`: press, double, triple, long |
 | `sensor: platform: <chip>` | `components::poll` with the driver crate ([drivers](components.md#any-embedded-hal-driver)) |
-| `filters:` | `components::filter`: `Linear`, `Clamp`, `MovingAverage`, `Delta`, `Offset`, closures |
+| `filters:` | `components::filter`: `Linear`, `Clamp`, `MovingAverage`, `Delta`, `Offset`, `Multiply`, closures |
 | `light: platform: monochromatic` | `components::dimmer` on a LEDC channel |
 | `light: platform: esp32_rmt_led_strip` | `components::rgb_light` (feature `smartled`) |
 | `fan: platform: speed` | `components::fan` |

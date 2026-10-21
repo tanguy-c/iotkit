@@ -1,5 +1,5 @@
 //! The clusters of the appliances: Window Covering, Valve, Door Lock, Fan Control, Thermostat
-//! and Mode Select, plus the Smoke CO Alarm of a binary sensor. Ported from esp-ha.
+//! and Mode Select, plus the Smoke CO Alarm of a binary sensor.
 //!
 //! Reads come from the entity's state; commands and writes go through `Entity::command`, like
 //! commands over MQTT. The conversions are in [`map`].

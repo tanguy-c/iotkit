@@ -27,7 +27,7 @@ useful to read as to hand to an agent:
 | Skill | For |
 | --- | --- |
 | [add-component](.claude/skills/add-component/SKILL.md) | a ready-made part (sensor, actuator, input) and its wizard entry |
-| [add-entity-kind](.claude/skills/add-entity-kind/SKILL.md) | a new entity kind through the model, MQTT, Matter and the wizard |
+| [add-entity-kind](.claude/skills/add-entity-kind/SKILL.md) | a new entity kind through the model, MQTT, the ESPHome API, Matter and the wizard |
 | [add-chip](.claude/skills/add-chip/SKILL.md) | another ESP32 chip |
 | [size-check](.claude/skills/size-check/SKILL.md) | comparing the C6 firmware sizes before committing |
 

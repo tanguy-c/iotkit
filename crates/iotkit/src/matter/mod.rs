@@ -115,8 +115,8 @@ pub enum Pollutant {
     Tvoc,
 }
 
-/// `None`: the entity has no Matter equivalent (it stays MQTT-only): numbers, text sensors,
-/// buttons, sensors of other classes or in a unit Matter does not take.
+/// `None`: the entity has no Matter equivalent (MQTT and the ESPHome API only): numbers, text
+/// sensors, buttons, sensors of other classes or in a unit Matter does not take.
 pub fn matter_kind(entity: &dyn Entity) -> Option<MatterKind> {
     let meta = entity.meta();
     let class = meta.device_class;

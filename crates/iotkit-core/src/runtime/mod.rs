@@ -2,8 +2,8 @@
 //!
 //! Each subsystem passes its check when it works (Wi-Fi up, broker reached, ...). The runtime
 //! waits for [`Health::healthy`]; then it marks the boot stable and, after an OTA update, the
-//! image valid. If the checks never all pass, the image is not confirmed and the bootloader can
-//! roll it back.
+//! image valid. If the checks never all pass, the image is not confirmed and the firmware rolls
+//! it back after its trial boots.
 //!
 //! ```
 //! use iotkit_core::runtime::{Check, Health};

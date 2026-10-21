@@ -11,7 +11,8 @@ With the [`tls` feature](lean.md#tls), a broker on port 8883 is reached over TLS
 (`mqtt 192.168.1.10:8883`).
 
 Topics: `iotkit/<host>/status` (`online` / `offline`), `iotkit/<host>/<entity>/state`,
-`iotkit/<host>/<entity>/set`, and discovery under `homeassistant/`. The `iotkit` prefix is
+`iotkit/<host>/<entity>/set`, `iotkit/<host>/<entity>/<setting>/set` (one setting of a fan,
+thermostat or cover), and discovery under `homeassistant/`. The `iotkit` prefix is
 `IOTKIT_TOPIC_PREFIX` ([names](lean.md#names)).
 
 ## ESPHome API
@@ -43,12 +44,13 @@ Bluetooth step, the device is already on the network.
 | --- | --- |
 | `Light` | Extended Color Light |
 | `Switch` | On/Off Plug |
-| temperature, humidity, pressure, illuminance, battery, air quality sensors | the matching sensor |
-| contact, motion, leak, smoke/CO binary sensors | the matching sensor or alarm |
+| temperature, humidity, pressure, illuminance, air quality sensors, in a unit Matter takes | the matching sensor |
+| battery sensor | the device's power source |
+| binary sensors: motion/occupancy/presence, leak, smoke, CO/gas; others as contact | the matching sensor or alarm |
 | `Event` with presses | Generic Switch |
 | `Cover`, `Valve`, `Lock`, `Fan`, `Climate`, `Select` | Window Covering, Water Valve, Door Lock, Fan, Thermostat, Mode Select |
 
-Other entities stay MQTT-only. `matter pair` lets another controller pair for 15 minutes;
+Other entities are not on Matter (MQTT and the ESPHome API only). `matter pair` lets another controller pair for 15 minutes;
 `matter reset` forgets every pairing. Matter uses the test vendor's attestation: fine for
 development, not for selling devices.
 

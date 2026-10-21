@@ -1,5 +1,4 @@
-//! Battery charge from its voltage (the ADC reading is `iotkit_app::battery`). Ported from
-//! esp-ha.
+//! Battery charge from its voltage (the ADC reading is `iotkit::battery`).
 
 /// A battery's discharge curve: (millivolts, percent) points, ascending.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
