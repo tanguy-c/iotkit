@@ -42,7 +42,7 @@ code you own.
 
 ## Status
 
-Early, not released yet: the API and the settings' flash layout may still change.
+Early (0.1): the API and the settings' flash layout may still change.
 
 - Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and serial),
   signed OTA with rollback, MQTT with Home Assistant, Matter over Wi-Fi with Home Assistant's

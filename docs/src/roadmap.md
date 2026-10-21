@@ -1,9 +1,9 @@
 # Roadmap
 
-What is left before a first release, and after. [Status](introduction.md#status) says what works
+What 0.1 does not have yet, and what comes after. [Status](introduction.md#status) says what works
 today.
 
-## Before 0.1
+## Not in 0.1
 
 - **Hardware tests** beyond the ESP32-C6: the C3, C5, S3 and original ESP32; Matter over Thread
   with a border router.

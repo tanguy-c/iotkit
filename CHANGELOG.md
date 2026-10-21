@@ -1,8 +1,11 @@
 # Changelog
 
-iotkit is not released yet: the API and the settings' flash layout may still change.
+The API and the settings' flash layout may still change before 1.0.
 
-## Unreleased
+## 0.1.0 (2026-10-21)
+
+The first release: a rewrite of the earlier esp-ha firmware as a kit. Install from git (not on
+crates.io yet, see the [roadmap](docs/src/roadmap.md)); tested on an ESP32-C6-DevKitC-1.
 
 - One crate for devices, `iotkit` (was `iotkit-app` and ten layer crates), plus `iotkit-core`
   (chip-independent, host-tested) and `iotkit-build`. Paths: `iotkit_app::` is `iotkit::`, the

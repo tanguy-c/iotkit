@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report it privately with GitHub's **Report a vulnerability** button (the repository's
-*Security* tab), not in a public issue. iotkit is not released yet: fixes go to `main`.
+*Security* tab), not in a public issue. iotkit is at 0.1: fixes go to `main`, and the latest release is the one supported.
 
 ## What iotkit protects, and what it does not
 

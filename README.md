@@ -45,7 +45,7 @@ on the console: the board's LED shows up in Home Assistant. `cargo iotkit new` w
 
 ## Status
 
-Early, not released yet: the API and the settings' flash layout may still change. Tested on an
+Early (0.1): the API and the settings' flash layout may still change. Tested on an
 ESP32-C6-DevKitC-1; the C3, C5, S3, ESP32 and H2 are build-tested ([chips](https://tanguy-c.github.io/iotkit/introduction.html#chips)).
 Matter uses test attestation credentials: for development, not for selling devices. What comes
 next: the [roadmap](docs/src/roadmap.md).
