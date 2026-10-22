@@ -16,3 +16,5 @@ published/
 .claude/worktrees/
 # The built guide (mdbook build docs).
 docs/book/
+# Python bytecode (tools/hil).
+__pycache__/

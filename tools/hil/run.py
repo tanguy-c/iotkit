@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import serial
 
@@ -58,10 +59,10 @@ class Console:
     def close(self):
         self.serial.close()
 
-    def wait_for(self, pattern, timeout):
-        """Reads the log until `pattern` (a regex) appears; returns the match or None."""
+    def wait_for(self, pattern, timeout, stop=lambda: False):
+        """Reads the log until `pattern` (a regex) appears, or until `stop()`; returns the match or None."""
         deadline = time.time() + timeout
-        while time.time() < deadline:
+        while time.time() < deadline and not stop():
             try:
                 self.seen += ANSI.sub(b"", self.serial.read(4096))
             except serial.SerialException:  # the chip restarted: the port comes back
@@ -91,12 +92,15 @@ def next_patch(version, n):
 
 
 def tree_with_version(name, version):
-    """A worktree of HEAD under target/hil/ with devkit at `version`, the same signing key."""
+    """A worktree of the working tree (its tracked changes) under target/hil/ with devkit at
+    `version`, the same signing key."""
     path = os.path.join(WORK, name)
     run(["git", "worktree", "remove", "-f", path], check=False)
     shutil.rmtree(path, ignore_errors=True)
     run(["git", "worktree", "prune"])
-    run(["git", "worktree", "add", "-q", "--detach", path, "HEAD"])
+    # A commit of the uncommitted changes (empty when there are none): the updates test them too.
+    base = run(["git", "stash", "create"]).stdout.strip() or "HEAD"
+    run(["git", "worktree", "add", "-q", "--detach", path, base])
     shutil.copytree(os.path.join(ROOT, "keys"), os.path.join(path, "keys"), dirs_exist_ok=True)
     secrets = os.path.join(ROOT, ".cargo", "secrets.toml")
     if os.path.exists(secrets):
@@ -189,12 +193,23 @@ def main():
     stuck = next_patch(base, 4)
     step(f"OTA push {stuck}, which runs but never gets healthy: rolled back to {good} after its timeout")
     tree = tree_with_version("stuck", stuck)
-    run(["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
-         "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"],
-        cwd=tree, env={**env, "DEVKIT_NEVER_HEALTHY": "1", "IOTKIT_UPDATE_TIMEOUT": "60"})
+    # The console listens during the push: the timeout may expire before the push returns.
     console = Console(wait_port())
-    if not console.wait_for(r"not healthy within 60 s", 120):
-        sys.exit("FAIL: the update timeout did not roll back:\n" + console.seen.decode(errors="replace")[-3000:])
+    with ThreadPoolExecutor(1) as pool:
+        push = pool.submit(
+            run, ["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
+                  "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"],
+            cwd=tree, env={**env, "DEVKIT_NEVER_HEALTHY": "1", "IOTKIT_UPDATE_TIMEOUT": "60"}, check=False)
+        # The push builds the firmware first.
+        rolled_back = console.wait_for(r"not healthy within 60 s", 900,
+                                       stop=lambda: push.done() and push.result().returncode != 0)
+        pushed = push.result()
+    if not rolled_back:  # the push failed: its rollback may still be in the unread log
+        rolled_back = console.wait_for(r"not healthy within 60 s", 5)
+    # The push may see the rollback already, and report it as a failure: the log decides.
+    if not rolled_back:
+        sys.exit("FAIL: the update timeout did not roll back:\n" + pushed.stdout[-1000:] + pushed.stderr[-1000:]
+                 + console.seen.decode(errors="replace")[-3000:])
     if not console.wait_for(r"- healthy", 120):
         sys.exit(f"FAIL: {good} not healthy again after the rollback:\n" + console.seen.decode(errors="replace")[-3000:])
     info = console.command("info", r"devkit (\S+), up[\s\S]*?last update: (\S+) (\S+)", timeout=10)
