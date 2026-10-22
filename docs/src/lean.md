@@ -59,3 +59,6 @@ of the MAC address make each device's name unique.
 The modules work on their own: `iotkit::ota` for signed updates with rollback, `iotkit::config`
 for settings, `iotkit::provision` for Improv, `iotkit::diag` for crash records. `apps/thread-light`
 builds its firmware from them (`default-features = false`, `matter-thread`, `panic-handler`).
+With `panic-handler`, call `iotkit::diag::esp::boot()` first on every boot, as `start` does: it
+takes the crash record, and until it is taken, later crashes are not recorded (of crashes in a
+row, the first is kept).

@@ -30,7 +30,8 @@ fn uptime_s() -> u32 {
 }
 
 /// Why the chip restarted, and the crash recorded before, if any (taken: the next boot will not
-/// see it again). Call once at boot.
+/// see it again). Call once at every boot (`iotkit::start` does): until the record is
+/// taken, later crashes are not recorded.
 pub fn boot() -> Boot {
     // SAFETY: only core 0 runs (iotkit never starts a second core), and nothing else touches
     // the record outside a crash.
