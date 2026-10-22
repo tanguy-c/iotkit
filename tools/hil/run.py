@@ -116,7 +116,9 @@ def main():
     if not os.path.exists(os.path.join(ROOT, "keys", "ota.key")):
         run(["cargo", "xtask", "keygen"])
     base = version_of(os.path.join(ROOT, "apps", "devkit", "Cargo.toml"))
-    env = {"CARGO_TARGET_DIR": os.path.join(ROOT, "target")}
+    # The update trees build apart from this one: cargo names workspace crates by their relative
+    # path, so a shared target dir lets either reuse the other's stale `iotkit`.
+    env = {"CARGO_TARGET_DIR": os.path.join(WORK, "target")}
 
     if not args.skip_flash:
         step(f"flash devkit {base} over USB")
