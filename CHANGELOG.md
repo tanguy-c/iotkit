@@ -11,6 +11,11 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   rolled back: the early rollback check moved from `start` into `init!`.
 - A crash before the boot reads the crash record no longer overwrites the one before it: of
   crashes in a row, the first is reported.
+- An update that runs but never gets healthy (it broke Wi-Fi or MQTT, say) is rolled back after
+  `IOTKIT_UPDATE_TIMEOUT` (30 minutes by default); before, only crashing ones were. A battery
+  device stays awake until its update is healthy or rolled back, instead of using up a trial boot
+  at each wake-up that missed the broker. `IOTKIT_UPDATE_TRIAL_BOOTS` sets the trial boots (3)
+  ([Updates](docs/src/updates.md#what-the-device-does)).
 
 ## 0.1.1 (2026-10-21)
 

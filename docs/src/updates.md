@@ -37,12 +37,27 @@ summary and keeps the running firmware.
 2. Streams the image into the spare slot; its header must name the same chip, product and
    version. A dropped connection resumes with an HTTP `Range` request.
 3. Checks the size and SHA-256, selects the slot and restarts.
-4. Gives the new firmware 3 trial boots to pass the health check: boot recorded, Wi-Fi up, broker
-   reached (each skipped when there is no network or broker to reach), and the app's own checks
-   (`Config::checks`, passed with `HEALTH.pass`). Then it keeps it.
-5. Otherwise switches back to the previous firmware by itself. An update that crashes before its
-   boots are counted is caught too, after more than 6 boots, by a counter in RTC memory (lost
-   when the power is cut).
+4. Runs the new firmware on trial until it passes the health check: boot recorded, Wi-Fi up,
+   broker reached (each skipped when there is no network or broker to reach), and the app's own
+   checks (`Config::checks`, passed with `HEALTH.pass`). Then it keeps it. A battery device stays
+   awake until then.
+5. Switches back to the previous firmware by itself if the new one crashes on each of its 3
+   trial boots, or is not healthy within 30 minutes of a trial boot. An update that crashes
+   before its boots are counted is caught too, after more than twice the trial boots, by a
+   counter in RTC memory (lost when the power is cut).
+
+Every app check must be able to pass within the timeout: a check that waits for something rare
+(an hourly reading, say) would roll back good updates. Both limits are set at build time, in the
+project's `.cargo/config.toml`:
+
+```toml
+[env]
+IOTKIT_UPDATE_TRIAL_BOOTS = "3"      # 1 to 10
+IOTKIT_UPDATE_TIMEOUT     = "1800"   # seconds a trial boot gets to be healthy, 60 to 86400
+```
+
+A longer timeout keeps a good update through a longer network outage; on a battery device it
+also means a longer wake in the worst case (about 50 mAh for 30 minutes of Wi-Fi).
 
 ## Keys and security
 

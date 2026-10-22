@@ -196,20 +196,20 @@ pub async fn boot(store: &SharedStore) -> BootAction {
     match action {
         BootAction::Normal => {}
         BootAction::Trial { boot } => {
-            log::info!("ota: trial boot {boot}/{} of {}", crate::ota::MAX_TRIAL_BOOTS, p.version());
+            log::info!(
+                "ota: trial boot {boot}/{} of {}, {} s to get healthy",
+                crate::ota::MAX_TRIAL_BOOTS,
+                p.version(),
+                crate::ota::UPDATE_TIMEOUT_S
+            );
+            TRIAL.store(true, Ordering::Release);
             if store.save(&Pending { boots: boot, ..p }).await.is_err() {
                 log::error!("ota: cannot count the trial boot");
             }
         }
         BootAction::RollBack { to } => {
             log::error!("ota: {} was not confirmed after {} boots, back to ota_{to}", p.version(), p.boots);
-            let switched = with(|flash| {
-                let layout = Layout::read(flash)?;
-                let mut ota = layout.ota(flash)?;
-                ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
-                ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)
-            });
-            if let Err(e) = switched {
+            if let Err(e) = switch_to(to) {
                 // Keep trying the update rather than loop on a failing switch.
                 log::error!("ota: rollback failed: {e}");
                 return action;
@@ -226,6 +226,45 @@ pub async fn boot(store: &SharedStore) -> BootAction {
         }
     }
     action
+}
+
+/// Selects slot `to`, as a firmware that works.
+fn switch_to(to: u8) -> Result<(), OtaError> {
+    with(|flash| {
+        let layout = Layout::read(flash)?;
+        let mut ota = layout.ota(flash)?;
+        ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
+        ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)
+    })
+}
+
+/// An update on trial: not confirmed yet (a deep-sleeping device does not sleep then).
+static TRIAL: AtomicBool = AtomicBool::new(false);
+
+/// Whether the running firmware is an update on trial (see [`boot`]).
+pub fn on_trial() -> bool {
+    TRIAL.load(Ordering::Acquire)
+}
+
+/// The update on trial was not healthy in time (`missing`: the checks not passed): goes back to
+/// the previous firmware and restarts. Returns if it cannot switch back.
+pub async fn give_up(store: &SharedStore, missing: u32) {
+    let mut store = store.lock().await;
+    let Some(p) = store.load::<Pending>().await.ok().flatten() else { return };
+    log::error!(
+        "ota: {} not healthy within {} s (checks missing: {missing:#x}), back to ota_{}",
+        p.version(),
+        crate::ota::UPDATE_TIMEOUT_S,
+        p.previous
+    );
+    if let Err(e) = switch_to(p.previous) {
+        log::error!("ota: rollback failed: {e}");
+        return;
+    }
+    let _ = store.remove::<Pending>().await;
+    let _ = store.save(&LastUpdate { outcome: Outcome::RolledBack, version: p.version }).await;
+    drop(store);
+    crate::diag::esp::restart().await
 }
 
 /// Whether otadata says the running firmware is an update not confirmed yet.
@@ -296,6 +335,7 @@ pub async fn confirm(store: &SharedStore) {
         let _ = store.save(&LastUpdate { outcome: Outcome::Confirmed, version: p.version }).await;
         log::info!("ota: {} confirmed", p.version());
     }
+    TRIAL.store(false, Ordering::Release);
 }
 
 static BUSY: AtomicBool = AtomicBool::new(false);

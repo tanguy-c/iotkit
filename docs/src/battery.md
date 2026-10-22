@@ -21,7 +21,9 @@ app.sleep().await   // sends the states, disconnects, sleeps `interval`
   received.
 - **Staying awake for maintenance** is the app's choice (`apps/sleepy` has a retained *Stay
   awake* switch). The device also stays awake while a setup window is open or an update installs,
-  so *Install* in Home Assistant works on a sleeping device: at its next wake-up.
+  so *Install* in Home Assistant works on a sleeping device: at its next wake-up. After an update
+  it stays awake until the new firmware is healthy, or rolled back after its
+  [timeout](updates.md#what-the-device-does).
 - **No broker:** if it is not reached within `max_awake`, the device sleeps 2, 4 then 8 times the
   interval, and after two failures forgets the access point and address.
 - **Wake reason:** `app.wake_reason` (`PowerOn`, `Timer`, `Pin`, `Other`); a pin armed with esp-hal's

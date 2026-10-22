@@ -182,7 +182,11 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         MAIN_WATCH.feed();
         ticker.next().await;
-        HEALTH.pass(RUNNING);
+        // Rollback test of the update timeout: a build with `DEVKIT_NEVER_HEALTHY=1` runs but never
+        // gets healthy.
+        if option_env!("DEVKIT_NEVER_HEALTHY").is_none() {
+            HEALTH.pass(RUNNING);
+        }
         if ticks.is_multiple_of(6) {
             info!("alive, up {} s", Instant::now().as_secs());
             UPTIME.set(Instant::now().as_secs() as f32);

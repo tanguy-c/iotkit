@@ -6,9 +6,11 @@
 //! ─► restart ─► trial boot 1..=MAX_TRIAL_BOOTS ─► healthy: confirm   (else: previous slot)
 //! ```
 //!
-//! Rollback does not rely on the bootloader: [`Pending`] in flash counts the trial boots, and
-//! the firmware switches back itself (so the image only has to reach `esp::boot`). A bootloader
-//! built with rollback works too.
+//! An update is rolled back when it crashes on each of its [`MAX_TRIAL_BOOTS`], or when a trial
+//! boot is not healthy within [`UPDATE_TIMEOUT_S`] (a deep-sleeping device stays awake until
+//! then). Rollback does not rely on the bootloader: [`Pending`] in flash counts the trial boots,
+//! and the firmware switches back itself (so the image only has to reach `esp::boot`). A
+//! bootloader built with rollback works too.
 
 #[cfg(esp_wifi)]
 pub mod esp;
@@ -17,8 +19,36 @@ use crate::config::{Setting, keys};
 use crate::image::Version;
 use serde::{Deserialize, Serialize};
 
-/// Boots an update gets to pass its health check before the previous slot comes back.
-pub const MAX_TRIAL_BOOTS: u8 = 3;
+/// Boots an update gets to pass its health check before the previous slot comes back:
+/// `IOTKIT_UPDATE_TRIAL_BOOTS` at build time (1 to 10), 3 by default.
+pub const MAX_TRIAL_BOOTS: u8 = match number(env!("IOTKIT_UPDATE_TRIAL_BOOTS")) {
+    Some(n @ 1..=10) => n as u8,
+    _ => panic!("IOTKIT_UPDATE_TRIAL_BOOTS: 1 to 10"),
+};
+
+/// Seconds a trial boot gets to pass the health check before the previous slot comes back:
+/// `IOTKIT_UPDATE_TIMEOUT` at build time (60 to 86400), 1800 by default.
+pub const UPDATE_TIMEOUT_S: u32 = match number(env!("IOTKIT_UPDATE_TIMEOUT")) {
+    Some(n @ 60..=86_400) => n,
+    _ => panic!("IOTKIT_UPDATE_TIMEOUT: 60 to 86400 seconds"),
+};
+
+/// A decimal number, for the build-time settings.
+const fn number(s: &str) -> Option<u32> {
+    let b = s.as_bytes();
+    if b.is_empty() || b.len() > 9 {
+        return None;
+    }
+    let (mut n, mut i) = (0, 0);
+    while i < b.len() {
+        match b[i] {
+            b'0'..=b'9' => n = n * 10 + (b[i] - b'0') as u32,
+            _ => return None,
+        }
+        i += 1;
+    }
+    Some(n)
+}
 
 /// An installed update waiting to be confirmed (in flash).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,12 +201,21 @@ mod tests {
     fn boot_policy() {
         assert_eq!(on_boot(None, Some(0)), BootAction::Normal);
         assert_eq!(on_boot(Some(&pending(0)), Some(1)), BootAction::Trial { boot: 1 });
-        assert_eq!(on_boot(Some(&pending(2)), Some(1)), BootAction::Trial { boot: 3 });
-        assert_eq!(on_boot(Some(&pending(3)), Some(1)), BootAction::RollBack { to: 0 });
+        let last = MAX_TRIAL_BOOTS;
+        assert_eq!(on_boot(Some(&pending(last - 1)), Some(1)), BootAction::Trial { boot: last });
+        assert_eq!(on_boot(Some(&pending(last)), Some(1)), BootAction::RollBack { to: 0 });
         assert_eq!(on_boot(Some(&pending(200)), Some(1)), BootAction::RollBack { to: 0 });
         // The bootloader is running the previous slot (its own rollback, or a USB flash).
         assert_eq!(on_boot(Some(&pending(1)), Some(0)), BootAction::Abandoned);
         assert_eq!(on_boot(Some(&pending(1)), None), BootAction::Abandoned);
+    }
+
+    #[test]
+    fn build_settings() {
+        assert_eq!(number("1800"), Some(1800));
+        for bad in ["", "-1", "1.5", "30m", "1234567890"] {
+            assert_eq!(number(bad), None, "{bad}");
+        }
     }
 
     #[test]

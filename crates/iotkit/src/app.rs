@@ -12,8 +12,9 @@ mod update;
 pub use sleep::{SleepConfig, SleepyApp, WakeReason, start_sleepy, wake_reason};
 
 use embassy_executor::Spawner;
+use embassy_futures::select::{Either, select};
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
 #[cfg(feature = "improv-ble")]
 use esp_hal::peripherals::BT;
 use esp_hal::{
@@ -482,9 +483,16 @@ async fn broker_check_task() {
     HEALTH.pass(BROKER);
 }
 
-/// Once healthy: the boot is stable, and an update just installed is kept.
+/// Once healthy: the boot is stable, and an update just installed is kept (rolled back if not
+/// healthy in time).
 #[embassy_executor::task]
 async fn supervisor_task(store: &'static SharedStore) {
+    if crate::ota::esp::on_trial() {
+        let deadline = Timer::after_secs(crate::ota::UPDATE_TIMEOUT_S.into());
+        if let Either::Second(()) = select(HEALTH.healthy(), deadline).await {
+            crate::ota::esp::give_up(store, HEALTH.missing()).await;
+        }
+    }
     HEALTH.healthy().await;
     crate::ota::esp::confirm(store).await;
     match BootStats::mark_stable(&mut *store.lock().await).await {
