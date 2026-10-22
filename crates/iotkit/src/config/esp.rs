@@ -45,7 +45,9 @@ pub fn init(flash: FLASH<'static>) {
 
 /// Runs `f` on the flash. Panics before [`init`], or if `f` uses the flash itself.
 pub fn with<R>(f: impl FnOnce(&mut FlashStorage<'static>) -> R) -> R {
-    with_slot(|slot| f(slot.as_mut().expect("crate::config::esp::init not called")))
+    with_slot(|slot| {
+        f(slot.as_mut().expect("the flash is not set up: call iotkit::init! (or iotkit::config::esp::init)"))
+    })
 }
 
 fn with_slot<R>(f: impl FnOnce(&mut Option<FlashStorage<'static>>) -> R) -> R {

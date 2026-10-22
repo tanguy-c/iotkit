@@ -37,14 +37,7 @@ async fn main(spawner: Spawner) -> ! {
     let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();
     let celsius = tsens.get_temperature().to_celsius();
 
-    let board = Board {
-        flash: p.FLASH,
-        wifi: p.WIFI,
-        bt: p.BT,
-        timg1: p.TIMG1,
-        usb: p.USB_DEVICE,
-        boot_button: Some(p.GPIO9.into()),
-    };
+    let board = Board { wifi: p.WIFI, bt: p.BT, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: Some(p.GPIO9.into()) };
     let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;
     TEMPERATURE.set((celsius * 10.0 + 0.5f32.copysign(celsius)) as i32 as f32 / 10.0);
     WAKEUPS.set(app.boots as f32);

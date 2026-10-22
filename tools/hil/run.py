@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hardware-in-the-loop test on an ESP32-C6 DevKit: flash devkit over USB, wait until healthy,
-push a newer version over OTA and check it is kept, push one that never gets healthy and check
-the device rolls back by itself.
+push a newer version over OTA and check it is kept, push one that never gets healthy and one that
+crashes before `iotkit::start`, and check the device rolls back by itself each time.
 
 Usage (from the repository root): tools/hil/run.py [--port /dev/ttyACM0] [--skip-flash]
 Needs: espflash, pyserial, the device's Wi-Fi and broker given at build time (WIFI_SSID,
@@ -167,6 +167,22 @@ def main():
                  f"{good} and the failed update {bad}:\n" + console.seen.decode(errors="replace")[-2000:])
     console.close()
     print(f"ok: {bad} rolled back to {good} ({info.group(3).decode()})")
+
+    early = next_patch(base, 3)
+    step(f"OTA push {early}, which panics before `iotkit::start`: the early guard rolls back to {good}")
+    tree = tree_with_version("early", early)
+    pushed = run(["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
+                  "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"],
+                 cwd=tree, env={**env, "DEVKIT_PANIC_EARLY": "1"}, check=False)
+    if "rolled back" not in pushed.stdout + pushed.stderr:
+        sys.exit("FAIL: push did not report a rollback:\n" + pushed.stdout[-2000:] + pushed.stderr[-2000:])
+    console = Console(wait_port())
+    info = console.command("info", r"devkit (\S+), up[\s\S]*?last update: (\S+) (\S+)", timeout=10)
+    if not info or info.group(1).decode() != good or info.group(2).decode() != early:
+        sys.exit("FAIL: after the early rollback `info` should report devkit "
+                 f"{good} and the failed update {early}:\n" + console.seen.decode(errors="replace")[-2000:])
+    console.close()
+    print(f"ok: {early} rolled back to {good} by the early guard")
 
     print("\nPASS")
 

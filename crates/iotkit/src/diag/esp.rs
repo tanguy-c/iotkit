@@ -127,7 +127,7 @@ pub async fn restart() -> ! {
     software_reset()
 }
 
-/// Records `crash` for the next boot and restarts.
+/// Records `crash` for the next boot (unless an earlier one is still there) and restarts.
 pub fn restart_with(crash: &Crash) -> ! {
     // SAFETY: see `boot`; we do not return.
     unsafe { rtc::store(&mut *record(), crash) };

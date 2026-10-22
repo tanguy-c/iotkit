@@ -36,7 +36,6 @@ async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
 
     let board = Board {
-        flash: p.FLASH,
         wifi: p.WIFI,
 {% if chip == "esp32" %}        timg1: p.TIMG1,
         uart: p.UART0,

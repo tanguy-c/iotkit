@@ -111,6 +111,25 @@ pub fn on_boot(pending: Option<&Pending>, booted_slot: Option<u8>) -> BootAction
     }
 }
 
+/// Boots of an unconfirmed update the early guard allows: [`on_boot`] rolls back on the 4th
+/// boot it counts, so past this the update never reached it.
+#[cfg(any(esp_wifi, test))]
+pub(crate) const EARLY_LIMIT: u32 = 2 * MAX_TRIAL_BOOTS as u32;
+/// Marks [`early_check`]'s counter as set (RTC memory holds garbage after a power cut).
+#[cfg(any(esp_wifi, test))]
+pub(crate) const EARLY_MAGIC: u32 = 0x07a0_ea71;
+
+/// The early guard's decision, from whether the running firmware is unconfirmed and the boot
+/// counter in RTC memory (magic, count): the counter to keep, and whether to roll back.
+#[cfg(any(esp_wifi, test))]
+pub(crate) fn early_check(unconfirmed: bool, counter: [u32; 2]) -> ([u32; 2], bool) {
+    if !unconfirmed {
+        return ([0; 2], false);
+    }
+    let boots = if counter[0] == EARLY_MAGIC { counter[1].saturating_add(1) } else { 1 };
+    ([EARLY_MAGIC, boots], boots > EARLY_LIMIT)
+}
+
 #[doc(hidden)]
 pub const fn __version(s: &str) -> Option<Version> {
     // const-friendly `major.minor.patch` parser, for `firmware!`.
@@ -186,6 +205,29 @@ mod tests {
             }
         }
         assert_eq!(boots, MAX_TRIAL_BOOTS);
+    }
+
+    #[test]
+    fn early_guard_counts_only_unconfirmed_boots() {
+        assert_eq!(early_check(false, [EARLY_MAGIC, 5]), ([0; 2], false));
+        // After a power cut the counter is garbage: start over.
+        assert_eq!(early_check(true, [0xdead_beef, 5]), ([EARLY_MAGIC, 1], false));
+        assert_eq!(early_check(true, [EARLY_MAGIC, u32::MAX]), ([EARLY_MAGIC, u32::MAX], true));
+    }
+
+    #[test]
+    fn an_update_crashing_before_its_trial_boots_rolls_back() {
+        let mut counter = [0; 2];
+        let mut rolled_back_at = None;
+        for boot in 1..=EARLY_LIMIT + 1 {
+            let (next, roll_back) = early_check(true, counter);
+            counter = next;
+            if roll_back {
+                rolled_back_at = Some(boot);
+                break;
+            }
+        }
+        assert_eq!(rolled_back_at, Some(EARLY_LIMIT + 1));
     }
 }
 

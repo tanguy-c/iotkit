@@ -82,14 +82,7 @@ async fn light_task(led: Led) {
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
 
-    let board = Board {
-        flash: p.FLASH,
-        wifi: p.WIFI,
-        bt: p.BT,
-        timg1: p.TIMG1,
-        usb: p.USB_DEVICE,
-        boot_button: Some(p.GPIO9.into()),
-    };
+    let board = Board { wifi: p.WIFI, bt: p.BT, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: Some(p.GPIO9.into()) };
     iotkit::start(spawner, board, &CONFIG).await;
 
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();

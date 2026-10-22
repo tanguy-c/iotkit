@@ -303,8 +303,6 @@ pub async fn start_sleepy(
         HEALTH.require(check);
     }
 
-    crate::config::esp::init(board.flash);
-    crate::ota::esp::early_guard();
     static STORE: StaticCell<SharedStore> = StaticCell::new();
     let store = match crate::config::esp::open().await {
         Ok(store) => &*STORE.init(Mutex::new(store)),

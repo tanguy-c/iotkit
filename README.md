@@ -16,7 +16,7 @@ static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY)).entities(&[&PUM
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
-    iotkit::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
+    iotkit::start(spawner, Board { wifi: p.WIFI, .. }, &CONFIG).await;
     spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default())).unwrap());
     // ...
 }

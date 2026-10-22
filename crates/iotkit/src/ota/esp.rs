@@ -24,13 +24,14 @@ use esp_bootloader_esp_idf::{
         read_partition_table,
     },
 };
+use esp_println::println;
 use esp_storage::FlashStorage;
 use heapless::String;
 
 use crate::ota::{
     BootAction, LastUpdate, Outcome, Pending,
     atomic::{AtomicBool, Ordering},
-    on_boot,
+    early_check, on_boot,
 };
 
 /// The chip this firmware runs on, as the image header names it.
@@ -143,7 +144,7 @@ struct Layout {
 }
 
 impl Layout {
-    fn read(flash: &mut FlashStorage<'static>) -> Result<Self, OtaError> {
+    fn read(flash: &mut FlashStorage<'_>) -> Result<Self, OtaError> {
         let mut buf = [0; PARTITION_TABLE_MAX_LEN];
         let table = read_partition_table(flash, &mut buf).map_err(|_| OtaError::NoSlots)?;
         let otadata = table
@@ -161,7 +162,7 @@ impl Layout {
         Ok(Self { otadata, slots, booted, target, target_offset: entry.offset(), target_len: entry.len() })
     }
 
-    fn ota<'a>(&self, flash: &'a mut FlashStorage<'static>) -> Result<Ota<'a, 'static>, OtaError> {
+    fn ota<'a, 'd>(&self, flash: &'a mut FlashStorage<'d>) -> Result<Ota<'a, 'd>, OtaError> {
         Ota::new(self.otadata.as_flash_region(flash), self.slots).map_err(|_| OtaError::Flash)
     }
 }
@@ -228,36 +229,30 @@ pub async fn boot(store: &SharedStore) -> BootAction {
 }
 
 /// Whether otadata says the running firmware is an update not confirmed yet.
-fn unconfirmed(ota: &mut Ota<'_, 'static>) -> bool {
+fn unconfirmed(ota: &mut Ota<'_, '_>) -> bool {
     matches!(ota.current_ota_state(), Ok(OtaImageState::New | OtaImageState::PendingVerify))
 }
 
 /// Boots of an unconfirmed firmware, counted in RTC memory (kept across resets, not power
-/// loss): magic, count.
+/// loss): see [`early_check`].
 #[esp_hal::ram(unstable(rtc_fast, persistent))]
 static mut EARLY: [u32; 2] = [0; 2];
-const EARLY_MAGIC: u32 = 0x07a0_ea71;
-/// [`boot`] rolls back on the 4th boot of an unconfirmed update; past this, it never ran.
-const EARLY_LIMIT: u32 = 2 * crate::ota::MAX_TRIAL_BOOTS as u32;
 
-/// Call right after `crate::config::esp::init`, before anything that can fail. Counts the boots
-/// of an unconfirmed update in RTC memory, and goes back to the previous firmware when they
-/// pass twice the trial boots: an update that crashes before reaching [`boot`] (which counts
-/// them in flash) is rolled back too.
+/// Run by [`init!`](crate::init) right after `esp_hal::init` and `crate::config::esp::init`,
+/// before the heap, the RTOS and the app, so little can crash before it (the logger is not up:
+/// it prints). Counts the boots of an unconfirmed update in RTC memory, and goes back to the
+/// previous firmware past twice the trial boots: an update that crashes before reaching [`boot`]
+/// (which counts them in flash) is rolled back too.
 pub fn early_guard() {
-    let checked = with(|flash| {
+    fn check(flash: &mut FlashStorage<'_>) -> Result<Option<(u8, u32)>, OtaError> {
         let layout = Layout::read(flash)?;
         let mut ota = layout.ota(flash)?;
         let early: *mut [u32; 2] = &raw mut EARLY;
         // SAFETY: core 0 only, at boot, and nothing else touches it.
         let early = unsafe { &mut *early };
-        if !unconfirmed(&mut ota) {
-            *early = [0; 2];
-            return Ok(None);
-        }
-        let boots = if early[0] == EARLY_MAGIC { early[1].saturating_add(1) } else { 1 };
-        *early = [EARLY_MAGIC, boots];
-        if boots <= EARLY_LIMIT {
+        let (counter, roll_back) = early_check(unconfirmed(&mut ota), *early);
+        *early = counter;
+        if !roll_back {
             return Ok(None);
         }
         let booted = layout.booted.ok_or(OtaError::NoSlots)?;
@@ -265,15 +260,15 @@ pub fn early_guard() {
         ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
         ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)?;
         *early = [0; 2];
-        Ok(Some((to, boots)))
-    });
-    match checked {
+        Ok(Some((to, counter[1])))
+    }
+    match with(check) {
         Ok(Some((to, boots))) => {
-            log::error!("ota: unconfirmed firmware booted {boots} times without counting them, back to ota_{to}");
+            println!("ota: unconfirmed firmware booted {boots} times without counting them, back to ota_{to}");
             esp_hal::system::software_reset();
         }
         Ok(None) | Err(OtaError::NoSlots) => {}
-        Err(e) => log::warn!("ota: early check: {e}"),
+        Err(e) => println!("ota: early check: {e}"),
     }
 }
 

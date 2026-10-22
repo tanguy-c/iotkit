@@ -193,8 +193,12 @@ pub mod rtc {
             .fold(0x811c_9dc5, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
     }
 
-    /// Writes `crash` into `record`.
+    /// Writes `crash` into `record`, unless it holds a crash not taken yet: of crashes in a row
+    /// before the boot takes the record (in `init!`, say), the first is kept.
     pub fn store(record: &mut Record, crash: &Crash) {
+        if read(record).is_some() {
+            return;
+        }
         let kind = match crash.kind {
             CrashKind::Panic => 0,
             CrashKind::Watchdog => 1,
@@ -266,6 +270,16 @@ mod tests {
         assert_eq!(rtc::take(&mut record), Some(crash()));
         // Taken once only.
         assert_eq!(rtc::take(&mut record), None);
+    }
+
+    #[test]
+    fn rtc_keeps_the_crash_not_taken_yet() {
+        let mut record = [0; rtc::WORDS];
+        rtc::store(&mut record, &crash());
+        rtc::store(&mut record, &Crash::new(CrashKind::Watchdog, 1));
+        assert_eq!(rtc::take(&mut record), Some(crash()));
+        rtc::store(&mut record, &Crash::new(CrashKind::Watchdog, 1));
+        assert_eq!(rtc::take(&mut record), Some(Crash::new(CrashKind::Watchdog, 1)));
     }
 
     #[test]

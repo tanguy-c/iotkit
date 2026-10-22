@@ -331,7 +331,6 @@ async fn main(spawner: Spawner) -> ! {{
         s,
         "
     let board = Board {{
-        flash: p.FLASH,
         wifi: p.WIFI,
 {}        boot_button: Some(p.GPIO{}.into()),
     }};

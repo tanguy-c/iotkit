@@ -1,6 +1,16 @@
 # Changelog
 
-The API and the settings' flash layout may still change before 1.0.
+The API and the settings' flash layout may still change before 1.0. Breaking changes come with
+the steps to apply them in [Upgrading](docs/src/upgrading.md).
+
+## Unreleased
+
+- **Breaking:** `Board` has no `flash` field: `init!` takes the flash, and `start` needs `init!`
+  ([Upgrading](docs/src/upgrading.md)).
+- An update that crashes right after `init!` (before the heap, the RTOS or the app start) is
+  rolled back: the early rollback check moved from `start` into `init!`.
+- A crash before the boot reads the crash record no longer overwrites the one before it: of
+  crashes in a row, the first is reported.
 
 ## 0.1.1 (2026-10-21)
 

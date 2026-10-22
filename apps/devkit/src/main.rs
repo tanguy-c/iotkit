@@ -142,9 +142,13 @@ fn console_command(cmd: &str) -> bool {
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
+    // Rollback test of the early guard: a build with `DEVKIT_PANIC_EARLY=1` crashes before
+    // `iotkit::start` can count its trial boots.
+    if option_env!("DEVKIT_PANIC_EARLY").is_some() {
+        panic!("DEVKIT_PANIC_EARLY is set");
+    }
 
     let board = Board {
-        flash: p.FLASH,
         wifi: p.WIFI,
         #[cfg(not(feature = "esp32"))]
         bt: p.BT,

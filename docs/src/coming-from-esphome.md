@@ -47,7 +47,7 @@ static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY)).entities(&[&PUM
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
-    let board = Board { flash: p.FLASH, wifi: p.WIFI, bt: p.BT, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: Some(p.GPIO9.into()) };
+    let board = Board { wifi: p.WIFI, bt: p.BT, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: Some(p.GPIO9.into()) };
     iotkit::start(spawner, board, &CONFIG).await;
 
     spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default())).unwrap());
