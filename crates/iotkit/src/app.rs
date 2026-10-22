@@ -307,7 +307,7 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
     };
     // After the boot is recorded (a crashing update still counts its crashes): may switch back
     // to the previous firmware and restart.
-    crate::ota::esp::boot(store).await;
+    crate::ota::esp::boot(store, fw.version).await;
 
     spawn(spawner, crate::diag::esp::watchdog_task(TimerGroup::new(board.timg1).wdt, config.watches));
 
@@ -330,7 +330,7 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
             None
         }
     };
-    spawn(spawner, supervisor_task(store));
+    spawn(spawner, supervisor_task(store, fw.version));
     if let Some(pin) = board.boot_button {
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
         spawn(spawner, crate::provision::esp::button_task(button, store));
@@ -486,11 +486,11 @@ async fn broker_check_task() {
 /// Once healthy: the boot is stable, and an update just installed is kept (rolled back if not
 /// healthy in time).
 #[embassy_executor::task]
-async fn supervisor_task(store: &'static SharedStore) {
+async fn supervisor_task(store: &'static SharedStore, version: crate::image::Version) {
     if crate::ota::esp::on_trial() {
         let deadline = Timer::after_secs(crate::ota::UPDATE_TIMEOUT_S.into());
         if let Either::Second(()) = select(HEALTH.healthy(), deadline).await {
-            crate::ota::esp::give_up(store, HEALTH.missing()).await;
+            crate::ota::esp::give_up(store, HEALTH.missing(), version).await;
         }
     }
     HEALTH.healthy().await;

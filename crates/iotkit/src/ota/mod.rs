@@ -141,8 +141,8 @@ pub fn on_boot(pending: Option<&Pending>, booted_slot: Option<u8>) -> BootAction
     }
 }
 
-/// Boots of an unconfirmed update the early guard allows: [`on_boot`] rolls back on the 4th
-/// boot it counts, so past this the update never reached it.
+/// Boots of an unconfirmed update the early guard allows: [`on_boot`] rolls back on boot
+/// `MAX_TRIAL_BOOTS + 1`, so past this the update never reached it.
 #[cfg(any(esp_wifi, test))]
 pub(crate) const EARLY_LIMIT: u32 = 2 * MAX_TRIAL_BOOTS as u32;
 /// Marks [`early_check`]'s counter as set (RTC memory holds garbage after a power cut).

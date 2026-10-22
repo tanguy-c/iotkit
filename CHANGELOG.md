@@ -15,7 +15,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   `IOTKIT_UPDATE_TIMEOUT` (30 minutes by default); before, only crashing ones were. A battery
   device stays awake until its update is healthy or rolled back, instead of using up a trial boot
   at each wake-up that missed the broker. `IOTKIT_UPDATE_TRIAL_BOOTS` sets the trial boots (3)
-  ([Updates](docs/src/updates.md#what-the-device-does)).
+  ([Updates](docs/src/updates.md#what-the-device-does)). An outage of the access point or broker
+  longer than the timeout rolls a good update back too. While an update is on trial, another
+  install is refused (its spare slot holds the firmware to go back to).
 
 ## 0.1.1 (2026-10-21)
 

@@ -40,7 +40,8 @@ summary and keeps the running firmware.
 4. Runs the new firmware on trial until it passes the health check: boot recorded, Wi-Fi up,
    broker reached (each skipped when there is no network or broker to reach), and the app's own
    checks (`Config::checks`, passed with `HEALTH.pass`). Then it keeps it. A battery device stays
-   awake until then.
+   awake until then, and another install is refused: the spare slot holds the firmware to go
+   back to.
 5. Switches back to the previous firmware by itself if the new one crashes on each of its 3
    trial boots, or is not healthy within 30 minutes of a trial boot. An update that crashes
    before its boots are counted is caught too, after more than twice the trial boots, by a
@@ -56,8 +57,11 @@ IOTKIT_UPDATE_TRIAL_BOOTS = "3"      # 1 to 10
 IOTKIT_UPDATE_TIMEOUT     = "1800"   # seconds a trial boot gets to be healthy, 60 to 86400
 ```
 
-A longer timeout keeps a good update through a longer network outage; on a battery device it
-also means a longer wake in the worst case (about 50 mAh for 30 minutes of Wi-Fi).
+The timeout cannot tell a broken update from an outage: if the access point or the broker is down
+for longer than the timeout during a trial, a good update is rolled back too (`info` and Home
+Assistant report it rolled back; install it again once they are back). A longer timeout keeps a
+good update through a longer outage; on a battery device it also means a longer wake in the
+worst case (about 50 mAh for 30 minutes of Wi-Fi).
 
 ## Keys and security
 

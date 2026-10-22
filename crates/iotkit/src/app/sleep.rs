@@ -329,7 +329,7 @@ pub async fn start_sleepy(
             }
         }
     };
-    crate::ota::esp::boot(store).await;
+    crate::ota::esp::boot(store, fw.version).await;
     spawn(spawner, crate::diag::esp::watchdog_task(TimerGroup::new(board.timg1).wdt, config.watches));
 
     let credentials = crate::net::esp::credentials(store).await;
@@ -354,7 +354,7 @@ pub async fn start_sleepy(
             None
         }
     };
-    spawn(spawner, supervisor_task(store));
+    spawn(spawner, supervisor_task(store, fw.version));
     spawn(spawner, awake_guard_task(sleep));
     if let Some(pin) = board.boot_button {
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
