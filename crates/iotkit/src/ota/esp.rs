@@ -257,12 +257,12 @@ pub fn on_trial() -> bool {
     TRIAL.load(Ordering::Acquire)
 }
 
-/// The update on trial (`version`, this firmware) was not healthy in time (`missing`: the
-/// checks not passed): goes back to the previous firmware and restarts. If it cannot, it
+/// The update on trial (`version`, this firmware) was not healthy within `timeout_s` (`missing`:
+/// the checks not passed): goes back to the previous firmware and restarts. If it cannot, it
 /// restarts still on trial: the boot counters ([`boot`], [`early_guard`]) roll back from there.
-pub async fn give_up(store: &SharedStore, missing: u32, version: Version) -> ! {
+pub async fn give_up(store: &SharedStore, missing: u32, version: Version, timeout_s: u32) -> ! {
     let mut store = store.lock().await;
-    log::error!("ota: {version} not healthy within {} s (checks missing: {missing:#x})", crate::ota::UPDATE_TIMEOUT_S);
+    log::error!("ota: {version} not healthy within {timeout_s} s (checks missing: {missing:#x})");
     // Its record is gone (the trial boot could not be saved, say): otadata knows the slots.
     let to = match store.load::<Pending>().await.ok().flatten() {
         Some(p) => Ok(p.previous),

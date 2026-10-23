@@ -28,6 +28,7 @@ use esp_hal::{peripherals::UART0, uart::Uart};
 use esp_hal::{peripherals::USB_DEVICE, usb::usb_serial_jtag::UsbSerialJtag};
 use log::{error, info, warn};
 
+use crate::atomic::{AtomicBool, Ordering};
 use crate::{BootStats, Check, Device, Entity, Firmware, Health, Net, Setting, SharedStore, TaskWatch};
 use static_cell::StaticCell;
 
@@ -325,8 +326,7 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
         Ok(net) => Some(start_services(spawner, net, store, bt, config, credentials.is_none()).await),
         Err(e) => {
             error!("Wi-Fi: {e:?}");
-            HEALTH.pass(NETWORK);
-            HEALTH.pass(BROKER);
+            radio_failed();
             None
         }
     };
@@ -483,14 +483,30 @@ async fn broker_check_task() {
     HEALTH.pass(BROKER);
 }
 
+/// Wi-Fi did not start: [`supervisor_task`] gives up an update on trial at once.
+static NO_RADIO: AtomicBool = AtomicBool::new(false);
+
+/// Wi-Fi did not start: its checks cannot pass, so they are skipped. Not for an update on trial:
+/// the previous firmware had a radio (it received the update), and this one, kept, could not be
+/// updated again but over USB.
+fn radio_failed() {
+    if crate::ota::esp::on_trial() {
+        error!("ota: the update cannot start Wi-Fi, back to the previous firmware");
+        NO_RADIO.store(true, Ordering::Release);
+        return;
+    }
+    HEALTH.pass(NETWORK);
+    HEALTH.pass(BROKER);
+}
+
 /// Once healthy: the boot is stable, and an update just installed is kept (rolled back if not
 /// healthy in time).
 #[embassy_executor::task]
 async fn supervisor_task(store: &'static SharedStore, version: crate::image::Version) {
     if crate::ota::esp::on_trial() {
-        let deadline = Timer::after_secs(crate::ota::UPDATE_TIMEOUT_S.into());
-        if let Either::Second(()) = select(HEALTH.healthy(), deadline).await {
-            crate::ota::esp::give_up(store, HEALTH.missing(), version).await;
+        let timeout = if NO_RADIO.load(Ordering::Acquire) { 0 } else { crate::ota::UPDATE_TIMEOUT_S };
+        if let Either::Second(()) = select(HEALTH.healthy(), Timer::after_secs(timeout.into())).await {
+            crate::ota::esp::give_up(store, HEALTH.missing(), version, timeout).await;
         }
     }
     HEALTH.healthy().await;

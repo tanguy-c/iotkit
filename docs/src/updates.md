@@ -43,7 +43,8 @@ summary and keeps the running firmware.
    awake until then, and another install is refused: the spare slot holds the firmware to go
    back to.
 5. Switches back to the previous firmware by itself if the new one crashes on each of its 3
-   trial boots, or is not healthy within 30 minutes of a trial boot. An update that crashes
+   trial boots, or is not healthy within 30 minutes of a trial boot, or cannot start Wi-Fi at
+   all (at once: it could not be updated again but over USB). An update that crashes
    before its boots are counted is caught too, after more than twice the trial boots, by a
    counter in RTC memory (lost when the power is cut).
 

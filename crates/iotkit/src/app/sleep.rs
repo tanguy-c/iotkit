@@ -40,7 +40,7 @@ use log::{error, info, warn};
 use static_cell::StaticCell;
 
 use super::{
-    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, network_check_task, spawn,
+    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, network_check_task, radio_failed, spawn,
     supervisor_task,
 };
 
@@ -349,8 +349,7 @@ pub async fn start_sleepy(
         }
         Err(e) => {
             error!("Wi-Fi: {e:?}");
-            HEALTH.pass(NETWORK);
-            HEALTH.pass(BROKER);
+            radio_failed();
             None
         }
     };

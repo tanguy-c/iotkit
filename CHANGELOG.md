@@ -17,7 +17,8 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   at each wake-up that missed the broker. `IOTKIT_UPDATE_TRIAL_BOOTS` sets the trial boots (3)
   ([Updates](docs/src/updates.md#what-the-device-does)). An outage of the access point or broker
   longer than the timeout rolls a good update back too. While an update is on trial, another
-  install is refused (its spare slot holds the firmware to go back to).
+  install is refused (its spare slot holds the firmware to go back to). An update that cannot
+  start Wi-Fi at all is rolled back at once; before, it was kept, unreachable but over USB.
 
 ## 0.1.1 (2026-10-21)
 
