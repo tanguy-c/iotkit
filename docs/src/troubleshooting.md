@@ -8,7 +8,7 @@
 | Build fails: "No OTA key" or "no signing key" | `cargo iotkit keygen` |
 | `ota push`: name not resolved | Use the device's address (`net` on the console) |
 | `ota push`: connection timed out | The device is not on Wi-Fi yet, or on another network |
-| Update refused | Another signing key, product or chip; a version not newer, or the running one older than `--min-version`; an image too big for the slot |
+| Update refused | Another signing key, product or chip; a version not newer, or the running one older than `--min-version`; an image too big for the slot; "on trial": the last update is not healthy yet, wait for it to be kept or rolled back |
 | Device keeps rolling back | The health check never passes: read the log over USB |
 | Setup page cannot join | Wrong password or a 5 GHz-only network; some phone hotspots refuse for a minute after a wrong password |
 | MQTT keeps reconnecting | Broker address (`mqtt` on the console), login, or a weak Wi-Fi signal |

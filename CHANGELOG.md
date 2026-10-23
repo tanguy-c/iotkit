@@ -1,6 +1,24 @@
 # Changelog
 
-The API and the settings' flash layout may still change before 1.0.
+The API and the settings' flash layout may still change before 1.0. Breaking changes come with
+the steps to apply them in [Upgrading](docs/src/upgrading.md).
+
+## Unreleased
+
+- **Breaking:** `Board` has no `flash` field: `init!` takes the flash, and `start` needs `init!`
+  ([Upgrading](docs/src/upgrading.md)).
+- An update that crashes right after `init!` (before the heap, the RTOS or the app start) is
+  rolled back: the early rollback check moved from `start` into `init!`.
+- A crash before the boot reads the crash record no longer overwrites the one before it: of
+  crashes in a row, the first is reported.
+- An update that runs but never gets healthy (it broke Wi-Fi or MQTT, say) is rolled back after
+  `IOTKIT_UPDATE_TIMEOUT` (30 minutes by default); before, only crashing ones were. A battery
+  device stays awake until its update is healthy or rolled back, instead of using up a trial boot
+  at each wake-up that missed the broker. `IOTKIT_UPDATE_TRIAL_BOOTS` sets the trial boots (3)
+  ([Updates](docs/src/updates.md#what-the-device-does)). An outage of the access point or broker
+  longer than the timeout rolls a good update back too. While an update is on trial, another
+  install is refused (its spare slot holds the firmware to go back to). An update that cannot
+  start Wi-Fi at all is rolled back at once; before, it was kept, unreachable but over USB.
 
 ## 0.1.1 (2026-10-21)
 

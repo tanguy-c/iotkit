@@ -30,7 +30,8 @@ fn uptime_s() -> u32 {
 }
 
 /// Why the chip restarted, and the crash recorded before, if any (taken: the next boot will not
-/// see it again). Call once at boot.
+/// see it again). Call once at every boot (`iotkit::start` does): until the record is
+/// taken, later crashes are not recorded.
 pub fn boot() -> Boot {
     // SAFETY: only core 0 runs (iotkit never starts a second core), and nothing else touches
     // the record outside a crash.
@@ -127,7 +128,7 @@ pub async fn restart() -> ! {
     software_reset()
 }
 
-/// Records `crash` for the next boot and restarts.
+/// Records `crash` for the next boot (unless an earlier one is still there) and restarts.
 pub fn restart_with(crash: &Crash) -> ! {
     // SAFETY: see `boot`; we do not return.
     unsafe { rtc::store(&mut *record(), crash) };

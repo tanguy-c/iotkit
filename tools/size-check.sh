@@ -18,11 +18,12 @@ git worktree add -q --detach "$wt" "$base"
 mkdir -p "$wt/keys" && cp keys/ota.pub keys/ota.key "$wt/keys/"
 [ ! -f .cargo/secrets.toml ] || cp .cargo/secrets.toml "$wt/.cargo/"
 
-# One target dir for both trees: the dependencies build once.
-build() { # tree output cargo-args (-p app first)
-    tree=$1 elf=$2; shift 2
-    (cd "$tree" && CARGO_TARGET_DIR="$root/target" cargo build --quiet --release "$@")
-    cp "$root/target/riscv32imac-unknown-none-elf/release/$2" "$elf"
+# A target dir per tree: cargo names workspace crates by their relative path, so a shared one
+# reuses the other tree's `iotkit` when its files look older. The base's stays for later runs.
+build() { # tree target-dir output cargo-args (-p app first)
+    tree=$1 target=$2 elf=$3; shift 3
+    (cd "$tree" && CARGO_TARGET_DIR="$target" cargo build --quiet --release "$@")
+    cp "$target/riscv32imac-unknown-none-elf/release/$2" "$elf"
 }
 # Symbol sizes by name (same-named locals summed; no `$d`/`.L` assembler labels).
 syms() { nm -S -t d --size-sort -C "$1" | awk '$4 !~ /^[$.]/ { n = $4; for (i = 5; i <= NF; i++) n = n " " $i; s[n] += $2 } END { for (n in s) print s[n] "\t" n }'; }
@@ -31,8 +32,8 @@ grew=0
 for cfg in "devkit -p devkit" "devkit-matter -p devkit --features matter-wifi" "thread-light -p thread-light"; do
     set -- $cfg; name=$1; shift
     b=$out/$name.base h=$out/$name.head
-    build "$wt" "$b" "$@"
-    build "$root" "$h" "$@"
+    build "$wt" "$out/target" "$b" "$@"
+    build "$root" "$root/target" "$h" "$@"
     echo "== $name: $(git rev-parse --short "$base") -> working tree (section, size, delta)"
     size -A "$b" >"$b.size"; size -A "$h" >"$h.size"
     awk 'NR == FNR { s[$1] = $2; next } /^\./ && !/^\.(debug|comment|riscv)/ { d = $2 - s[$1]

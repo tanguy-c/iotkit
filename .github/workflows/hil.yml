@@ -1,6 +1,7 @@
 name: Hardware
 
-# tools/hil/run.py on a real ESP32-C6 DevKit: flash, healthy, OTA push kept, OTA rollback.
+# tools/hil/run.py on a real ESP32-C6 DevKit: flash, healthy, OTA push kept, OTA rollback (after
+# its trial boots, by the early guard, and after the update timeout).
 # Needs a self-hosted runner labelled `iotkit-c6` with the board on USB (espflash, pyserial,
 # Rust targets installed), on the network the secrets below name, with a broker reachable there.
 on:

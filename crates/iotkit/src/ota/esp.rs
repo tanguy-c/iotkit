@@ -3,7 +3,7 @@
 
 use core::fmt::{self, Write as _};
 
-use crate::config::esp::{SharedStore, with};
+use crate::config::esp::{EspStore, SharedStore, with};
 use crate::image::{Digest, Manifest, PublicKey, Sha256, Version, app};
 use crate::net::{
     esp::{GetError, Net, Sink, get, get_from},
@@ -24,13 +24,14 @@ use esp_bootloader_esp_idf::{
         read_partition_table,
     },
 };
+use esp_println::println;
 use esp_storage::FlashStorage;
 use heapless::String;
 
 use crate::ota::{
     BootAction, LastUpdate, Outcome, Pending,
     atomic::{AtomicBool, Ordering},
-    on_boot,
+    early_check, on_boot,
 };
 
 /// The chip this firmware runs on, as the image header names it.
@@ -88,7 +89,8 @@ macro_rules! firmware {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Why an update failed.
 pub enum OtaError {
-    /// Another update is running.
+    /// Another update is running, or the running one is on trial (its spare slot holds the
+    /// firmware to go back to).
     Busy,
     /// No `otadata` and two OTA app partitions, or the running app is not in one.
     NoSlots,
@@ -107,7 +109,7 @@ pub enum OtaError {
 impl fmt::Display for OtaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OtaError::Busy => f.write_str("an update is already running"),
+            OtaError::Busy => f.write_str("an update is running or on trial"),
             OtaError::NoSlots => f.write_str("no OTA partitions (see partitions.csv)"),
             OtaError::Download(e) => write!(f, "download failed: {e:?}"),
             OtaError::Manifest(e) => write!(f, "manifest: {e}"),
@@ -143,7 +145,7 @@ struct Layout {
 }
 
 impl Layout {
-    fn read(flash: &mut FlashStorage<'static>) -> Result<Self, OtaError> {
+    fn read(flash: &mut FlashStorage<'_>) -> Result<Self, OtaError> {
         let mut buf = [0; PARTITION_TABLE_MAX_LEN];
         let table = read_partition_table(flash, &mut buf).map_err(|_| OtaError::NoSlots)?;
         let otadata = table
@@ -161,7 +163,7 @@ impl Layout {
         Ok(Self { otadata, slots, booted, target, target_offset: entry.offset(), target_len: entry.len() })
     }
 
-    fn ota<'a>(&self, flash: &'a mut FlashStorage<'static>) -> Result<Ota<'a, 'static>, OtaError> {
+    fn ota<'a, 'd>(&self, flash: &'a mut FlashStorage<'d>) -> Result<Ota<'a, 'd>, OtaError> {
         Ota::new(self.otadata.as_flash_region(flash), self.slots).map_err(|_| OtaError::Flash)
     }
 }
@@ -171,8 +173,8 @@ fn triple(v: Version) -> (u16, u16, u16) {
 }
 
 /// Handles a pending update at boot: counts a trial boot, or rolls back (and restarts). Call
-/// early, right after opening the store.
-pub async fn boot(store: &SharedStore) -> BootAction {
+/// early, right after opening the store; `version` is this firmware's.
+pub async fn boot(store: &SharedStore, version: Version) -> BootAction {
     let found = with(|flash| {
         let layout = Layout::read(flash)?;
         let unconfirmed = unconfirmed(&mut layout.ota(flash)?);
@@ -187,35 +189,33 @@ pub async fn boot(store: &SharedStore) -> BootAction {
         && let Ok((Some(slot), slots, true)) = found
     {
         log::warn!("ota: this firmware is not confirmed but its record is gone: on trial again");
-        let previous = (slot + slots as u8 - 1) % slots as u8;
-        pending = Some(Pending { slot, previous, version: (0, 0, 0), boots: 0 });
+        pending = Some(Pending { slot, previous: previous(slot, slots), version: triple(version), boots: 0 });
     }
     let action = on_boot(pending.as_ref(), booted);
     let Some(p) = pending else { return action };
     match action {
         BootAction::Normal => {}
         BootAction::Trial { boot } => {
-            log::info!("ota: trial boot {boot}/{} of {}", crate::ota::MAX_TRIAL_BOOTS, p.version());
+            log::info!(
+                "ota: trial boot {boot}/{} of {}, {} s to get healthy",
+                crate::ota::MAX_TRIAL_BOOTS,
+                p.version(),
+                crate::ota::UPDATE_TIMEOUT_S
+            );
+            TRIAL.store(true, Ordering::Release);
             if store.save(&Pending { boots: boot, ..p }).await.is_err() {
                 log::error!("ota: cannot count the trial boot");
             }
         }
         BootAction::RollBack { to } => {
             log::error!("ota: {} was not confirmed after {} boots, back to ota_{to}", p.version(), p.boots);
-            let switched = with(|flash| {
-                let layout = Layout::read(flash)?;
-                let mut ota = layout.ota(flash)?;
-                ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
-                ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)
-            });
-            if let Err(e) = switched {
+            if let Err(e) = roll_back(&mut store, to, p.version).await {
                 // Keep trying the update rather than loop on a failing switch.
                 log::error!("ota: rollback failed: {e}");
                 return action;
             }
-            let _ = store.remove::<Pending>().await;
-            let _ = store.save(&LastUpdate { outcome: Outcome::RolledBack, version: p.version }).await;
             drop(store);
+            // Nothing to shut down yet: no task runs.
             esp_hal::system::software_reset();
         }
         BootAction::Abandoned => {
@@ -227,53 +227,100 @@ pub async fn boot(store: &SharedStore) -> BootAction {
     action
 }
 
+/// The slot an update in `slot` came from (of `slots`).
+fn previous(slot: u8, slots: usize) -> u8 {
+    (slot + slots as u8 - 1) % slots as u8
+}
+
+/// Selects slot `to`, as a firmware that works.
+fn select_valid(ota: &mut Ota<'_, '_>, to: u8) -> Result<(), OtaError> {
+    ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
+    ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)
+}
+
+/// Selects slot `to` after the update `version` failed, and records it. Restart next.
+async fn roll_back(store: &mut EspStore, to: u8, version: (u16, u16, u16)) -> Result<(), OtaError> {
+    with(|flash| {
+        let layout = Layout::read(flash)?;
+        select_valid(&mut layout.ota(flash)?, to)
+    })?;
+    let _ = store.remove::<Pending>().await;
+    let _ = store.save(&LastUpdate { outcome: Outcome::RolledBack, version }).await;
+    Ok(())
+}
+
+/// An update on trial: not confirmed yet (a deep-sleeping device does not sleep then).
+static TRIAL: AtomicBool = AtomicBool::new(false);
+
+/// Whether the running firmware is an update on trial (see [`boot`]).
+pub fn on_trial() -> bool {
+    TRIAL.load(Ordering::Acquire)
+}
+
+/// The update on trial (`version`, this firmware) was not healthy within `timeout_s` (`missing`:
+/// the checks not passed): goes back to the previous firmware and restarts. If it cannot, it
+/// restarts still on trial: the boot counters ([`boot`], [`early_guard`]) roll back from there.
+pub async fn give_up(store: &SharedStore, missing: u32, version: Version, timeout_s: u32) -> ! {
+    let mut store = store.lock().await;
+    log::error!("ota: {version} not healthy within {timeout_s} s (checks missing: {missing:#x})");
+    // Its record is gone (the trial boot could not be saved, say): otadata knows the slots.
+    let to = match store.load::<Pending>().await.ok().flatten() {
+        Some(p) => Ok(p.previous),
+        None => with(Layout::read).and_then(|l| l.booted.map(|b| previous(b, l.slots)).ok_or(OtaError::NoSlots)),
+    };
+    let rolled_back = match to {
+        Ok(to) => {
+            log::error!("ota: back to ota_{to}");
+            roll_back(&mut store, to, triple(version)).await
+        }
+        Err(e) => Err(e),
+    };
+    if let Err(e) = rolled_back {
+        log::error!("ota: rollback failed: {e}, restarting on trial");
+    }
+    drop(store);
+    crate::diag::esp::restart().await
+}
+
 /// Whether otadata says the running firmware is an update not confirmed yet.
-fn unconfirmed(ota: &mut Ota<'_, 'static>) -> bool {
+fn unconfirmed(ota: &mut Ota<'_, '_>) -> bool {
     matches!(ota.current_ota_state(), Ok(OtaImageState::New | OtaImageState::PendingVerify))
 }
 
 /// Boots of an unconfirmed firmware, counted in RTC memory (kept across resets, not power
-/// loss): magic, count.
+/// loss): see [`early_check`].
 #[esp_hal::ram(unstable(rtc_fast, persistent))]
 static mut EARLY: [u32; 2] = [0; 2];
-const EARLY_MAGIC: u32 = 0x07a0_ea71;
-/// [`boot`] rolls back on the 4th boot of an unconfirmed update; past this, it never ran.
-const EARLY_LIMIT: u32 = 2 * crate::ota::MAX_TRIAL_BOOTS as u32;
 
-/// Call right after `crate::config::esp::init`, before anything that can fail. Counts the boots
-/// of an unconfirmed update in RTC memory, and goes back to the previous firmware when they
-/// pass twice the trial boots: an update that crashes before reaching [`boot`] (which counts
-/// them in flash) is rolled back too.
+/// Run by [`init!`](crate::init) right after `esp_hal::init` and `crate::config::esp::init`,
+/// before the heap, the RTOS and the app, so little can crash before it (the logger is not up:
+/// it prints). Counts the boots of an unconfirmed update in RTC memory, and goes back to the
+/// previous firmware past twice the trial boots: an update that crashes before reaching [`boot`]
+/// (which counts them in flash) is rolled back too.
 pub fn early_guard() {
-    let checked = with(|flash| {
+    fn check(flash: &mut FlashStorage<'_>) -> Result<Option<(u8, u32)>, OtaError> {
         let layout = Layout::read(flash)?;
         let mut ota = layout.ota(flash)?;
         let early: *mut [u32; 2] = &raw mut EARLY;
         // SAFETY: core 0 only, at boot, and nothing else touches it.
         let early = unsafe { &mut *early };
-        if !unconfirmed(&mut ota) {
-            *early = [0; 2];
+        let (counter, roll_back) = early_check(unconfirmed(&mut ota), *early);
+        *early = counter;
+        if !roll_back {
             return Ok(None);
         }
-        let boots = if early[0] == EARLY_MAGIC { early[1].saturating_add(1) } else { 1 };
-        *early = [EARLY_MAGIC, boots];
-        if boots <= EARLY_LIMIT {
-            return Ok(None);
-        }
-        let booted = layout.booted.ok_or(OtaError::NoSlots)?;
-        let to = (booted + layout.slots as u8 - 1) % layout.slots as u8;
-        ota.set_current_app_partition(subtype(to)?).map_err(|_| OtaError::Flash)?;
-        ota.set_current_ota_state(OtaImageState::Valid).map_err(|_| OtaError::Flash)?;
+        let to = previous(layout.booted.ok_or(OtaError::NoSlots)?, layout.slots);
+        select_valid(&mut ota, to)?;
         *early = [0; 2];
-        Ok(Some((to, boots)))
-    });
-    match checked {
+        Ok(Some((to, counter[1])))
+    }
+    match with(check) {
         Ok(Some((to, boots))) => {
-            log::error!("ota: unconfirmed firmware booted {boots} times without counting them, back to ota_{to}");
+            println!("ota: unconfirmed firmware booted {boots} times without counting them, back to ota_{to}");
             esp_hal::system::software_reset();
         }
         Ok(None) | Err(OtaError::NoSlots) => {}
-        Err(e) => log::warn!("ota: early check: {e}"),
+        Err(e) => println!("ota: early check: {e}"),
     }
 }
 
@@ -301,6 +348,7 @@ pub async fn confirm(store: &SharedStore) {
         let _ = store.save(&LastUpdate { outcome: Outcome::Confirmed, version: p.version }).await;
         log::info!("ota: {} confirmed", p.version());
     }
+    TRIAL.store(false, Ordering::Release);
 }
 
 static BUSY: AtomicBool = AtomicBool::new(false);
@@ -321,7 +369,7 @@ static REQUESTING: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 /// that task runs an install, so its large buffers exist once.
 pub async fn request_install(manifest_url: &str) -> Result<Version, OtaError> {
     let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
-    if BUSY.load(Ordering::Acquire) {
+    if on_trial() || BUSY.load(Ordering::Acquire) {
         return Err(OtaError::Busy);
     }
     let url = String::try_from(manifest_url).map_err(|_| OtaError::Download(GetError::Url(http::Error::Url)))?;
@@ -398,7 +446,8 @@ async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str
             BUSY.store(false, Ordering::Release);
         }
     }
-    if BUSY.swap(true, Ordering::Acquire) {
+    // On trial, the spare slot holds the firmware a rollback goes back to.
+    if on_trial() || BUSY.swap(true, Ordering::Acquire) {
         return Err(OtaError::Busy);
     }
     let guard = Guard;

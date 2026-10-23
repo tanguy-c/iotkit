@@ -16,7 +16,8 @@
 //! after twice the interval, and the discovery is sent only when it changed. If the device cannot
 //! reach the broker within `max_awake`, it sleeps again, longer after each failure, and forgets
 //! the access point and address after two. It stays awake while a setup window is open or an
-//! update is installing.
+//! update is installing, or on trial (until healthy, or rolled back after
+//! [`UPDATE_TIMEOUT_S`](crate::ota::UPDATE_TIMEOUT_S)).
 
 use core::cell::RefCell;
 
@@ -39,7 +40,7 @@ use log::{error, info, warn};
 use static_cell::StaticCell;
 
 use super::{
-    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, network_check_task, spawn,
+    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, network_check_task, radio_failed, spawn,
     supervisor_task,
 };
 
@@ -188,8 +189,12 @@ static LPWR_PERIPHERAL: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMu
     embassy_sync::blocking_mutex::Mutex::new(RefCell::new(None));
 
 /// An update is asked for (Home Assistant's Install may come in with the retained commands,
-/// while the update task still checks the manifest) or installs.
+/// while the update task still checks the manifest), installs, or is on trial (it stays awake
+/// until healthy or rolled back).
 fn installing() -> bool {
+    if crate::ota::esp::on_trial() {
+        return true;
+    }
     #[cfg(feature = "ha-update")]
     if super::update::FIRMWARE.install_requested() {
         return true;
@@ -303,8 +308,6 @@ pub async fn start_sleepy(
         HEALTH.require(check);
     }
 
-    crate::config::esp::init(board.flash);
-    crate::ota::esp::early_guard();
     static STORE: StaticCell<SharedStore> = StaticCell::new();
     let store = match crate::config::esp::open().await {
         Ok(store) => &*STORE.init(Mutex::new(store)),
@@ -326,7 +329,7 @@ pub async fn start_sleepy(
             }
         }
     };
-    crate::ota::esp::boot(store).await;
+    crate::ota::esp::boot(store, fw.version).await;
     spawn(spawner, crate::diag::esp::watchdog_task(TimerGroup::new(board.timg1).wdt, config.watches));
 
     let credentials = crate::net::esp::credentials(store).await;
@@ -346,12 +349,11 @@ pub async fn start_sleepy(
         }
         Err(e) => {
             error!("Wi-Fi: {e:?}");
-            HEALTH.pass(NETWORK);
-            HEALTH.pass(BROKER);
+            radio_failed();
             None
         }
     };
-    spawn(spawner, supervisor_task(store));
+    spawn(spawner, supervisor_task(store, fw.version));
     spawn(spawner, awake_guard_task(sleep));
     if let Some(pin) = board.boot_button {
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
@@ -419,7 +421,7 @@ async fn remember_task(net: Net) {
 }
 
 /// Sleeps again when the broker is not reached within `max_awake` (not while a setup window is
-/// open or an update installs): 2, 4, then 8 times longer after each failure; after two, the
+/// open or an update installs or is on trial): 2, 4, then 8 times longer after each failure; after two, the
 /// remembered access point and address are dropped (a fresh scan and DHCP next time).
 #[embassy_executor::task]
 async fn awake_guard_task(sleep: &'static SleepConfig) {

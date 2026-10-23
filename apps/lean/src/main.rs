@@ -23,7 +23,7 @@ static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
     // No `bt` (improv-ble off); `usb` stays for Improv over serial.
-    let board = Board { flash: p.FLASH, wifi: p.WIFI, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: None };
+    let board = Board { wifi: p.WIFI, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: None };
     iotkit::start(spawner, board, &CONFIG).await;
 
     let tsens = TemperatureSensor::new(p.TSENS, tsens::Config::default()).unwrap();

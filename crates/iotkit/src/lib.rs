@@ -11,7 +11,7 @@
 //!
 //! // in `main`:
 //! iotkit::init!(p);
-//! let app = iotkit::start(spawner, Board { flash: p.FLASH, wifi: p.WIFI, .. }, &CONFIG).await;
+//! let app = iotkit::start(spawner, Board { wifi: p.WIFI, .. }, &CONFIG).await;
 //! ```
 //!
 //! The full, compiled version: `apps/devkit/src/main.rs`.

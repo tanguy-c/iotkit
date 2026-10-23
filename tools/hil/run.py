@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hardware-in-the-loop test on an ESP32-C6 DevKit: flash devkit over USB, wait until healthy,
-push a newer version over OTA and check it is kept, push one that never gets healthy and check
-the device rolls back by itself.
+push a newer version over OTA and check it is kept, then three that must roll back by themselves:
+one that crashes at boot, one that crashes before `iotkit::start`, one that never gets healthy.
 
 Usage (from the repository root): tools/hil/run.py [--port /dev/ttyACM0] [--skip-flash]
 Needs: espflash, pyserial, the device's Wi-Fi and broker given at build time (WIFI_SSID,
@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import serial
 
@@ -58,10 +59,10 @@ class Console:
     def close(self):
         self.serial.close()
 
-    def wait_for(self, pattern, timeout):
-        """Reads the log until `pattern` (a regex) appears; returns the match or None."""
+    def wait_for(self, pattern, timeout, stop=lambda: False):
+        """Reads the log until `pattern` (a regex) appears, or until `stop()`; returns the match or None."""
         deadline = time.time() + timeout
-        while time.time() < deadline:
+        while time.time() < deadline and not stop():
             try:
                 self.seen += ANSI.sub(b"", self.serial.read(4096))
             except serial.SerialException:  # the chip restarted: the port comes back
@@ -91,12 +92,15 @@ def next_patch(version, n):
 
 
 def tree_with_version(name, version):
-    """A worktree of HEAD under target/hil/ with devkit at `version`, the same signing key."""
+    """A worktree of the working tree (its tracked changes) under target/hil/ with devkit at
+    `version`, the same signing key."""
     path = os.path.join(WORK, name)
     run(["git", "worktree", "remove", "-f", path], check=False)
     shutil.rmtree(path, ignore_errors=True)
     run(["git", "worktree", "prune"])
-    run(["git", "worktree", "add", "-q", "--detach", path, "HEAD"])
+    # A commit of the uncommitted changes (empty when there are none): the updates test them too.
+    base = run(["git", "stash", "create"]).stdout.strip() or "HEAD"
+    run(["git", "worktree", "add", "-q", "--detach", path, base])
     shutil.copytree(os.path.join(ROOT, "keys"), os.path.join(path, "keys"), dirs_exist_ok=True)
     secrets = os.path.join(ROOT, ".cargo", "secrets.toml")
     if os.path.exists(secrets):
@@ -116,7 +120,9 @@ def main():
     if not os.path.exists(os.path.join(ROOT, "keys", "ota.key")):
         run(["cargo", "xtask", "keygen"])
     base = version_of(os.path.join(ROOT, "apps", "devkit", "Cargo.toml"))
-    env = {"CARGO_TARGET_DIR": os.path.join(ROOT, "target")}
+    # The update trees build apart from this one: cargo names workspace crates by their relative
+    # path, so a shared target dir lets either reuse the other's stale `iotkit`.
+    env = {"CARGO_TARGET_DIR": os.path.join(WORK, "target")}
 
     if not args.skip_flash:
         step(f"flash devkit {base} over USB")
@@ -127,7 +133,7 @@ def main():
 
     step("boots and gets healthy")
     console = Console(args.port or wait_port())
-    if not args.skip_flash and not console.wait_for(r"healthy", 90):
+    if not args.skip_flash and not console.wait_for(r"- healthy", 90):
         sys.exit("FAIL: not healthy within 90 s:\n" + console.seen.decode(errors="replace")[-3000:])
     info = console.command("info", r"devkit (\S+), up")
     if not info or info.group(1).decode() != base:
@@ -145,7 +151,7 @@ def main():
     run(["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
          "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"], cwd=tree, env=env)
     console = Console(wait_port())
-    if not console.wait_for(r"healthy", 120):
+    if not console.wait_for(r"- healthy", 120):
         sys.exit("FAIL: the update did not get healthy:\n" + console.seen.decode(errors="replace")[-3000:])
     if not console.command("info", rf"last update: {re.escape(good)} Confirmed"):
         sys.exit(f"FAIL: `info` does not report {good} confirmed")
@@ -167,6 +173,51 @@ def main():
                  f"{good} and the failed update {bad}:\n" + console.seen.decode(errors="replace")[-2000:])
     console.close()
     print(f"ok: {bad} rolled back to {good} ({info.group(3).decode()})")
+
+    early = next_patch(base, 3)
+    step(f"OTA push {early}, which panics before `iotkit::start`: the early guard rolls back to {good}")
+    tree = tree_with_version("early", early)
+    pushed = run(["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
+                  "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"],
+                 cwd=tree, env={**env, "DEVKIT_PANIC_EARLY": "1"}, check=False)
+    if "rolled back" not in pushed.stdout + pushed.stderr:
+        sys.exit("FAIL: push did not report a rollback:\n" + pushed.stdout[-2000:] + pushed.stderr[-2000:])
+    console = Console(wait_port())
+    info = console.command("info", r"devkit (\S+), up[\s\S]*?last update: (\S+) (\S+)", timeout=10)
+    if not info or info.group(1).decode() != good or info.group(2).decode() != early:
+        sys.exit("FAIL: after the early rollback `info` should report devkit "
+                 f"{good} and the failed update {early}:\n" + console.seen.decode(errors="replace")[-2000:])
+    console.close()
+    print(f"ok: {early} rolled back to {good} by the early guard")
+
+    stuck = next_patch(base, 4)
+    step(f"OTA push {stuck}, which runs but never gets healthy: rolled back to {good} after its timeout")
+    tree = tree_with_version("stuck", stuck)
+    # The console listens during the push: the timeout may expire before the push returns.
+    console = Console(wait_port())
+    with ThreadPoolExecutor(1) as pool:
+        push = pool.submit(
+            run, ["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
+                  "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"],
+            cwd=tree, env={**env, "DEVKIT_NEVER_HEALTHY": "1", "IOTKIT_UPDATE_TIMEOUT": "60"}, check=False)
+        # The push builds the firmware first.
+        rolled_back = console.wait_for(r"not healthy within 60 s", 900,
+                                       stop=lambda: push.done() and push.result().returncode != 0)
+        pushed = push.result()
+    if not rolled_back:  # the push failed: its rollback may still be in the unread log
+        rolled_back = console.wait_for(r"not healthy within 60 s", 5)
+    # The push may see the rollback already, and report it as a failure: the log decides.
+    if not rolled_back:
+        sys.exit("FAIL: the update timeout did not roll back:\n" + pushed.stdout[-1000:] + pushed.stderr[-1000:]
+                 + console.seen.decode(errors="replace")[-3000:])
+    if not console.wait_for(r"- healthy", 120):
+        sys.exit(f"FAIL: {good} not healthy again after the rollback:\n" + console.seen.decode(errors="replace")[-3000:])
+    info = console.command("info", r"devkit (\S+), up[\s\S]*?last update: (\S+) (\S+)", timeout=10)
+    if not info or info.group(1).decode() != good or info.group(2).decode() != stuck:
+        sys.exit("FAIL: after the timeout `info` should report devkit "
+                 f"{good} and the failed update {stuck}:\n" + console.seen.decode(errors="replace")[-2000:])
+    console.close()
+    print(f"ok: {stuck} rolled back to {good} after its timeout")
 
     print("\nPASS")
 

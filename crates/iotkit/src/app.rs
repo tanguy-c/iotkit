@@ -12,8 +12,9 @@ mod update;
 pub use sleep::{SleepConfig, SleepyApp, WakeReason, start_sleepy, wake_reason};
 
 use embassy_executor::Spawner;
+use embassy_futures::select::{Either, select};
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
 #[cfg(feature = "improv-ble")]
 use esp_hal::peripherals::BT;
 use esp_hal::{
@@ -27,6 +28,7 @@ use esp_hal::{peripherals::UART0, uart::Uart};
 use esp_hal::{peripherals::USB_DEVICE, usb::usb_serial_jtag::UsbSerialJtag};
 use log::{error, info, warn};
 
+use crate::atomic::{AtomicBool, Ordering};
 use crate::{BootStats, Check, Device, Entity, Firmware, Health, Net, Setting, SharedStore, TaskWatch};
 use static_cell::StaticCell;
 
@@ -46,8 +48,6 @@ pub static HEALTH: Health = Health::new(&[RECORDED, NETWORK, BROKER]);
 
 /// The peripherals the kit takes; the app keeps the rest.
 pub struct Board {
-    /// Holds the settings, the update slots and the crash record.
-    pub flash: FLASH<'static>,
     /// The Wi-Fi radio.
     pub wifi: WIFI<'static>,
     /// Bluetooth LE, for Improv (`improv-ble`).
@@ -165,10 +165,23 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
     "ESP32-S3"
 };
 
+/// [`init!`]'s first step, before the heap, the RTOS and the app: sets up the shared flash
+/// ([`config::esp::with`](crate::config::esp::with)), and rolls back an update that keeps crashing
+/// this early.
+#[doc(hidden)]
+pub fn __early_boot(flash: FLASH<'static>) {
+    crate::config::esp::init(flash);
+    crate::ota::esp::early_guard();
+}
+
 /// Sets up the chip for the kit, in `main` before [`start`]: the app descriptor, the clocks at
-/// full speed, the heap (64 KB reclaimed from the bootloader plus `heap`, 96 KB by default; the
-/// Wi-Fi and Bluetooth drivers allocate) and the RTOS timer. Declares `$p`, the peripherals
-/// (`TIMG0` and `FROM_CPU_INTR0` are taken).
+/// full speed, the flash, the rollback of an update that keeps crashing
+/// ([`early_guard`](crate::ota::esp::early_guard)), the heap (64 KB reclaimed from the bootloader
+/// plus `heap`, 96 KB by default; the Wi-Fi and Bluetooth drivers allocate) and the RTOS timer.
+/// Declares `$p`, the peripherals (`FLASH`, `TIMG0` and `FROM_CPU_INTR0` are taken). The app
+/// reaches the flash through [`config::esp::with`](crate::config::esp::with) (its own partition:
+/// [`config::esp::find_partition`](crate::config::esp::find_partition)), or keeps settings with
+/// [`App::save`].
 ///
 /// ```ignore
 /// iotkit::init!(p);
@@ -192,6 +205,7 @@ macro_rules! init {
             $crate::__private::esp_hal::Config::default()
                 .with_cpu_clock($crate::__private::esp_hal::clock::CpuClock::max()),
         );
+        $crate::__early_boot($p.FLASH);
         $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: 64 * 1024);
         $crate::__private::esp_alloc::heap_allocator!(size: $heap);
         let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
@@ -219,6 +233,7 @@ macro_rules! init {
             $crate::__private::esp_hal::Config::default()
                 .with_cpu_clock($crate::__private::esp_hal::clock::CpuClock::max()),
         );
+        $crate::__early_boot($p.FLASH);
         // The ESP32's data RAM is small: the heap is the RAM the bootloader leaves (`dram2`).
         $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: $heap);
         let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
@@ -257,10 +272,10 @@ impl App {
     }
 }
 
-/// Starts the kit (see the [crate] docs). Call first in `main`, right after `esp_hal::init`,
-/// the heap and `esp_rtos::start`. Panics if the `config` partition is missing.
+/// Starts the kit (see the [crate] docs). Call first in `main`, right after [`init!`]. Panics
+/// without it, or if the `config` partition is missing.
 pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> App {
-    // First: the crash record must be taken before anything can overwrite it.
+    // The crash record: a crash before this (in `init!`, say) does not overwrite it.
     let boot = crate::diag::esp::boot();
     esp_println::logger::init_logger_from_env();
     let fw = config.firmware;
@@ -272,14 +287,6 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
         HEALTH.require(check);
     }
 
-    crate::config::esp::init(board.flash);
-    // Before anything that can fail: an update that crashes this early is still rolled back.
-    crate::ota::esp::early_guard();
-    // Rollback test of the early guard: a build with `IOTKIT_PANIC_EARLY=1` crashes before
-    // `crate::ota::esp::boot` can count its trial boots.
-    if option_env!("IOTKIT_PANIC_EARLY").is_some() {
-        panic!("IOTKIT_PANIC_EARLY is set");
-    }
     static STORE: StaticCell<SharedStore> = StaticCell::new();
     let store = match crate::config::esp::open().await {
         Ok(store) => &*STORE.init(Mutex::new(store)),
@@ -301,7 +308,7 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
     };
     // After the boot is recorded (a crashing update still counts its crashes): may switch back
     // to the previous firmware and restart.
-    crate::ota::esp::boot(store).await;
+    crate::ota::esp::boot(store, fw.version).await;
 
     spawn(spawner, crate::diag::esp::watchdog_task(TimerGroup::new(board.timg1).wdt, config.watches));
 
@@ -319,12 +326,11 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
         Ok(net) => Some(start_services(spawner, net, store, bt, config, credentials.is_none()).await),
         Err(e) => {
             error!("Wi-Fi: {e:?}");
-            HEALTH.pass(NETWORK);
-            HEALTH.pass(BROKER);
+            radio_failed();
             None
         }
     };
-    spawn(spawner, supervisor_task(store));
+    spawn(spawner, supervisor_task(store, fw.version));
     if let Some(pin) = board.boot_button {
         let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
         spawn(spawner, crate::provision::esp::button_task(button, store));
@@ -477,9 +483,32 @@ async fn broker_check_task() {
     HEALTH.pass(BROKER);
 }
 
-/// Once healthy: the boot is stable, and an update just installed is kept.
+/// Wi-Fi did not start: [`supervisor_task`] gives up an update on trial at once.
+static NO_RADIO: AtomicBool = AtomicBool::new(false);
+
+/// Wi-Fi did not start: its checks cannot pass, so they are skipped. Not for an update on trial:
+/// the previous firmware had a radio (it received the update), and this one, kept, could not be
+/// updated again but over USB.
+fn radio_failed() {
+    if crate::ota::esp::on_trial() {
+        error!("ota: the update cannot start Wi-Fi, back to the previous firmware");
+        NO_RADIO.store(true, Ordering::Release);
+        return;
+    }
+    HEALTH.pass(NETWORK);
+    HEALTH.pass(BROKER);
+}
+
+/// Once healthy: the boot is stable, and an update just installed is kept (rolled back if not
+/// healthy in time).
 #[embassy_executor::task]
-async fn supervisor_task(store: &'static SharedStore) {
+async fn supervisor_task(store: &'static SharedStore, version: crate::image::Version) {
+    if crate::ota::esp::on_trial() {
+        let timeout = if NO_RADIO.load(Ordering::Acquire) { 0 } else { crate::ota::UPDATE_TIMEOUT_S };
+        if let Either::Second(()) = select(HEALTH.healthy(), Timer::after_secs(timeout.into())).await {
+            crate::ota::esp::give_up(store, HEALTH.missing(), version, timeout).await;
+        }
+    }
     HEALTH.healthy().await;
     crate::ota::esp::confirm(store).await;
     match BootStats::mark_stable(&mut *store.lock().await).await {

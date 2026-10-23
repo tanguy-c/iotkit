@@ -142,9 +142,13 @@ fn console_command(cmd: &str) -> bool {
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
+    // Rollback test of the early guard: a build with `DEVKIT_PANIC_EARLY=1` crashes before
+    // `iotkit::start` can count its trial boots.
+    if option_env!("DEVKIT_PANIC_EARLY").is_some() {
+        panic!("DEVKIT_PANIC_EARLY is set");
+    }
 
     let board = Board {
-        flash: p.FLASH,
         wifi: p.WIFI,
         #[cfg(not(feature = "esp32"))]
         bt: p.BT,
@@ -178,7 +182,11 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         MAIN_WATCH.feed();
         ticker.next().await;
-        HEALTH.pass(RUNNING);
+        // Rollback test of the update timeout: a build with `DEVKIT_NEVER_HEALTHY=1` runs but never
+        // gets healthy.
+        if option_env!("DEVKIT_NEVER_HEALTHY").is_none() {
+            HEALTH.pass(RUNNING);
+        }
         if ticks.is_multiple_of(6) {
             info!("alive, up {} s", Instant::now().as_secs());
             UPTIME.set(Instant::now().as_secs() as f32);

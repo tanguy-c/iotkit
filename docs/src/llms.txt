@@ -18,6 +18,7 @@ Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `io
 - [Only what the device uses](https://tanguy-c.github.io/iotkit/lean.html): opt-out features, IOTKIT_HOSTNAME, IOTKIT_TOPIC_PREFIX
 - [Console, logs, editor](https://tanguy-c.github.io/iotkit/console.html): USB console commands, ESP_LOG
 - [Troubleshooting](https://tanguy-c.github.io/iotkit/troubleshooting.html)
+- [Upgrading](https://tanguy-c.github.io/iotkit/upgrading.html): what to change in a project for each breaking release
 - [Examples](https://tanguy-c.github.io/iotkit/examples.html): devkit, showcase, sleepy, lean, thread-light
 - [Working on iotkit](https://tanguy-c.github.io/iotkit/contributing.html): repository layout, first commands
 - [Roadmap](https://tanguy-c.github.io/iotkit/roadmap.html)
