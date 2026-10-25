@@ -113,7 +113,9 @@ impl UserTask for ThreadCheck {
                 // Returning would stop the stack.
                 core::future::pending::<()>().await;
             }
-            netif.wait_changed().await;
+            // Also polled: OpenThread wakes one waiter per change, and the stack's network
+            // manager waits too, so the attach can wake it instead.
+            select(netif.wait_changed(), embassy_time::Timer::after_secs(1)).await;
         }
     }
 }
