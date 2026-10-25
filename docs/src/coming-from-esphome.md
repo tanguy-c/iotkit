@@ -109,7 +109,7 @@ is set once on the console (`mqtt 192.168.1.10`) or at build time (`MQTT_HOST`).
 | `globals:` with `restore_value` | a [`Setting`](entities.md#settings), `App::load` / `App::save` |
 | `substitutions:` | `const`s |
 | `lambda:` | plain Rust, anywhere |
-| `deep_sleep:` | feature `deep-sleep`, `start_sleepy` ([battery devices](battery.md)) |
+| `deep_sleep:` | feature `deep-sleep`, `start_sleepy`, over the API too ([battery devices](battery.md)) |
 | `packages:` | modules and crates |
 | `web_server:` | none: Home Assistant and the console |
 

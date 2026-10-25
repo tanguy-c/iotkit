@@ -1,6 +1,6 @@
 # iotkit
 
-> A no_std Rust firmware kit for ESP32 smart devices (esp-hal 1.2, Embassy): Wi-Fi setup, signed OTA updates with automatic rollback, Home Assistant over the ESPHome API or MQTT, Matter over Wi-Fi and Thread, deep sleep. A device's main lists its entities and calls `iotkit::start`. 0.1 is released from git (not on crates.io yet); depend on the git repository.
+> A no_std Rust firmware kit for ESP32 smart devices (esp-hal 1.2, Embassy): Wi-Fi setup, signed OTA updates with automatic rollback, Home Assistant over the ESPHome API or MQTT, Matter over Wi-Fi and Thread, battery devices (deep sleep, Matter ICDs). A device's main lists its entities and calls `iotkit::start`. 0.1 is released from git (not on crates.io yet); depend on the git repository.
 
 Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `iotkit-core` (chip-independent, re-exported by `iotkit`), `iotkit-build` (the project's build-dependency). CLI: `cargo iotkit` (`new`, `keygen`, `build`, `verify`, `flash`, `ota push`, `ota publish`, `web`). API docs: `cargo doc -p iotkit --open` in a project.
 
@@ -11,15 +11,15 @@ Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `io
 - [Coming from ESPHome](https://tanguy-c.github.io/iotkit/coming-from-esphome.html): each YAML block and its iotkit code
 - [Install from the browser](https://tanguy-c.github.io/iotkit/install-from-browser.html): ESP Web Tools page from `cargo iotkit build`
 - [Entities and settings](https://tanguy-c.github.io/iotkit/entities.html): entity kinds, DeviceClass, Unit, Config, Setting
-- [Components and drivers](https://tanguy-c.github.io/iotkit/components.html): relay, binary_input, button, dimmer, fan, rgb_light, poll, filters, any embedded-hal driver
+- [Components and drivers](https://tanguy-c.github.io/iotkit/components.html): relay, binary_input, button, dimmer, fan, rgb_light, poll, filters, any embedded-hal driver; status LEDs (`status_led`, `status_rgb`, `iotkit::status`)
 - [Home Assistant and Matter](https://tanguy-c.github.io/iotkit/home-assistant.html): the ESPHome API, MQTT discovery and topics, Matter device types
-- [Updates](https://tanguy-c.github.io/iotkit/updates.html): signed OTA, rollback, updates from Home Assistant, keys
-- [Battery devices](https://tanguy-c.github.io/iotkit/battery.html): deep sleep with `start_sleepy`
+- [Updates](https://tanguy-c.github.io/iotkit/updates.html): signed OTA, rollback, the health check per network, updates from Home Assistant and over Matter (Thread), keys
+- [Battery devices](https://tanguy-c.github.io/iotkit/battery.html): deep sleep with `start_sleepy` (MQTT, ESPHome API), pairing mode and a wake-up button; a Matter ICD over Thread with `matter-icd` (sleepy end device)
 - [Only what the device uses](https://tanguy-c.github.io/iotkit/lean.html): opt-out features, IOTKIT_HOSTNAME, IOTKIT_TOPIC_PREFIX
 - [Console, logs, editor](https://tanguy-c.github.io/iotkit/console.html): USB console commands, ESP_LOG
 - [Troubleshooting](https://tanguy-c.github.io/iotkit/troubleshooting.html)
 - [Upgrading](https://tanguy-c.github.io/iotkit/upgrading.html): what to change in a project for each breaking release
-- [Examples](https://tanguy-c.github.io/iotkit/examples.html): devkit, showcase, sleepy, lean, thread-light
+- [Examples](https://tanguy-c.github.io/iotkit/examples.html): devkit, showcase, sleepy, lean, thread-light, ble-beacon
 - [Working on iotkit](https://tanguy-c.github.io/iotkit/contributing.html): repository layout, first commands
 - [Roadmap](https://tanguy-c.github.io/iotkit/roadmap.html)
 
