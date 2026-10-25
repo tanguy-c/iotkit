@@ -3,7 +3,7 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
-## To the next release (from 0.1)
+## To 0.2 (from 0.1)
 
 ### `matter_task` takes the firmware
 

@@ -3,7 +3,7 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
-## Unreleased
+## 0.2.0 (2026-10-25)
 
 - **Breaking:** `init!` takes the flash (`Board` has no `flash` field) and `start` needs it;
   `matter_task` takes the product name and the `Firmware` instead of a `Product`
@@ -30,7 +30,7 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - Fixed: a second setup window panicked; Home Assistant's ESPHome integration failed to add a
   device at the first try, and showed "Update available" with no version before the first check;
   a crash before the boot overwrote the previous crash record. The setup button is
-  interrupt-driven, and over the ESPHome API the firmware shows as "1.2.0 (ESPHome iotkit 0.1.1)".
+  interrupt-driven, and over the ESPHome API the firmware shows as "1.2.0 (ESPHome iotkit 0.2.0)".
 
 ## 0.1.1 (2026-10-21)
 

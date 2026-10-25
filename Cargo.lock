@@ -3165,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bt-hci 0.10.1",
  "chacha20poly1305",
@@ -3211,11 +3211,11 @@ dependencies = [
 
 [[package]]
 name = "iotkit-build"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "iotkit-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "critical-section",
  "embassy-futures",
@@ -3232,7 +3232,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit-image"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "ed25519-compact",
  "serde",
