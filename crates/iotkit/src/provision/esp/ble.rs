@@ -19,7 +19,7 @@ use crate::provision::improv::{
 const CAPABILITIES: u8 = capability::IDENTIFY | capability::DEVICE_INFO;
 
 #[gatt_server]
-struct Server {
+pub(super) struct Server {
     improv: ImprovService,
 }
 
@@ -37,8 +37,15 @@ struct ImprovService {
     capabilities: u8,
 }
 
+/// The GATT server, for every window: [`Server::new_with_config`] panics the second time.
+pub(super) fn server(p: &Provisioner) -> Option<Server<'static>> {
+    let gap = GapConfig::Peripheral(PeripheralConfig { name: p.net.hostname, appearance: &appearance::UNKNOWN });
+    Server::new_with_config(gap).inspect_err(|e| log::error!("provision: GATT server: {e:?}")).ok()
+}
+
 /// Improv over Bluetooth until the window closes (Bluetooth is off afterwards).
-pub(super) async fn run_ble(bt: BT<'_>, p: &Provisioner) {
+pub(super) async fn run_ble(bt: BT<'_>, p: &Provisioner, server: Option<&Server<'_>>) {
+    let Some(server) = server else { return closed().await };
     let connector = match BleConnector::new(bt, Default::default()) {
         Ok(connector) => connector,
         Err(e) => {
@@ -51,16 +58,8 @@ pub(super) async fn run_ble(bt: BT<'_>, p: &Provisioner) {
     let stack = trouble_host::new(controller, &mut resources).set_random_address(address()).build();
     let mut runner = stack.runner();
     let mut peripheral = stack.peripheral();
-    let gap = GapConfig::Peripheral(PeripheralConfig { name: p.net.hostname, appearance: &appearance::UNKNOWN });
-    let server = match Server::new_with_config(gap) {
-        Ok(server) => server,
-        Err(e) => {
-            log::error!("provision: GATT server: {e:?}");
-            return closed().await;
-        }
-    };
     log::info!("provision: Improv over Bluetooth as '{}'", p.net.hostname);
-    match select(runner.run(), serve(&stack, &mut peripheral, &server, p)).await {
+    match select(runner.run(), serve(&stack, &mut peripheral, server, p)).await {
         Either::First(Err(e)) => {
             log::warn!("provision: Bluetooth stopped: {e:?}");
             closed().await;

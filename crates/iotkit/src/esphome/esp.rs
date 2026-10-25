@@ -3,6 +3,7 @@
 
 use core::fmt::{self, Write as _};
 
+use crate::atomic::{AtomicBool, Ordering};
 use crate::config::esp::SharedStore;
 use crate::esphome::{
     ApiKey,
@@ -10,10 +11,14 @@ use crate::esphome::{
     noise::{self, Cipher},
     proto::Writer,
 };
+use crate::health::{ESPHOME, HEALTH};
 use crate::model::{Binding, Device};
 use crate::net::{esp::Net, mdns::Service};
-use embassy_futures::select::{Either3, select3};
-use embassy_net::{IpEndpoint, tcp::TcpSocket};
+use embassy_futures::select::{Either, Either3, select, select3};
+use embassy_net::{
+    IpEndpoint,
+    tcp::{State, TcpSocket},
+};
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::Write;
 use heapless::String;
@@ -57,6 +62,33 @@ enum Error {
     Frame,
 }
 
+/// A client subscribed to the states and got them all, this boot (for the health check).
+static SEEN: AtomicBool = AtomicBool::new(false);
+/// Home Assistant has connected once (stored: [`Client`]).
+static KNOWN: AtomicBool = AtomicBool::new(false);
+
+/// A client subscribed to the states and got them all.
+#[cfg(feature = "deep-sleep")]
+static SETTLED: AtomicBool = AtomicBool::new(false);
+
+/// Waits until a client (Home Assistant) has subscribed and received every state: on a
+/// deep-sleeping device, what the wake-up was for. Polled: it has several waiters.
+#[cfg(feature = "deep-sleep")]
+pub async fn wait_settled() {
+    while !SETTLED.load(Ordering::Relaxed) {
+        embassy_time::Timer::after_millis(50).await;
+    }
+}
+
+/// Home Assistant has connected once: the health check waits for it from then on.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Client;
+
+impl crate::config::Setting for Client {
+    const KEY: u16 = crate::config::keys::ESPHOME_CLIENT;
+    const VERSION: u8 = 1;
+}
+
 /// The stored key; the first time, `ESPHOME_API_KEY` from build time (base64) or a random one,
 /// which is then stored.
 pub async fn key(store: &SharedStore) -> ApiKey {
@@ -76,8 +108,12 @@ pub async fn key(store: &SharedStore) -> ApiKey {
 /// Serves the API for `device` as node `net.hostname`, and advertises it over mDNS; never
 /// returns.
 #[embassy_executor::task]
-pub async fn api_task(net: Net, device: &'static Device, key: ApiKey) {
-    let binding = Binding::allocate().expect("esphome: no binding left");
+pub async fn api_task(net: Net, device: &'static Device, store: &'static SharedStore, key: ApiKey) {
+    // Not added to Home Assistant yet: nothing to wait for.
+    let known = store.lock().await.load::<Client>().await.ok().flatten().is_some();
+    if !known {
+        HEALTH.pass(ESPHOME);
+    }
     let (mut mac, mut txt_mac, mut txt_name) = (String::<17>::new(), String::<16>::new(), String::<48>::new());
     let _ = txt_mac.push_str("mac=");
     for (i, b) in net.mac.iter().enumerate() {
@@ -99,34 +135,74 @@ pub async fn api_task(net: Net, device: &'static Device, key: ApiKey) {
     if let Some(service) = advertised {
         crate::net::esp::advertise(service);
     }
-    let mut party = crate::runtime::shutdown::register();
+    KNOWN.store(known, Ordering::Relaxed);
+    // Two clients at once: Home Assistant often opens a second connection while the first is still
+    // there (a retry next to the one its mDNS browser starts), and reconnects right after it learns
+    // that the device wants the key; with one served, the other would be refused or left waiting.
     let (mut rx, mut tx) = ([0u8; 1024], [0u8; 2048]);
+    let (mut rx2, mut tx2) = ([0u8; 1024], [0u8; 2048]);
     log::info!("esphome: API on port {PORT}");
-    loop {
-        net.wait_online().await;
-        let mut socket = TcpSocket::new(net.stack, &mut rx, &mut tx);
+    let mac = &mac;
+    let key = &key;
+    let client = async |rx: &mut [u8], tx: &mut [u8]| -> ! {
+        let binding = Binding::allocate().expect("esphome: no binding left");
+        let mut party = crate::runtime::shutdown::register();
+        let mut socket = TcpSocket::new(net.stack, rx, tx);
         socket.set_timeout(Some(IDLE));
-        if socket.accept(PORT).await.is_err() {
-            continue;
+        loop {
+            net.wait_online().await;
+            let stop = async {
+                match party.as_mut() {
+                    Some(p) => p.requested().await,
+                    None => core::future::pending().await,
+                }
+            };
+            match select(accepted(&mut socket), stop).await {
+                Either::First(true) => {}
+                Either::First(false) => {
+                    socket.abort();
+                    continue;
+                }
+                // Asleep or restarting: no client to tell.
+                Either::Second(()) => break,
+            }
+            let peer = Peer(socket.remote_endpoint());
+            let result = session(&mut socket, net, device, key, mac, binding, party.as_mut()).await;
+            if HEALTH.has_passed(ESPHOME) && SEEN.load(Ordering::Relaxed) && !KNOWN.swap(true, Ordering::Relaxed) {
+                let _ = store.lock().await.save(&Client).await;
+            }
+            match result {
+                Err(Error::Closed) | Ok(()) => log::info!("esphome: {peer} disconnected"),
+                // How Home Assistant adds a device: it tries without encryption, then asks for the key.
+                Err(Error::Plaintext) => log::info!("esphome: {peer}: no encryption, told it to use the key"),
+                Err(Error::Key) => log::info!("esphome: {peer}: wrong or no key"),
+                Err(e) => log::warn!("esphome: {peer}: {e:?}"),
+            }
+            // What was sent goes out, without waiting for the client's FIN.
+            let _ = with_timeout(Duration::from_secs(2), socket.flush()).await;
+            socket.abort();
+            if party.as_mut().is_some_and(|p| p.is_requested()) {
+                break;
+            }
         }
-        let peer = Peer(socket.remote_endpoint());
-        let result = session(&mut socket, net, device, &key, &mac, binding, party.as_mut()).await;
-        match result {
-            Err(Error::Closed) | Ok(()) => log::info!("esphome: {peer} disconnected"),
-            // How Home Assistant adds a device: it tries without encryption, then asks for the key.
-            Err(Error::Plaintext) => log::info!("esphome: {peer}: no encryption, told it to use the key"),
-            Err(Error::Key) => log::info!("esphome: {peer}: wrong or no key"),
-            Err(e) => log::warn!("esphome: {peer}: {e:?}"),
-        }
-        // What was sent goes out, then the port listens again at once: waiting for the client's
-        // FIN would refuse its reconnection (Home Assistant reconnects right after a key check).
-        let _ = with_timeout(Duration::from_secs(2), socket.flush()).await;
-        socket.abort();
-        if let Some(p) = party.as_mut()
-            && p.is_requested()
-        {
+        if let Some(p) = party.as_mut() {
             p.done();
-            core::future::pending::<()>().await;
+        }
+        core::future::pending().await
+    };
+    match select(client(&mut rx, &mut tx), client(&mut rx2, &mut tx2)).await {
+        Either::First(never) | Either::Second(never) => never,
+    }
+}
+
+/// Waits for a connection on `socket`, which may be listening, or connected, already.
+async fn accepted(socket: &mut TcpSocket<'_>) -> bool {
+    loop {
+        match socket.state() {
+            State::Closed | State::Listen => return socket.accept(PORT).await.is_ok(),
+            // Its handshake ends in a round trip.
+            State::SynReceived => embassy_time::Timer::after_millis(10).await,
+            _ => return true,
         }
     }
 }
@@ -263,6 +339,10 @@ async fn session(
                     send(socket, &mut tx, &mut out, |w| api::state(w, *entity)).await?;
                 }
             }
+            #[cfg(feature = "deep-sleep")]
+            SETTLED.store(true, Ordering::Relaxed);
+            SEEN.store(true, Ordering::Relaxed);
+            HEALTH.pass(ESPHOME);
         }
         let changed = async {
             match subscribed {
@@ -305,6 +385,15 @@ async fn session(
             id::SUBSCRIBE_STATES_REQUEST => {
                 subscribed = true;
                 device.entities.iter().for_each(|e| e.mark_dirty(binding));
+                // The time, for updates installed at a set time.
+                #[cfg(esp_scheduled)]
+                send(socket, &mut tx, &mut out, |_| Some(id::GET_TIME_REQUEST)).await?;
+            }
+            #[cfg(esp_scheduled)]
+            id::GET_TIME_RESPONSE => {
+                if let Some((epoch, zone)) = api::time(body) {
+                    crate::clock::set(epoch, zone);
+                }
             }
             id::PING_REQUEST => send(socket, &mut tx, &mut out, |_| Some(id::PING_RESPONSE)).await?,
             id::DISCONNECT_REQUEST => {

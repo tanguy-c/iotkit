@@ -7,7 +7,7 @@ use core::{
 
 use crate::config::esp::SharedStore;
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either, Either3, select, select3};
 use embassy_net::{
     Config as NetConfig, DhcpConfig, IpEndpoint, Runner, Stack, StackResources,
     dns::DnsQueryType,
@@ -291,10 +291,14 @@ async fn wifi_task(
         backoff.succeeded();
         // Connected: stay until the link drops or a command comes. The state is polled: waiting
         // for esp-radio's disconnect event sometimes never returned.
+        #[cfg(feature = "matter-icd")]
+        let mut saving = None;
         let dropped = loop {
             if !w.controller.is_connected() {
                 break true;
             }
+            #[cfg(feature = "matter-icd")]
+            power_save(&mut w.controller, &mut saving);
             if let Ok(rssi) = w.controller.rssi() {
                 RSSI.store(rssi, Ordering::Relaxed);
             }
@@ -309,6 +313,25 @@ async fn wifi_task(
             connected = false;
             Timer::after_secs(1).await;
         }
+    }
+}
+
+/// On battery (`matter-icd`): the radio sleeps between the access point's DTIM beacons, except
+/// while a setup window is open (Bluetooth shares the radio, and power saving starves it). Not
+/// `Maximum`: waking every `listen_interval` beacons can miss the broadcasts sent after a DTIM
+/// beacon (ARP, mDNS, which Matter needs). On the C6 it needs esp-radio to keep the Wi-Fi power
+/// controller's clock on while the modem dozes (esp-hal `main`, not in 1.0.0-beta.1): without it
+/// the radio misses every beacon and the device drops off the network.
+#[cfg(feature = "matter-icd")]
+fn power_save(controller: &mut WifiController<'static>, saving: &mut Option<bool>) {
+    let on = !crate::provision::esp::window_open();
+    if *saving == Some(on) {
+        return;
+    }
+    let mode = if on { esp_radio::wifi::PowerSaveMode::Minimum } else { esp_radio::wifi::PowerSaveMode::None };
+    match controller.set_power_saving(mode) {
+        Ok(()) => *saving = Some(on),
+        Err(e) => log::warn!("net: power save {mode:?}: {e:?}"),
     }
 }
 
@@ -441,6 +464,10 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
     }
     let group = IpEndpoint::new(Ipv4Addr::from(mdns::GROUP).into(), mdns::PORT);
     let mut buf = [0u8; 512];
+    // A deep-sleeping device says goodbye before it sleeps: Home Assistant reconnects as soon as
+    // it announces itself again, not at its next retry.
+    #[cfg(all(feature = "esphome-api", feature = "deep-sleep"))]
+    let mut party = crate::runtime::shutdown::register();
     loop {
         wait_online(stack).await;
         let Some(ip) = stack.config_v4().map(|c| c.address.address().octets()) else { continue };
@@ -457,8 +484,29 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
         }
         // Serve until the address goes away.
         loop {
-            match select(socket.recv_from(&mut buf), stack.wait_config_down()).await {
-                Either::First(Ok((n, _from))) => {
+            #[cfg(all(feature = "esphome-api", feature = "deep-sleep"))]
+            let going = async {
+                match party.as_mut() {
+                    Some(p) => p.requested().await,
+                    None => core::future::pending().await,
+                }
+            };
+            #[cfg(not(all(feature = "esphome-api", feature = "deep-sleep")))]
+            let going = core::future::pending::<()>();
+            match select3(socket.recv_from(&mut buf), stack.wait_config_down(), going).await {
+                Either3::Third(()) => {
+                    #[cfg(all(feature = "esphome-api", feature = "deep-sleep"))]
+                    {
+                        if let Some(n) = SERVICE.try_get().and_then(|s| s.goodbye(hostname, ip, &mut out)) {
+                            let _ = socket.send_to(&out[..n], group).await;
+                        }
+                        if let Some(p) = party.as_mut() {
+                            p.done();
+                        }
+                    }
+                    core::future::pending::<()>().await;
+                }
+                Either3::First(Ok((n, _from))) => {
                     if let Some(len) = mdns::answer(&buf[..n], hostname, ip, &mut out) {
                         let _ = socket.send_to(&out[..len], group).await;
                     }
@@ -467,8 +515,8 @@ async fn mdns_task(stack: Stack<'static>, hostname: &'static str) {
                         let _ = socket.send_to(&out[..len], group).await;
                     }
                 }
-                Either::First(Err(_)) => {}
-                Either::Second(()) => break,
+                Either3::First(Err(_)) => {}
+                Either3::Second(()) => break,
             }
         }
     }

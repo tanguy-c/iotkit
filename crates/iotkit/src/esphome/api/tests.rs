@@ -65,6 +65,8 @@ fn hello_and_device_info() {
     assert_eq!(id, id::DEVICE_INFO_RESPONSE);
     assert_eq!(field(&f, 3).unwrap().str(), "AA:BB:CC:DD:EE:FF");
     assert_eq!(field(&f, 9).unwrap().str(), "1.2.3");
+    // Home Assistant shows "1.2.3 (ESPHome iotkit x.y.z)".
+    assert_eq!(field(&f, 4).unwrap().str(), concat!("iotkit ", env!("CARGO_PKG_VERSION")));
     assert_eq!(field(&f, 8).unwrap().str(), "iotkit.Test", "maker.model, as Home Assistant splits it");
     assert_eq!(field(&f, 1), None, "no password");
 }
@@ -131,6 +133,18 @@ fn states() {
     PRESS.trigger(1);
     assert_eq!(field(&message(|w| state(w, &PRESS)).unwrap().1, 2).unwrap().str(), "double");
     assert!(message(|w| state(w, &RESTART)).is_none(), "buttons have no state");
+}
+
+#[test]
+fn update_state() {
+    static FIRMWARE: crate::model::Update = crate::model::Update::new("firmware", "Firmware");
+    FIRMWARE.set_installed("1.2.0");
+    let (id, f) = message(|w| state(w, &FIRMWARE)).unwrap();
+    assert_eq!(id, 117);
+    assert_eq!((field(&f, 6).unwrap().str(), field(&f, 7).unwrap().str()), ("1.2.0", "1.2.0"), "not checked yet");
+    FIRMWARE.set_latest("1.3.0", "", "");
+    let (_, f) = message(|w| state(w, &FIRMWARE)).unwrap();
+    assert_eq!(field(&f, 7).unwrap().str(), "1.3.0");
 }
 
 /// A command message for `entity` with `fields` after its key.
@@ -208,4 +222,54 @@ fn commands() {
     assert_eq!(send(33, &LAMP, |w| w.bool(2, true)).0, None);
     assert_eq!(command(&DEVICE, 33, &[0x0d, 1, 2, 3, 4], |_, _| {}).map(|e| e.meta().id), None);
     assert_eq!(command(&DEVICE, 33, &[0xff], |_, _| {}).map(|e| e.meta().id), None);
+}
+
+/// A protobuf message from (field, wire type, value) parts; length-delimited ones nest.
+fn proto(parts: &[(u32, u8, &[u8])]) -> std::vec::Vec<u8> {
+    let mut out = std::vec::Vec::new();
+    for &(field, wire, value) in parts {
+        out.push((field << 3) as u8 | wire);
+        if wire == 2 {
+            out.push(value.len() as u8);
+        }
+        out.extend_from_slice(value);
+    }
+    out
+}
+
+fn varint(mut v: u64) -> std::vec::Vec<u8> {
+    let mut out = std::vec::Vec::new();
+    loop {
+        let b = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(b);
+            return out;
+        }
+        out.push(b | 0x80);
+    }
+}
+
+fn sint(v: i32) -> std::vec::Vec<u8> {
+    varint(((v << 1) ^ (v >> 31)) as u32 as u64)
+}
+
+/// What Home Assistant sends for Europe/Paris (`CET-1CEST,M3.5.0,M10.5.0/3`).
+#[test]
+fn time_from_home_assistant() {
+    use crate::time::{Day, Transition};
+    let start = proto(&[(1, 0, &sint(7200)), (3, 0, &varint(1)), (4, 0, &varint(3)), (5, 0, &varint(5))]);
+    let end = proto(&[(1, 0, &sint(10_800)), (3, 0, &varint(1)), (4, 0, &varint(10)), (5, 0, &varint(5))]);
+    let zone = proto(&[(1, 0, &sint(-3600)), (2, 0, &sint(-7200)), (3, 2, &start), (4, 2, &end)]);
+    let body = proto(&[(1, 5, &1_792_836_000u32.to_le_bytes()), (2, 2, b"CET-1CEST,M3.5.0,M10.5.0/3"), (3, 2, &zone)]);
+    let (epoch, zone) = time(&body).unwrap();
+    assert_eq!(epoch, 1_792_836_000);
+    assert_eq!((zone.std_offset_s, zone.dst_offset_s), (-3600, -7200));
+    let last_sunday = |month| Day::MonthWeekDay { month, week: 5, weekday: 0 };
+    assert_eq!(zone.dst_start, Transition { day: last_sunday(3), time_s: 7200 });
+    assert_eq!(zone.dst_end, Transition { day: last_sunday(10), time_s: 10_800 });
+    assert_eq!(zone.offset(i64::from(epoch)), 7200, "October 24, 2026: summer time");
+    // No time zone: UTC; no time: nothing.
+    assert_eq!(time(&proto(&[(1, 5, &5u32.to_le_bytes())])), Some((5, crate::time::Zone::UTC)));
+    assert_eq!(time(&[]), None);
 }
