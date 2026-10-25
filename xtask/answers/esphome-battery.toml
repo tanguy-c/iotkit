@@ -1,0 +1,22 @@
+# `cargo iotkit new --answers answers/esphome-battery.toml`: a battery ESP32-C6 for Home Assistant's
+# ESPHome integration: it wakes up every 15 min, reports, and deep-sleeps; a button on GPIO3 wakes it,
+# a LED on GPIO6 shows its status. CI generates and builds it.
+name = "Mailbox"
+maker = "CI"
+board = "esp32c6-devkitc-1"
+esphome = "fixed"
+power = "battery"
+report_every_min = 15
+battery_pin = 2
+button_pin = 3
+status = "led"
+status_pin = 6
+
+[[parts]]
+kind = "contact"
+name = "Flap"
+pin = 5
+
+[[parts]]
+kind = "temperature"
+pin = 4
