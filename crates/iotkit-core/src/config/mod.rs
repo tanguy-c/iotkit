@@ -46,12 +46,26 @@ pub mod keys {
     pub const OTA_LAST: u16 = 0x0031;
     /// `iotkit::ota`: the manifest URL to check for updates.
     pub const UPDATE_SOURCE: u16 = 0x0032;
+    /// `iotkit::matter::ota`: the Matter OTA provider of the update on trial.
+    pub const OTA_MATTER_FROM: u16 = 0x0033;
+    /// `iotkit::ota`: a downloaded image waiting for its provider's go-ahead, or its time.
+    pub const OTA_STAGED: u16 = 0x0034;
+    /// `iotkit` (`ha-update`): whether and when updates install without a click.
+    pub const OTA_AUTO: u16 = 0x0035;
+    /// `iotkit` (`ha-update`): the update downloaded for a set time, and when.
+    pub const OTA_SCHEDULED: u16 = 0x0036;
+    /// `iotkit` (`deep-sleep`, `ha-update`): the release last found, shown between checks.
+    pub const OTA_KNOWN: u16 = 0x0037;
     /// `iotkit::mqtt`: the broker.
     pub const MQTT_BROKER: u16 = 0x0040;
     /// `iotkit::matter`: the setup code (passcode and discriminator).
     pub const MATTER_SETUP: u16 = 0x0050;
     /// `iotkit::esphome`: the ESPHome API's encryption key.
     pub const ESPHOME_API_KEY: u16 = 0x0060;
+    /// `iotkit::esphome`: Home Assistant has connected once (the health check then waits for it).
+    pub const ESPHOME_CLIENT: u16 = 0x0061;
+    /// `iotkit` (`deep-sleep`): the device reached its link once (else it starts in pairing mode).
+    pub const SLEEP_LINKED: u16 = 0x0070;
 }
 
 /// Largest encoded setting, version byte included.

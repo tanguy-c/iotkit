@@ -18,8 +18,8 @@ use crate::runtime::atomic::{AtomicU8, Ordering};
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal, watch::Watch};
 
-/// Parties that can register.
-pub const MAX_PARTIES: usize = 4;
+/// Parties that can register: MQTT, each ESPHome API client, mDNS, a status LED...
+pub const MAX_PARTIES: usize = 6;
 
 static REQUEST: Watch<CriticalSectionRawMutex, (), MAX_PARTIES> = Watch::new();
 static REGISTERED: AtomicU8 = AtomicU8::new(0);

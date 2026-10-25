@@ -44,31 +44,49 @@ pub struct Health {
     required: AtomicU32,
     passed: AtomicU32,
     changed: Signal<CriticalSectionRawMutex, ()>,
+    /// Told of every change, for more waiters than [`healthy`](Self::healthy)'s one.
+    observer: Option<fn()>,
 }
 
 impl Health {
     /// Health that requires `required` (more with [`require`](Self::require)).
     pub const fn new(required: &[Check]) -> Self {
+        Self::build(required, None)
+    }
+
+    /// The same, calling `observer` at each change.
+    pub const fn observed(required: &[Check], observer: fn()) -> Self {
+        Self::build(required, Some(observer))
+    }
+
+    const fn build(required: &[Check], observer: Option<fn()>) -> Self {
         let mut mask = 0;
         let mut i = 0;
         while i < required.len() {
             mask |= required[i].bit();
             i += 1;
         }
-        Self { required: AtomicU32::new(mask), passed: AtomicU32::new(0), changed: Signal::new() }
+        Self { required: AtomicU32::new(mask), passed: AtomicU32::new(0), changed: Signal::new(), observer }
+    }
+
+    fn changed(&self) {
+        self.changed.signal(());
+        if let Some(observer) = self.observer {
+            observer();
+        }
     }
 
     /// Adds `check` to the required ones (e.g. an app's own, next to a kit's).
     pub fn require(&self, check: Check) {
         self.required.fetch_or(check.bit(), Ordering::AcqRel);
-        self.changed.signal(());
+        self.changed();
     }
 
     /// Marks `check` as passed.
     pub fn pass(&self, check: Check) {
         let before = self.passed.fetch_or(check.bit(), Ordering::AcqRel);
         if before & check.bit() == 0 {
-            self.changed.signal(());
+            self.changed();
         }
     }
 
