@@ -1,7 +1,8 @@
 # Dev and CI services: `docker compose -f test-server/compose.yaml up` (or podman compose).
 #   MQTT broker     mqtt://<this PC>:1883   (anonymous, for development only)
 #   Updates         http://<this PC>:8080/<package>/manifest.json   (serves ../dist from `cargo xtask build`)
-#   Home Assistant  http://localhost:8123   (`up -d homeassistant`; about 1.7 GB; its broker is `mosquitto`)
+#   Home Assistant  http://localhost:8123   (`up -d homeassistant`; about 1.7 GB; its broker is localhost:1883;
+#                   host network, as on a real install: mDNS, `.local` names and ESPHome discovery)
 #   Matter server   ws://localhost:5580/ws  (`up -d matter-server`; host network: Matter needs IPv6
 #                   multicast; in the Home Assistant container's Matter integration the URL is
 #                   ws://host.containers.internal:5580/ws with rootless podman)
@@ -25,7 +26,9 @@ services:
 
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
-    ports: ["8123:8123"]
+    # mDNS needs the host's network: a bridged container cannot resolve `iotkit-xxxx.local` or
+    # discover ESPHome devices.
+    network_mode: host
     volumes:
       - ./ha-config:/config:Z
     depends_on: [mosquitto]
@@ -35,6 +38,10 @@ services:
     network_mode: host
     # The device may only have an IPv6 link-local address: name the interface towards it
     # (`MATTER_INTERFACE=wlp2s0 docker compose ... up -d matter-server`; `ip link` lists them).
-    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlan0}"]
+    # Its OTA provider offers the `.ota` files `cargo iotkit ota build` writes (one app's
+    # `dist/<package>/`: `MATTER_OTA_DIR=../dist/devkit` for another), and keeps its state per
+    # device in a folder there.
+    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlan0}", "--ota-provider-dir", "/updates"]
     volumes:
       - ./matter-data:/data:Z
+      - ${MATTER_OTA_DIR:-../dist/thread-light}:/updates:Z
