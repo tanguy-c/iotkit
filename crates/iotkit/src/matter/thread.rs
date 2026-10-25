@@ -1,21 +1,27 @@
 //! Matter over Thread: rs-matter-embassy's Thread stack owns the 802.15.4 radio and Bluetooth
-//! (commissioning over BLE gives the device its Thread network). No Wi-Fi, so no `iotkit::net`,
-//! MQTT or HTTP OTA. Needs a Thread border router (Home Assistant's OpenThread Border Router,
-//! a Google or Apple hub) and `clang` + `cmake` to build OpenThread.
+//! (commissioning over BLE gives the device its Thread network). No Wi-Fi, so no `iotkit::net`
+//! or MQTT; updates come over Matter (`matter-ota`). Needs a Thread border router (Home
+//! Assistant's OpenThread Border Router, a Google or Apple hub) and `clang` + `cmake` to build
+//! OpenThread. [`NETWORK`](crate::health::NETWORK) passes once attached to the Thread network.
 
 use core::pin::pin;
 
+use crate::Firmware;
 use crate::config::esp::{NVS_LABEL, SharedFlash, SharedStore, find_partition};
+use crate::health::{HEALTH, NETWORK, Radio, radio_failed};
 use crate::model::Device;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_futures::select::{Either, select};
 use esp_hal::peripherals::{ADC1, BT, IEEE802154, RNG};
+#[cfg(not(feature = "matter-icd"))]
+use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 use rs_matter_embassy::{
     matter::{
         crypto::{Crypto, Rng, default_crypto},
+        dm::networks::NetChangeNotif,
         dm::{
             Async, Dataver, EmptyHandler, Node,
-            clusters::desc,
+            clusters::{desc, gen_diag::NetifDiag},
             devices::test::{DAC_PRIVKEY, TEST_DEV_ATT},
             endpoints::ROOT_ENDPOINT_ID,
         },
@@ -24,8 +30,8 @@ use rs_matter_embassy::{
         utils::init::InitMaybeUninit,
     },
     persist::SeqMapKvBlobStore,
-    stack::rand::reseeding_csprng,
-    wireless::{EmbassyThread, EmbassyThreadMatterStack, esp::EspThreadDriver},
+    stack::{UserTask, nal::NetStack, rand::reseeding_csprng},
+    wireless::esp::EspThreadDriver,
 };
 use static_cell::StaticCell;
 
@@ -34,15 +40,22 @@ pub use crate::matter::common::{
 };
 use crate::matter::{
     clusters::{Colors, Identifies},
-    common::{REQUESTS, Request, identity, setup_code},
+    common::{Request, Tap, identity, next_request, setup_code, started, updates},
     endpoints::{self, COLOR, DESC, IDENTIFY},
     handler::Entities,
 };
 
-/// Memory for the stack's futures.
+/// Memory for the stack's futures; the OTA requestor's (a CASE session, a BDX download) too.
+#[cfg(not(feature = "matter-ota"))]
 const BUMP_SIZE: usize = 20_000;
+#[cfg(feature = "matter-ota")]
+const BUMP_SIZE: usize = 32_000;
 
+#[cfg(not(feature = "matter-icd"))]
 type Stack = EmbassyThreadMatterStack<'static, BUMP_SIZE, ()>;
+// On battery, a sleepy end device ([`crate::matter::icd`]).
+#[cfg(feature = "matter-icd")]
+type Stack = crate::matter::icd::Stack<BUMP_SIZE>;
 
 /// The radios, and the TRNG's entropy source (without Wi-Fi, it needs the ADC).
 pub struct Peripherals {
@@ -56,31 +69,66 @@ pub struct Peripherals {
     pub adc1: ADC1<'static>,
 }
 
-/// Runs Matter over Thread for the entities of `device`; never returns. `name`: a unique name
-/// for the device (shown in controllers, used as serial number).
+/// Runs Matter over Thread for the entities of `device`, as `product_name` at the version of
+/// `firmware` (which `matter-ota` updates); never returns. `name`: a unique name for the device
+/// (shown in controllers, used as serial number).
 #[embassy_executor::task]
 pub async fn matter_task(
     p: Peripherals,
     store: &'static SharedStore,
-    product: Product,
+    product_name: &'static str,
+    firmware: Firmware,
     name: &'static str,
     device: &'static Device,
 ) {
     // Kept for the task's lifetime: the TRNG needs it.
     let _entropy = esp_hal::rng::TrngSource::new(p.rng, p.adc1);
-    if let Err(e) = run(p.radio, p.bt, store, product, name, device).await {
+    if let Err(e) = run(p.radio, p.bt, store, product_name, firmware, name, device).await {
         log::error!("matter: stopped: {e:?}");
+        radio_failed(Radio::Thread);
     }
 }
 
+/// Passes [`NETWORK`] once the Thread interface is operational (attached, with addresses). The
+/// stack runs it on the operational network only.
+struct ThreadCheck;
+
+impl UserTask for ThreadCheck {
+    async fn run<S, N>(&mut self, _net_stack: S, netif: N) -> Result<(), Error>
+    where
+        S: NetStack,
+        N: NetifDiag + NetChangeNotif,
+    {
+        loop {
+            let mut up = false;
+            netif.netifs(&mut |ni| {
+                up |= ni.operational;
+                Ok(())
+            })?;
+            if up {
+                if !HEALTH.has_passed(NETWORK) {
+                    log::info!("thread: attached");
+                    HEALTH.pass(NETWORK);
+                }
+                // Returning would stop the stack.
+                core::future::pending::<()>().await;
+            }
+            netif.wait_changed().await;
+        }
+    }
+}
+
+#[cfg_attr(not(feature = "matter-ota"), allow(unused_variables))]
 async fn run(
     radio: IEEE802154<'static>,
     bt: BT<'static>,
     store: &'static SharedStore,
-    product: Product,
+    product_name: &'static str,
+    firmware: Firmware,
     name: &'static str,
     device: &'static Device,
 ) -> Result<(), Error> {
+    let product = Product::of(product_name, firmware);
     let trng = esp_hal::rng::Trng::try_new().map_err(|_| Error::from(ErrorCode::NoSpace))?;
     let Ok(csprng) = reseeding_csprng(trng, 1000);
     let crypto = default_crypto(csprng, DAC_PRIVKEY);
@@ -91,7 +139,11 @@ async fn run(
     static STACK: StaticCell<Stack> = StaticCell::new();
     let stack = STACK.uninit().init_with(Stack::init(info, comm, &TEST_DEV_ATT));
 
-    let (node, eps) = endpoints::build(device, Stack::root_endpoint(), &mut rand);
+    #[cfg(not(feature = "matter-ota"))]
+    let root = Stack::root_endpoint();
+    #[cfg(feature = "matter-ota")]
+    let root = crate::matter::ota::root_endpoint!(thread);
+    let (node, eps) = endpoints::build(device, root, &mut rand);
     let node: Node<'static> = node;
     // Mutually exclusive matchers: the last chained is tried first.
     let handler = EmptyHandler
@@ -106,6 +158,11 @@ async fn run(
             |e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id && c != IDENTIFY.id,
             Async(Entities { eps }),
         );
+    #[cfg(feature = "matter-ota")]
+    let handler = handler.chain(
+        |e, c| e == ROOT_ENDPOINT_ID && c == crate::matter::ota::CLUSTER.id,
+        crate::matter::ota::requestor(updates(), firmware, store, Dataver::new_rand(&mut rand)),
+    );
 
     let range = find_partition(NVS_LABEL).ok_or(Error::from(ErrorCode::NoSpace))?;
     let mut kv_store = SeqMapKvBlobStore::new(BlockingAsync::new(SharedFlash), range.clone());
@@ -116,19 +173,23 @@ async fn run(
         stack.startup(&crypto, &mut kv_store).await?;
     }
     let kv = stack.matter().kv(kv_store);
+    started(stack.matter());
+    if !stack.matter().has_fabrics() {
+        // Not commissioned: no Thread network to join yet.
+        HEALTH.pass(NETWORK);
+    }
 
     let mut eui64 = [0; 8];
     rand.fill_bytes(&mut eui64);
-    let matter = pin!(stack.run(
-        EmbassyThread::new(EspThreadDriver::new(radio, bt), crypto.rand()?, eui64, &kv, stack, true),
-        &crypto,
-        (node, handler),
-        &kv,
-        (),
-    ));
+    #[cfg(not(feature = "matter-icd"))]
+    let thread = EmbassyThread::new(EspThreadDriver::new(radio, bt), crypto.rand()?, eui64, &kv, stack, true);
+    #[cfg(feature = "matter-icd")]
+    let thread =
+        crate::matter::icd::SleepyThread::new(EspThreadDriver::new(radio, bt), crypto.rand()?, eui64, &kv, stack);
+    let matter = pin!(stack.run(thread, &crypto, (node, Tap(handler)), &kv, ThreadCheck));
     let requests = async {
         loop {
-            match REQUESTS.wait().await {
+            match next_request(stack.matter()).await {
                 Request::Pair => match stack.matter().open_basic_comm_window(PAIRING_WINDOW_S, &crypto, &()) {
                     Ok(()) => log::info!("matter: pairing window open for {} min", PAIRING_WINDOW_S / 60),
                     Err(e) => log::warn!("matter: cannot open a pairing window: {e:?}"),

@@ -32,11 +32,15 @@ mod appliances;
 #[cfg(feature = "_esp")]
 mod clusters;
 #[cfg(feature = "_esp")]
-mod common;
+pub(crate) mod common;
 #[cfg(feature = "_esp")]
 mod endpoints;
 #[cfg(feature = "_esp")]
 mod handler;
+#[cfg(feature = "matter-icd")]
+pub mod icd;
+#[cfg(feature = "matter-ota")]
+mod ota;
 #[cfg(feature = "matter-thread")]
 pub mod thread;
 // Links the C library functions OpenThread and mbedtls call.
