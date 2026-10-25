@@ -1,0 +1,36 @@
+[package]
+name         = "ble-beacon"
+description  = "The ESP32-C6's temperature in BTHome advertisements: iotkit's boot records and health check without its network or updates"
+publish      = false
+version      = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+
+[features]
+default = ["esp32c6"]
+esp32c6 = ["esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-alloc/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-radio/esp32c6", "esp-println/esp32c6", "iotkit/esp32c6"]
+
+[dependencies]
+# A path, not `workspace = true`: older cargo cannot turn the default features off over it.
+# No `wifi`, `matter-*` or updates: the store, boot records and the health check only.
+iotkit = { path = "../../crates/iotkit", default-features = false, features = ["panic-handler"] }
+
+esp-alloc              = { workspace = true }
+esp-hal                = { workspace = true }
+esp-rtos               = { workspace = true }
+esp-radio              = { version = "1.0.0-beta.1", features = ["ble", "esp-alloc", "log-04", "unstable"] }
+esp-bootloader-esp-idf = { workspace = true }
+esp-println            = { workspace = true }
+embassy-executor       = { workspace = true }
+embassy-futures        = "0.1"
+embassy-sync           = { workspace = true }
+embassy-time           = { workspace = true }
+static_cell            = { workspace = true }
+log                    = { workspace = true }
+# As iotkit's Improv over Bluetooth.
+bt-hci                 = "0.10"
+trouble-host           = { version = "0.8", default-features = false, features = ["peripheral", "default-packet-pool"] }
+
+[build-dependencies]
+iotkit-build = { workspace = true }
