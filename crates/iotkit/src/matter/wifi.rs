@@ -8,6 +8,7 @@ use core::{
     pin::pin,
 };
 
+use crate::Firmware;
 use crate::config::esp::{NVS_LABEL, SharedFlash, SharedStore, find_partition};
 use crate::model::Device;
 use crate::net::esp::Net;
@@ -19,7 +20,7 @@ pub use crate::matter::common::{
 };
 use crate::matter::{
     clusters::{Colors, Identifies},
-    common::{REQUESTS, Request, identity, setup_code},
+    common::{Request, Tap, Updates, identity, next_request, setup_code, started, updates},
     endpoints::{self, COLOR, DESC, Ep, IDENTIFY},
     handler::Entities,
 };
@@ -53,8 +54,11 @@ use rs_matter_embassy::{
 };
 use static_cell::StaticCell;
 
-/// Memory for the stack's futures.
+/// Memory for the stack's futures; the OTA requestor's (a CASE session, a BDX download) too.
+#[cfg(not(feature = "matter-ota"))]
 const BUMP_SIZE: usize = 20_000;
+#[cfg(feature = "matter-ota")]
+const BUMP_SIZE: usize = 32_000;
 
 type Stack = EthMatterStack<'static, BUMP_SIZE, ()>;
 
@@ -90,10 +94,18 @@ impl Mdns for HostMdns {
     }
 }
 
-/// Runs Matter on `net` for the entities of `device` (see the [crate] docs); never returns.
-/// After an error it starts again (it also answers `<hostname>.local`).
+/// Runs Matter on `net` for the entities of `device` (see the [crate] docs), as `product_name`
+/// at the version of `firmware` (which `matter-ota` updates); never returns. After an error it
+/// starts again (it also answers `<hostname>.local`).
 #[embassy_executor::task]
-pub async fn matter_task(net: Net, store: &'static SharedStore, product: Product, device: &'static Device) {
+pub async fn matter_task(
+    net: Net,
+    store: &'static SharedStore,
+    product_name: &'static str,
+    firmware: Firmware,
+    device: &'static Device,
+) {
+    let product = Product::of(product_name, firmware);
     let Ok(trng) = esp_hal::rng::Trng::try_new() else {
         log::error!("matter: no random number generator");
         return;
@@ -109,18 +121,26 @@ pub async fn matter_task(net: Net, store: &'static SharedStore, product: Product
     let stack = STACK.uninit().init_with(Stack::init(info, comm, &TEST_DEV_ATT));
     static BUFFERS: StaticCell<EnetMatterUdpBuffers> = StaticCell::new();
     let buffers = BUFFERS.init(EnetMatterUdpBuffers::new());
-    let (node, eps) = endpoints::build(device, Stack::root_endpoint(), &mut rand);
+    #[cfg(not(feature = "matter-ota"))]
+    let root = Stack::root_endpoint();
+    #[cfg(feature = "matter-ota")]
+    let root = crate::matter::ota::root_endpoint!(eth);
+    let (node, eps) = endpoints::build(device, root, &mut rand);
     let node: &'static [rs_matter_embassy::matter::dm::Endpoint<'static>] = node.endpoints;
 
+    #[cfg_attr(not(feature = "matter-ota"), allow(clippy::let_unit_value))]
+    let updates = updates();
     loop {
         let node = Node { endpoints: node };
-        if let Err(e) = run(net, stack, &crypto, node, eps, buffers).await {
+        if let Err(e) = run(net, stack, &crypto, node, eps, buffers, store, firmware, updates).await {
             log::error!("matter: stopped: {e:?}, starting again in 10 s");
         }
         embassy_time::Timer::after_secs(10).await;
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(feature = "matter-ota"), allow(unused_variables))]
 async fn run<C: Crypto>(
     net: Net,
     stack: &mut Stack,
@@ -128,6 +148,9 @@ async fn run<C: Crypto>(
     node: Node<'static>,
     eps: &'static [Ep],
     buffers: &EnetMatterUdpBuffers,
+    store: &'static SharedStore,
+    firmware: Firmware,
+    updates: Updates,
 ) -> Result<(), Error> {
     let mut rand = crypto.weak_rand()?;
     // Mutually exclusive matchers: the last chained is tried first.
@@ -143,6 +166,11 @@ async fn run<C: Crypto>(
             |e, c| e != ROOT_ENDPOINT_ID && c != DESC.id && c != COLOR.id && c != IDENTIFY.id,
             Async(Entities { eps }),
         );
+    #[cfg(feature = "matter-ota")]
+    let handler = handler.chain(
+        |e, c| e == ROOT_ENDPOINT_ID && c == crate::matter::ota::CLUSTER.id,
+        crate::matter::ota::requestor(updates, firmware, store, Dataver::new_rand(&mut rand)),
+    );
 
     // Pairings and the rest of rs-matter's state, in the `nvs` partition. If it does not load
     // (another firmware's data, say), it is erased and Matter starts unpaired.
@@ -155,6 +183,7 @@ async fn run<C: Crypto>(
         stack.startup(crypto, &mut kv_store).await?;
     }
     let kv = stack.matter().kv(kv_store);
+    started(stack.matter());
 
     let mut mdns = HostMdns { mdns: BuiltinMdns::new(), hostname: net.hostname };
     let matter = pin!(stack.run_preex(
@@ -162,13 +191,13 @@ async fn run<C: Crypto>(
         EnetNetif::new(net.stack, InterfaceTypeEnum::WiFi),
         &mut mdns,
         crypto,
-        (node, handler),
+        (node, Tap(handler)),
         &kv,
         (),
     ));
     let requests = async {
         loop {
-            match REQUESTS.wait().await {
+            match next_request(stack.matter()).await {
                 Request::Pair => match stack.matter().open_basic_comm_window(PAIRING_WINDOW_S, crypto, &()) {
                     Ok(()) => log::info!("matter: pairing window open for {} min", PAIRING_WINDOW_S / 60),
                     Err(e) => log::warn!("matter: cannot open a pairing window: {e:?}"),

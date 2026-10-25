@@ -56,9 +56,15 @@ development, not for selling devices.
 
 ## Matter over Thread
 
-`iotkit` with `default-features = false` and `matter-thread` (ESP32-C6 or H2; building needs
-`clang` and `cmake`). `apps/thread-light` boots and advertises for Bluetooth commissioning; it is
-untested end to end (it needs a Thread border router).
+`cargo iotkit new` with *Thread* as the network (an ESP32-C6, or an ESP32-H2 board with 8 MB of
+flash) makes one: `iotkit` with `default-features = false`, `matter-thread` and `matter-ota`, and
+`iotkit::start` with the Thread `Board`
+(the 802.15.4 radio, Bluetooth, the RNG and ADC1 for its entropy, so no analog parts yet).
+Building needs `clang` and `cmake`. It pairs over Bluetooth, then joins the controller's Thread
+network; holding BOOT 3 s opens a pairing window for another controller. Updates come over Matter
+([Updates](updates.md#over-matter-thread-wi-fi)). `apps/thread-light` is this output for
+`xtask/answers/thread.toml`; it boots and advertises for Bluetooth commissioning, and is untested
+end to end (it needs a Thread border router).
 
 ## A test setup on the PC
 

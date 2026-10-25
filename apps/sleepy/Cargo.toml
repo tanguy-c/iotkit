@@ -9,16 +9,20 @@ license.workspace      = true
 
 [features]
 default = ["esp32c6"]
-esp32c6 = ["iotkit/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6"]
+esp32c6 = ["iotkit/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-hal-smartled/esp32c6"]
+## Home Assistant's ESPHome integration instead of MQTT (no "Stay awake": see the main.rs docs).
+esphome-api = ["iotkit/esphome-api"]
 
 [dependencies]
-iotkit = { workspace = true, features = ["deep-sleep", "ha-update"] }
+iotkit = { workspace = true, features = ["deep-sleep", "ha-update", "smartled"] }
 
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }
 embassy-executor       = { workspace = true }
 embassy-futures        = "0.1"
 embassy-time           = { workspace = true }
+esp-hal-smartled       = { workspace = true }
+smart-leds             = { workspace = true }
 log                    = { workspace = true }
 
 [build-dependencies]

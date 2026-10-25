@@ -27,6 +27,59 @@ pub mod id {
     pub const LIST_ENTITIES_REQUEST: u16 = 11;
     pub const LIST_ENTITIES_DONE: u16 = 19;
     pub const SUBSCRIBE_STATES_REQUEST: u16 = 20;
+    pub const GET_TIME_REQUEST: u16 = 36;
+    pub const GET_TIME_RESPONSE: u16 = 37;
+}
+
+/// GetTimeResponse: the time (Unix seconds) and Home Assistant's time zone (UTC if it sent none).
+pub fn time(body: &[u8]) -> Option<(u32, crate::time::Zone)> {
+    use crate::time::{Day, Transition, Zone};
+    let sint = |v: Value| {
+        let n = v.uint();
+        (n >> 1) as i32 ^ -((n & 1) as i32)
+    };
+    let rule = |b: &[u8]| {
+        let (mut t, mut kind, mut day, mut month, mut week, mut weekday) = (Transition::default(), 0, 0, 0, 0, 0);
+        for (field, v) in Fields::new(b) {
+            match field {
+                1 => t.time_s = sint(v),
+                2 => day = v.uint(),
+                3 => kind = v.uint(),
+                4 => month = v.uint(),
+                5 => week = v.uint(),
+                6 => weekday = v.uint(),
+                _ => {}
+            }
+        }
+        t.day = match kind {
+            1 if (1..=12).contains(&month) && (1..=5).contains(&week) && weekday <= 6 => {
+                Day::MonthWeekDay { month: month as u8, week: week as u8, weekday: weekday as u8 }
+            }
+            2 if (1..=365).contains(&day) => Day::JulianNoLeap(day as u16),
+            3 if day <= 365 => Day::DayOfYear(day as u16),
+            _ => Day::None,
+        };
+        t
+    };
+    let (mut epoch, mut zone) = (None, Zone::UTC);
+    for (field, v) in Fields::new(body) {
+        match (field, v) {
+            (1, v) => epoch = Some(v.fixed32()),
+            (3, Value::Bytes(b)) => {
+                for (field, v) in Fields::new(b) {
+                    match (field, v) {
+                        (1, v) => zone.std_offset_s = sint(v),
+                        (2, v) => zone.dst_offset_s = sint(v),
+                        (3, Value::Bytes(b)) => zone.dst_start = rule(b),
+                        (4, Value::Bytes(b)) => zone.dst_end = rule(b),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    epoch.filter(|&e| e > 0).map(|e| (e, zone))
 }
 
 /// The entity key in messages: the FNV-1a hash of its id, the same at every boot.
@@ -47,9 +100,12 @@ pub fn hello(w: &mut Writer, name: &str) -> u16 {
 pub fn device_info(w: &mut Writer, device: &Device, mac: &str) -> u16 {
     w.str(2, device.name);
     w.str(3, mac);
-    // Shown as the ESPHome version: iotkit's.
-    w.str(4, env!("CARGO_PKG_VERSION"));
+    // Shown as the ESPHome version: iotkit's, named (Home Assistant writes "ESPHome" before it).
+    w.str(4, concat!("iotkit ", env!("CARGO_PKG_VERSION")));
     w.str(6, device.model);
+    // Asleep is not offline: Home Assistant keeps the states instead of showing it unavailable.
+    #[cfg(feature = "deep-sleep")]
+    w.bool(7, true);
     // The app as an ESPHome "project", `maker.model`: Home Assistant shows the two parts as the
     // device's manufacturer and model (it requires the dot), and the firmware version.
     let mut project = heapless::String::<96>::new();
@@ -291,7 +347,9 @@ pub fn state(w: &mut Writer, entity: &dyn Entity) -> Option<u16> {
             w.bool(4, u.percentage.is_some());
             w.float(5, u.percentage.map_or(0.0, f32::from));
             w.str(6, &u.installed);
-            w.str(7, &u.latest);
+            // Not checked yet: up to date, as over MQTT (Home Assistant shows any other latest
+            // version, an empty one too, as an update).
+            w.str(7, if u.latest.is_empty() { &u.installed } else { &u.latest });
             w.str(8, entity.meta().name);
             w.str(9, &u.summary);
             w.str(10, &u.release_url);

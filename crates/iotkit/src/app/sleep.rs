@@ -1,4 +1,5 @@
-//! Deep-sleeping devices (feature `deep-sleep`, MQTT only): wake up, report, sleep.
+//! Deep-sleeping devices (feature `deep-sleep`, over MQTT or the ESPHome API): wake up, report,
+//! sleep.
 //!
 //! ```ignore
 //! static SLEEP: SleepConfig = SleepConfig { interval: Duration::from_secs(300), max_awake: Duration::from_secs(30) };
@@ -11,13 +12,21 @@
 //!
 //! What a wake-up does differently from [`start`](super::start): the access point and the
 //! address of the last wake-up are reused (no scan, no DHCP; kept in RTC memory, lost on power
-//! loss); boots are not written to flash; MQTT has no last will (asleep is not offline),
+//! loss); boots are not written to flash. Over MQTT: no last will (asleep is not offline),
 //! commands are retained (Home Assistant's command waits for the next wake-up), readings expire
-//! after twice the interval, and the discovery is sent only when it changed. If the device cannot
-//! reach the broker within `max_awake`, it sleeps again, longer after each failure, and forgets
-//! the access point and address after two. It stays awake while a setup window is open or an
-//! update is installing, or on trial (until healthy, or rolled back after
+//! after twice the interval, and the discovery is sent only when it changed. Over the ESPHome API
+//! (`esphome-api`): the device says it sleeps (Home Assistant keeps its states), and the wake-up
+//! lasts until Home Assistant has connected and received the states. If that link is not up
+//! within `max_awake`, it sleeps again, longer after each failure, and forgets the access point
+//! and address after two. It stays awake while a setup window is open, in pairing mode, or
+//! while an update is installing or on trial (until healthy, or rolled back after
 //! [`UPDATE_TIMEOUT_S`](crate::ota::UPDATE_TIMEOUT_S)).
+//!
+//! **Pairing mode** keeps it awake for 10 minutes (a short press ends it sooner): at power-on
+//! until it has been linked once, and when the button is held 3 s (which also opens the setup
+//! window). The
+//! button (`Board::boot_button`) wakes the chip when it is on a low-power pin (GPIO0-7 on the
+//! C6, not its BOOT button): a short press then wakes it for a report, a 3 s hold for pairing.
 
 use core::cell::RefCell;
 
@@ -28,7 +37,7 @@ use embassy_futures::select::{Either, select};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use esp_hal::{
-    gpio::{Input, InputConfig, Pull},
+    gpio::{Input, InputConfig, Pin, Pull, WakeupConfig},
     peripherals::LPWR,
     rtc_cntl::{
         SocResetReason, WakeupSource,
@@ -39,16 +48,18 @@ use esp_hal::{
 use log::{error, info, warn};
 use static_cell::StaticCell;
 
-use super::{
-    App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, broker_check_task, network_check_task, radio_failed, spawn,
-    supervisor_task,
-};
+use super::wifi::{Ble, broker_check_task, network_check_task, provisioner, require_checks, spawn_provisioning};
+use super::{App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, spawn};
+use crate::config::{Setting, keys};
+use crate::health::{Radio, radio_failed, supervisor_task};
+use crate::provision::gesture::Gesture;
 
 /// How a deep-sleeping device sleeps.
 pub struct SleepConfig {
     /// Time asleep between two wake-ups.
     pub interval: Duration,
-    /// Longest time awake without reaching the broker before sleeping again.
+    /// Longest time awake without the link (the broker, or Home Assistant over the ESPHome API)
+    /// before sleeping again.
     pub max_awake: Duration,
 }
 
@@ -97,8 +108,11 @@ const GATEWAY: usize = 8;
 const DNS: usize = 9;
 const FAILURES: usize = 10;
 const LEASE_AGE: usize = 11;
-const WORDS: usize = 12;
-const MAGIC_VALUE: u32 = 0x5130_0001;
+/// When the release was last checked for: RTC seconds ([`rtc_seconds`]), [`NEVER`] at first.
+const LAST_CHECK: usize = 12;
+const WORDS: usize = 13;
+const MAGIC_VALUE: u32 = 0x5130_0002;
+const NEVER: u32 = u32::MAX;
 /// A lease older than this is asked again (most routers lease for an hour or more).
 const LEASE_REUSE_S: u32 = 30 * 60;
 
@@ -120,10 +134,41 @@ fn rtc_init(woke: bool) -> u32 {
             *r = [0; WORDS];
             r[MAGIC] = MAGIC_VALUE;
             r[BOOTS] = boots;
+            r[LAST_CHECK] = NEVER;
         }
         r[BOOTS] = r[BOOTS].wrapping_add(1);
         r[BOOTS]
     })
+}
+
+/// Started with [`start_sleepy`]: the RTC block is valid.
+static SLEEPY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Seconds since power-up, counted on through deep sleep by the RTC timer.
+#[cfg(feature = "ha-update")]
+fn rtc_seconds() -> u32 {
+    // SAFETY: only read, as esp-hal's own sleep code borrows it.
+    let rtc = esp_hal::rtc_cntl::Rtc::new(unsafe { esp_hal::peripherals::RTC_TIMER::steal() });
+    rtc.time_since_power_up().as_secs() as u32
+}
+
+/// Seconds since the release was last checked for, across deep sleeps: `None` if never this
+/// power-up, or not started with [`start_sleepy`].
+#[cfg(feature = "ha-update")]
+pub(crate) fn since_check() -> Option<u32> {
+    if !SLEEPY.load(core::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    rtc(|r| (r[LAST_CHECK] != NEVER).then(|| rtc_seconds().saturating_sub(r[LAST_CHECK])))
+}
+
+/// The release was checked for now; `ago`: as if `ago` seconds before (to check again sooner).
+#[cfg(feature = "ha-update")]
+pub(crate) fn checked(ago: u32) {
+    if SLEEPY.load(core::sync::atomic::Ordering::Relaxed) {
+        let at = rtc_seconds().saturating_sub(ago);
+        rtc(|r| r[LAST_CHECK] = at);
+    }
 }
 
 fn bssid_words(b: [u8; 6]) -> [u32; 2] {
@@ -156,7 +201,7 @@ fn fast_connect() -> FastConnect {
     })
 }
 
-/// Keeps the access point and the address of a wake-up that reached the broker.
+/// Keeps the access point and the address of a wake-up whose link came up.
 fn remember(net: Net) {
     let ap = crate::net::esp::connected_ap();
     let lease = net.stack.config_v4();
@@ -196,7 +241,7 @@ fn installing() -> bool {
         return true;
     }
     #[cfg(feature = "ha-update")]
-    if super::update::FIRMWARE.install_requested() {
+    if super::update::FIRMWARE.install_requested() || super::update::checking() {
         return true;
     }
     crate::ota::esp::installing()
@@ -208,6 +253,12 @@ fn deep_sleep(duration: Duration) -> ! {
     let Some(lpwr) = lpwr else {
         error!("sleep: no LPWR peripheral; restarting instead");
         esp_hal::system::software_reset()
+    };
+    // Awake for an update scheduled sooner (a minute at least, if it could not install now).
+    #[cfg(esp_scheduled)]
+    let duration = match super::update::seconds_to_due() {
+        Some(s) => duration.min(Duration::from_secs(s.max(60))),
+        None => duration,
     };
     let awake = Instant::now().as_secs().saturating_add(duration.as_secs());
     rtc(|r| r[LEASE_AGE] = r[LEASE_AGE].saturating_add(awake.min(u64::from(u32::MAX)) as u32));
@@ -235,7 +286,7 @@ fn busy_wait(duration: esp_hal::time::Duration) {
     while start.elapsed() < duration {}
 }
 
-/// When the broker was reached in this wake-up.
+/// When the link came up in this wake-up.
 static CONNECTED_AT: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::Cell<Option<Instant>>> =
     embassy_sync::blocking_mutex::Mutex::new(core::cell::Cell::new(None));
 
@@ -252,11 +303,12 @@ pub struct SleepyApp {
 }
 
 impl SleepyApp {
-    /// Waits until the broker is reached and the retained commands had time to arrive (they
-    /// come right after the connection): then the app knows what Home Assistant asked.
-    /// `false` if not reached within [`SleepConfig::max_awake`].
+    /// Waits until the link is up (the broker reached, or Home Assistant connected over the
+    /// ESPHome API and sent the states) and commands had time to arrive (retained ones come right
+    /// after the connection): then the app knows what Home Assistant asked.
+    /// `false` if not up within [`SleepConfig::max_awake`].
     pub async fn settled(&self) -> bool {
-        if with_timeout(self.sleep.max_awake, crate::mqtt::esp::wait_connected()).await.is_err() {
+        if with_timeout(self.sleep.max_awake, wait_link()).await.is_err() {
             return false;
         }
         let at = CONNECTED_AT.lock(core::cell::Cell::get).unwrap_or_else(Instant::now);
@@ -271,14 +323,14 @@ impl SleepyApp {
 
     /// The same, for `duration`.
     pub async fn sleep_for(&self, duration: Duration) -> ! {
-        // Not while an update installs, or a setup window is open.
-        while installing() || crate::provision::esp::window_open() {
+        // Not while an update installs, a setup window is open, or in pairing mode.
+        while stays_awake() {
             Timer::after_secs(1).await;
         }
         if self.settled().await {
             rtc(|r| r[DISCOVERY_HASH] = crate::mqtt::esp::discovery_hash());
         }
-        // MQTT sends what is pending and disconnects.
+        // MQTT and the ESPHome API send what is pending and disconnect.
         let _ = with_timeout(Duration::from_secs(5), crate::runtime::shutdown::shutdown()).await;
         deep_sleep(duration)
     }
@@ -297,6 +349,7 @@ pub async fn start_sleepy(
     let woke = wake_reason != WakeReason::PowerOn;
     let boots = rtc_init(woke);
     LPWR_PERIPHERAL.lock(|l| l.replace(Some(lpwr)));
+    SLEEPY.store(true, core::sync::atomic::Ordering::Relaxed);
     let boot = crate::diag::esp::boot();
     esp_println::logger::init_logger_from_env();
     let fw = config.firmware;
@@ -307,6 +360,7 @@ pub async fn start_sleepy(
     for &check in config.checks {
         HEALTH.require(check);
     }
+    require_checks();
 
     static STORE: StaticCell<SharedStore> = StaticCell::new();
     let store = match crate::config::esp::open().await {
@@ -349,18 +403,31 @@ pub async fn start_sleepy(
         }
         Err(e) => {
             error!("Wi-Fi: {e:?}");
-            radio_failed();
+            radio_failed(Radio::WiFi);
             None
         }
     };
     spawn(spawner, supervisor_task(store, fw.version));
     spawn(spawner, awake_guard_task(sleep));
+    if !woke && store.lock().await.load::<Linked>().await.ok().flatten().is_none() {
+        info!("sleep: never linked yet: pairing mode");
+        set_pairing(true);
+    }
+    spawn(spawner, pairing_task());
     if let Some(pin) = board.boot_button {
-        let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
-        spawn(spawner, crate::provision::esp::button_task(button, store));
+        let gpio = pin.number();
+        let mut button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
+        if let Err(e) = button.apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true))
+            && !woke
+        {
+            warn!("sleep: the button (GPIO{gpio}) cannot wake the chip: {e}");
+        }
+        // Held since the wake-up it caused.
+        let since = (wake_reason == WakeReason::Pin && button.is_low()).then(|| Instant::from_ticks(0));
+        spawn(spawner, button_task(button, store, net, since));
     }
     #[cfg(any(feature = "console", feature = "improv-serial"))]
-    super::spawn_console(spawner, board.usb, store, net.map(|net| super::provisioner(net, store, config)), config);
+    super::wifi::spawn_console(spawner, board.usb, store, net.map(|net| provisioner(net, store, config)), config);
 
     SleepyApp { app: App { store, net, stats }, wake_reason, boots, sleep }
 }
@@ -369,7 +436,7 @@ async fn start_services(
     spawner: Spawner,
     net: Net,
     store: &'static SharedStore,
-    bt: super::Ble,
+    bt: Ble,
     config: &'static Config,
     sleep: &'static SleepConfig,
     unprovisioned: bool,
@@ -395,42 +462,155 @@ async fn start_services(
             };
             spawn(spawner, crate::mqtt::esp::mqtt_sleepy_task(net, device, broker, sleepy));
             spawn(spawner, broker_check_task());
-            spawn(spawner, remember_task(net));
+            MQTT_LINK.store(true, core::sync::atomic::Ordering::Relaxed);
         }
         None => {
+            #[cfg(not(feature = "esphome-api"))]
             warn!("no MQTT broker: set one with `mqtt HOST[:PORT]` on the console");
             HEALTH.pass(BROKER);
         }
     }
+    #[cfg(feature = "esphome-api")]
+    spawn(spawner, crate::esphome::esp::api_task(net, device, store, crate::esphome::esp::key(store).await));
+    spawn(spawner, remember_task(net, store));
     #[cfg(feature = "ota-push")]
     spawn(spawner, crate::ota::esp::serve_task(net, store, config.firmware));
     #[cfg(all(feature = "ha-update", not(feature = "ota-push")))]
     spawn(spawner, crate::ota::esp::install_task(net, store, config.firmware));
     #[cfg(feature = "ha-update")]
     spawn(spawner, super::update::update_task(net, store, config.firmware));
-    super::spawn_provisioning(spawner, bt, super::provisioner(net, store, config), unprovisioned);
+    spawn_provisioning(spawner, bt, provisioner(net, store, config), unprovisioned);
 }
 
-/// Once the broker is reached: remember how, for the next wake-up.
-#[embassy_executor::task]
-async fn remember_task(net: Net) {
+/// A broker is stored: MQTT is a link too.
+static MQTT_LINK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The link a wake-up reports over: Home Assistant over the ESPHome API, or the broker (when
+/// one is stored, either does).
+async fn wait_link() {
+    #[cfg(feature = "esphome-api")]
+    if MQTT_LINK.load(core::sync::atomic::Ordering::Relaxed) {
+        select(crate::esphome::esp::wait_settled(), crate::mqtt::esp::wait_connected()).await;
+    } else {
+        crate::esphome::esp::wait_settled().await;
+    }
+    #[cfg(not(feature = "esphome-api"))]
     crate::mqtt::esp::wait_connected().await;
+}
+
+/// The device reached its link once: it no longer starts in pairing mode.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Linked;
+
+impl Setting for Linked {
+    const KEY: u16 = keys::SLEEP_LINKED;
+    const VERSION: u8 = 1;
+}
+
+/// Pairing mode (see the [module](self) docs).
+static PAIRING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static PAIRING_CHANGED: embassy_sync::signal::Signal<CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
+/// Pairing mode was asked for again (the button): it starts afresh.
+static PAIRING_ASKED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Whether the device is in pairing mode.
+pub(crate) fn pairing() -> bool {
+    PAIRING.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+fn set_pairing(on: bool) {
+    PAIRING.store(on, core::sync::atomic::Ordering::Relaxed);
+    PAIRING_CHANGED.signal(());
+    crate::status::notify();
+}
+
+/// Not asleep now: an update installs or is on trial, a setup window is open, pairing mode, or
+/// the button is down (BOOT cannot wake the chip: a hold started while awake keeps it awake).
+fn stays_awake() -> bool {
+    installing() || crate::provision::esp::window_open() || pairing() || crate::provision::gesture::pressing()
+}
+
+/// Ends pairing mode after the setup window's time, or when left with a short press.
+#[embassy_executor::task]
+async fn pairing_task() {
+    loop {
+        while !pairing() {
+            PAIRING_CHANGED.wait().await;
+        }
+        PAIRING_ASKED.store(false, core::sync::atomic::Ordering::Relaxed);
+        let window = crate::provision::esp::WINDOW;
+        info!("sleep: pairing mode for {} min (a short press ends it)", window.as_secs() / 60);
+        // Left with a short press, or asked for again with the button.
+        let changed = async {
+            while pairing() && !PAIRING_ASKED.load(core::sync::atomic::Ordering::Relaxed) {
+                PAIRING_CHANGED.wait().await;
+            }
+        };
+        match select(Timer::after(window), changed).await {
+            Either::First(()) => info!("sleep: pairing mode over"),
+            Either::Second(()) if pairing() => continue,
+            Either::Second(()) => info!("sleep: pairing mode left"),
+        }
+        set_pairing(false);
+        rtc(|r| r[FAILURES] = 0);
+    }
+}
+
+/// The button: a short press is the app's (or leaves pairing mode), held 3 s it opens the setup
+/// window in pairing mode, 10 s a factory reset. `since`: held since the wake-up it caused.
+#[embassy_executor::task]
+async fn button_task(
+    mut button: Input<'static>,
+    store: &'static SharedStore,
+    net: Option<Net>,
+    mut since: Option<Instant>,
+) {
+    loop {
+        match crate::provision::gesture::next(&mut button, since.take()).await {
+            Gesture::Press if pairing() => {
+                set_pairing(false);
+                // The window opened with the mode; without a network it stays, to get one.
+                if net.is_some_and(|n| n.is_online()) {
+                    crate::provision::esp::close_window();
+                }
+            }
+            Gesture::Press => crate::provision::gesture::pressed(),
+            Gesture::Provision => {
+                info!("sleep: button held, setup window open");
+                crate::provision::esp::open_window();
+                PAIRING_ASKED.store(true, core::sync::atomic::Ordering::Relaxed);
+                set_pairing(true);
+            }
+            Gesture::FactoryReset => crate::provision::esp::factory_reset(store).await,
+        }
+    }
+}
+
+/// Once the link is up: remember how, for the next wake-up.
+#[embassy_executor::task]
+async fn remember_task(net: Net, store: &'static SharedStore) {
+    wait_link().await;
+    let mut settings = store.lock().await;
+    if settings.load::<Linked>().await.ok().flatten().is_none() {
+        let _ = settings.save(&Linked).await;
+    }
+    drop(settings);
     CONNECTED_AT.lock(|c| c.set(Some(Instant::now())));
     remember(net);
-    info!("sleep: broker reached {} ms after the start", Instant::now().as_millis());
+    info!("sleep: link up {} ms after the start", Instant::now().as_millis());
 }
 
-/// Sleeps again when the broker is not reached within `max_awake` (not while a setup window is
+/// Sleeps again when the link is not up within `max_awake` (not while a setup window is
 /// open or an update installs or is on trial): 2, 4, then 8 times longer after each failure; after two, the
 /// remembered access point and address are dropped (a fresh scan and DHCP next time).
 #[embassy_executor::task]
 async fn awake_guard_task(sleep: &'static SleepConfig) {
     loop {
-        let connected = crate::mqtt::esp::wait_connected();
+        let connected = wait_link();
         if let Either::First(()) = select(connected, Timer::after(sleep.max_awake)).await {
             return;
         }
-        if installing() || crate::provision::esp::window_open() {
+        if stays_awake() {
             continue;
         }
         let failures = rtc(|r| {
@@ -441,7 +621,8 @@ async fn awake_guard_task(sleep: &'static SleepConfig) {
             forget_network();
         }
         let factor = 1u32 << failures.min(3);
-        warn!("sleep: broker not reached in {} s ({failures} in a row)", sleep.max_awake.as_secs());
+        warn!("sleep: no link in {} s ({failures} in a row)", sleep.max_awake.as_secs());
+        crate::status::set_offline(true);
         deep_sleep(sleep.interval * factor)
     }
 }

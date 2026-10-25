@@ -91,6 +91,16 @@ def next_patch(version, n):
     return f"{major}.{minor}.{patch + n}"
 
 
+def snapshot():
+    """A commit of the working tree, new files included (not ignored ones), on no branch: the
+    updates test the uncommitted changes too. A separate index leaves the user's alone."""
+    env = {"GIT_INDEX_FILE": os.path.join(WORK, "snapshot.index")}
+    run(["git", "read-tree", "HEAD"], env=env)
+    run(["git", "add", "-A"], env=env)
+    tree = run(["git", "write-tree"], env=env).stdout.strip()
+    return run(["git", "commit-tree", tree, "-p", "HEAD", "-m", "hil: working tree"]).stdout.strip()
+
+
 def tree_with_version(name, version):
     """A worktree of the working tree (its tracked changes) under target/hil/ with devkit at
     `version`, the same signing key."""
@@ -98,9 +108,7 @@ def tree_with_version(name, version):
     run(["git", "worktree", "remove", "-f", path], check=False)
     shutil.rmtree(path, ignore_errors=True)
     run(["git", "worktree", "prune"])
-    # A commit of the uncommitted changes (empty when there are none): the updates test them too.
-    base = run(["git", "stash", "create"]).stdout.strip() or "HEAD"
-    run(["git", "worktree", "add", "-q", "--detach", path, base])
+    run(["git", "worktree", "add", "-q", "--detach", path, snapshot()])
     shutil.copytree(os.path.join(ROOT, "keys"), os.path.join(path, "keys"), dirs_exist_ok=True)
     secrets = os.path.join(ROOT, ".cargo", "secrets.toml")
     if os.path.exists(secrets):

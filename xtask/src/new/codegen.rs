@@ -7,15 +7,18 @@ use std::{
 };
 
 use super::{
-    MatterMode, Part, Project,
+    Indicator, MatterMode, Part, Project,
     parts::{Bus, Component, Stub},
 };
 
-/// `src/main.rs`. Each part gets an entity and, in its task (or, on a battery device, in
+/// `src/main.rs`. Each part gets an entity and, in its task (or, on a deep-sleeping device, in
 /// `main`), a `TODO` saying what to write.
 pub fn main_rs(p: &Project) -> String {
-    let battery = p.battery();
+    let sleepy = p.sleepy();
+    // The battery level, read once per wake-up (over Thread, the ADC feeds the TRNG: none).
+    let battery_pin = sleepy.then_some(p.answers.battery_pin).flatten();
     let led = p.status_led();
+    let status = p.answers.status;
     let mut iotkit: BTreeSet<&str> = ["Board", "Config", "PublicKey"].into();
     let mut time: BTreeSet<&str> = BTreeSet::new();
     let mut statics = String::new();
@@ -51,14 +54,18 @@ pub fn main_rs(p: &Project) -> String {
         let c = &part.konst;
         let set = format!("{}, then `{c}.set(..)`", k.todo);
 
-        if battery && k.is_reading() {
+        if sleepy && k.is_reading() {
             readings.push_str(&todo(4, part, &set, true));
             continue;
         }
 
-        let doc_extra = if battery { " Commands sent while the device sleeps arrive at its next wake-up." } else { "" };
+        let doc_extra = match (sleepy, p.esphome()) {
+            (false, _) => "",
+            (true, false) => " Commands sent while the device sleeps arrive at its next wake-up.",
+            (true, true) => " Commands reach it only while it is awake.",
+        };
         let task = format!("{}_task", part.id);
-        if let (false, Some(comp), Some(_)) = (battery, k.component, part.pin)
+        if let (false, Some(comp), Some(_)) = (sleepy, k.component, part.pin)
             && !(comp == Component::Analog && adc_taken)
         {
             adc_taken |= comp == Component::Analog;
@@ -195,14 +202,14 @@ pub fn main_rs(p: &Project) -> String {
         let _ = writeln!(statics, "static LED: Light = Light::new(\"status_led\", \"Status LED\");");
         ids.push("LED".into());
     }
-    if battery {
+    if battery_pin.is_some() {
+        iotkit.insert("Sensor");
+        let _ = writeln!(statics, "static BATTERY: Sensor = Sensor::battery(\"battery\", \"Battery\");");
+        ids.push("BATTERY".into());
+    }
+    if sleepy {
         iotkit.insert("SleepConfig");
         time.insert("Duration");
-        if p.answers.battery_pin.is_some() {
-            iotkit.insert("Sensor");
-            let _ = writeln!(statics, "static BATTERY: Sensor = Sensor::battery(\"battery\", \"Battery\");");
-            ids.push("BATTERY".into());
-        }
     } else {
         time.insert("Timer");
     }
@@ -211,12 +218,23 @@ pub fn main_rs(p: &Project) -> String {
     // Header.
     let _ = writeln!(s, "//! {}: made with `cargo iotkit new` (wiring and setup: README.md).", p.answers.name);
     let _ = writeln!(s, "//!");
-    if battery {
+    if sleepy {
         let _ = writeln!(
             s,
             "//! A battery device: it wakes up every {} min, reports, and sleeps (`iotkit::start_sleepy`).",
             p.answers.report_every_min
         );
+    } else if p.thread() {
+        s.push_str(
+            "//! `iotkit::start` brings Matter over Thread (paired over Bluetooth), signed updates over Matter\n\
+             //! (rolled back unless it rejoins Thread and its controller), crash records and the watchdog.\n",
+        );
+        if p.icd() {
+            s.push_str(
+                "//! On battery (`matter-icd`): a sleepy end device, whose radio polls its parent every few\n\
+                 //! seconds; the chip sleeps in between.\n",
+            );
+        }
     } else {
         let _ = writeln!(
             s,
@@ -245,22 +263,28 @@ pub fn main_rs(p: &Project) -> String {
     if any_pin {
         hal.insert("gpio::AnyPin");
     }
-    if led {
+    if led || status == Indicator::Rgb {
         hal.extend(["Async", "rmt::Rmt", "time::Rate"]);
+    }
+    if status == Indicator::Led {
+        hal.extend(["gpio::Level", "gpio::Output", "gpio::OutputConfig"]);
+        iotkit.insert("Active");
     }
     if !hal.is_empty() {
         let _ = writeln!(s, "use esp_hal::{};", group(&hal));
     }
-    if led {
+    if led || status == Indicator::Rgb {
         s.push_str("use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};\n");
     }
-    if battery && p.answers.battery_pin.is_some() {
+    if battery_pin.is_some() {
         s.push_str("use iotkit::battery::{Battery, BatteryCurve};\n");
     }
     let _ = writeln!(s, "use iotkit::{};", group(&iotkit));
 
     if led {
         s.push_str("use log::warn;\nuse smart_leds::{RGB8, SmartLedsWriteAsync, brightness};\n");
+    } else if status == Indicator::Rgb {
+        s.push_str("use smart_leds::RGB8;\n");
     }
     s.push_str(
         "
@@ -285,7 +309,7 @@ static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
         p.answers.name,
         ids.iter().map(|i| format!("&{i}")).collect::<Vec<_>>().join(", ")
     );
-    if battery {
+    if sleepy {
         let _ = writeln!(
             s,
             "
@@ -294,7 +318,7 @@ static SLEEP: SleepConfig = SleepConfig {{ interval: Duration::from_secs({}), ma
             u64::from(p.answers.report_every_min) * 60
         );
     }
-    if led {
+    if led || status == Indicator::Rgb {
         let pin = p.board.rgb_led.expect("status LED on a board with one");
         let _ = writeln!(
             s,
@@ -305,7 +329,7 @@ type Led = RmtSmartLeds<'static, {{ buffer_size::<RGB8>(1) }}, Async, RGB8, colo
     }
 
     // main. A part sharing the ADC with the battery reading needs `mut p` (to reborrow ADC1).
-    let shared_adc = battery && p.answers.battery_pin.is_some() && p.parts.iter().any(|part| part.kind.analog);
+    let shared_adc = battery_pin.is_some() && p.parts.iter().any(|part| part.kind.analog);
     let _ = write!(
         s,
         "
@@ -315,7 +339,7 @@ async fn main(spawner: Spawner) -> ! {{
 ",
         if shared_adc { "mut " } else { "" }
     );
-    if battery && let Some(pin) = p.answers.battery_pin {
+    if let Some(pin) = battery_pin {
         let curve = if p.answers.battery_curve == super::Curve::TwoAa { "ALKALINE_2AA" } else { "LIPO" };
         let shared = if shared_adc { "\n    // A part needs the ADC too: `p.ADC1.reborrow()` here." } else { "" };
         let _ = write!(
@@ -331,31 +355,42 @@ async fn main(spawner: Spawner) -> ! {{
         s,
         "
     let board = Board {{
-        wifi: p.WIFI,
 {}        boot_button: Some(p.GPIO{}.into()),
     }};
 ",
-        // The ESP32: no Bluetooth setup, and the console on UART0.
-        if p.board.chip == "esp32" {
-            "        timg1: p.TIMG1,\n        uart: p.UART0,\n        uart_rx: p.GPIO3.into(),\n"
+        if p.thread() {
+            "        radio: p.IEEE802154,\n        bt: p.BT,\n        rng: p.RNG,\n        adc1: p.ADC1,\n        timg1: p.TIMG1,\n"
+        } else if p.board.chip == "esp32" {
+            // The ESP32: no Bluetooth setup, and the console on UART0.
+            "        wifi: p.WIFI,\n        timg1: p.TIMG1,\n        uart: p.UART0,\n        uart_rx: p.GPIO3.into(),\n"
         } else {
-            "        bt: p.BT,\n        timg1: p.TIMG1,\n        usb: p.USB_DEVICE,\n"
+            "        wifi: p.WIFI,\n        bt: p.BT,\n        timg1: p.TIMG1,\n        usb: p.USB_DEVICE,\n"
         },
-        p.board.boot_pin
+        p.button_pin()
     );
-    if battery {
+    if sleepy {
         s.push_str("    let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;\n");
     } else {
         s.push_str("    iotkit::start(spawner, board, &CONFIG).await;\n");
     }
-    if led {
+    if led || status == Indicator::Rgb {
         let pin = p.board.rgb_led.unwrap_or_default();
+        let task = if led { "led_task" } else { "status_task" };
         let _ = write!(
             s,
             "
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
     let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO{pin}, Rate::from_mhz(80)).unwrap();
-    spawner.spawn(led_task(led).unwrap());
+    spawner.spawn({task}(led).unwrap());
+"
+        );
+    }
+    if let (Indicator::Led, Some(pin)) = (status, p.answers.status_pin) {
+        let _ = write!(
+            s,
+            "
+    let led = Output::new(p.GPIO{pin}, Level::Low, OutputConfig::default());
+    spawner.spawn(status_task(led).unwrap());
 "
         );
     }
@@ -364,7 +399,7 @@ async fn main(spawner: Spawner) -> ! {{
         s.push_str(&setup);
         s.push_str(&spawns);
     }
-    if battery {
+    if sleepy {
         if !readings.is_empty() {
             s.push_str("\n    // Read once per wake-up.\n");
             s.push_str(&readings);
@@ -388,10 +423,38 @@ async fn main(spawner: Spawner) -> ! {{
         );
     }
     s.push_str(&tasks);
+    match status {
+        Indicator::Off => {}
+        Indicator::Rgb => s.push_str(
+            "
+/// The board's RGB LED shows the status (`iotkit::status`): blue blinking while it waits to be set up.
+#[embassy_executor::task]
+async fn status_task(led: Led) {
+    // `Show::All` while developing; `Show::Pairing` for a release: lit only to set it up.
+    iotkit::components::status_rgb(led, 1, 32, iotkit::status::Show::All).await
+}
+",
+        ),
+        Indicator::Led => s.push_str(
+            "
+/// The LED shows the status (`iotkit::status`): slow blinking while it waits to be set up.
+#[embassy_executor::task]
+async fn status_task(led: Output<'static>) {
+    // `Show::All` while developing; `Show::Pairing` for a release: lit only to set it up.
+    iotkit::components::status_led(led, Active::High, iotkit::status::Show::All).await
+}
+",
+        ),
+    }
     if led {
+        let _ = write!(
+            s,
+            "
+/// The status LED, as a light{}; a short press of BOOT toggles it.",
+            if p.thread() { " over Matter" } else { " in Home Assistant" }
+        );
         s.push_str(
             "
-/// The status LED, as a light in Home Assistant; a short press of BOOT toggles it.
 #[embassy_executor::task]
 async fn led_task(mut led: Led) {
     let mut state = LightState { on: true, brightness: 20, rgb: [0, 128, 255] };
@@ -401,7 +464,7 @@ async fn led_task(mut led: Led) {
         if let Err(e) = led.write(brightness([color].into_iter(), state.brightness)).await {
             warn!(\"LED write failed: {e:?}\");
         }
-        state = match select(LED.wait_command(), iotkit::provision::esp::wait_press()).await {
+        state = match select(LED.wait_command(), iotkit::provision::gesture::wait_press()).await {
             Either::First(wanted) => wanted,
             Either::Second(()) => LightState { on: !state.on, ..state },
         };
@@ -641,9 +704,20 @@ fn component<'a>(
 }
 
 pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
-    let mut app_features = vec![p.board.chip, "ha-update"];
-    if p.battery() {
+    let mut app_features = vec![p.board.chip];
+    if p.thread() {
+        app_features.extend(["matter-thread", "matter-ota"]);
+        if p.icd() {
+            app_features.push("matter-icd");
+        }
+    } else {
+        app_features.push("ha-update");
+    }
+    if p.sleepy() {
         app_features.push("deep-sleep");
+    }
+    if p.answers.status == Indicator::Rgb {
+        app_features.push("smartled");
     }
     if p.esphome() {
         app_features.push("esphome-api");
@@ -652,8 +726,10 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
         path => format!("path = {:?}", format!("{path}/crates/iotkit")),
     };
-    // The ESP32 builds without `improv-ble`, which does not link on it yet.
-    let defaults = if p.board.chip == "esp32" {
+    // Thread builds without Wi-Fi; the ESP32 without `improv-ble`, which does not link on it yet.
+    let defaults = if p.thread() {
+        "default-features = false, "
+    } else if p.board.chip == "esp32" {
         app_features.extend(["wifi", "softap", "improv-serial", "console", "ota-push"]);
         "default-features = false, "
     } else {
@@ -671,7 +747,7 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
             in_features = l == "[features]";
             if in_features {
                 out.push_str("[features]\n");
-                if p.board.matter() {
+                if p.board.matter() && !p.thread() {
                     let link = if p.esphome() { "the ESPHome API" } else { "MQTT" };
                     let _ = writeln!(out, "## Matter over Wi-Fi, next to {link} (needs the 8 MB partition table).");
                     out.push_str("matter-wifi = [\"iotkit/matter-wifi\"]\n");
@@ -689,6 +765,14 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         if l.starts_with("iotkit ") || l.starts_with("iotkit=") {
             out.push_str(&line);
             replaced = true;
+        } else if l.starts_with("esp-hal-smartled") && p.thread() {
+            // Its 802.15.4 and Bluetooth drivers, for the chip.
+            let _ = writeln!(out, "{l}");
+            let _ = write!(
+                out,
+                "esp-radio              = {{ version = \"1.0.0-beta.1\", features = [\"{}\", \"ble\", \"ieee802154\", \"esp-alloc\", \"log-04\", \"unstable\"] }}",
+                p.board.chip
+            );
         } else {
             out.push_str(l);
         }
@@ -701,12 +785,18 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
 /// One sentence: the board, the power and what it talks to (README and AGENTS.md).
 fn summary(p: &Project) -> String {
     let a = &p.answers;
-    let power = if p.battery() {
+    let power = if p.sleepy() {
         format!("on battery, reporting every {} min", a.report_every_min)
+    } else if p.icd() {
+        "on battery (a Matter ICD)".into()
     } else {
         "plugged in".into()
     };
-    let link = if a.matter != MatterMode::Off { format!("{} and Matter", p.ha_link()) } else { p.ha_link().into() };
+    let link = if a.matter != MatterMode::Off && !p.thread() {
+        format!("{} and Matter", p.ha_link())
+    } else {
+        p.ha_link().into()
+    };
     format!("A smart device on an {}, {power}, for {link}.", p.board.model)
 }
 
@@ -722,6 +812,7 @@ pub fn readme(p: &Project) -> String {
         let pin = part.pin.map_or("to choose".into(), |n| format!("GPIO{n}"));
         let matter = match (a.matter != MatterMode::Off, part.kind.matter) {
             (true, Some(m)) => m,
+            (true, None) if p.thread() => "not shown (no Matter type)",
             (true, None) => "Home Assistant only",
             (false, _) => "-",
         };
@@ -745,14 +836,40 @@ pub fn readme(p: &Project) -> String {
     if let (true, Some(pin)) = (p.battery(), a.battery_pin) {
         let _ = writeln!(
             s,
-            "| Battery level | GPIO{pin} | the middle of a divider from the battery (two equal resistors, 100 kΩ+) | Sensor `battery` | - |"
+            "| Battery level | GPIO{pin} | the middle of a divider from the battery (two equal resistors, 100 kΩ+) | Sensor `battery` | {} |",
+            if a.matter != MatterMode::Off { "Power source (battery)" } else { "-" }
         );
     }
+    match (p.answers.status, a.status_pin) {
+        (Indicator::Led, Some(pin)) => {
+            let _ = writeln!(s, "| Status LED | GPIO{pin} | a LED and a resistor (330 Ω) to GND | - | - |");
+        }
+        (Indicator::Rgb, _) => {
+            let _ = writeln!(s, "| Status LED | GPIO{} | on the board | - | - |", p.board.rgb_led.unwrap_or_default());
+        }
+        _ => {}
+    }
+    let button = if p.button_pin() == p.board.boot_pin {
+        format!("BOOT (GPIO{})", p.board.boot_pin)
+    } else {
+        format!("The button on GPIO{} (to GND)", p.button_pin())
+    };
     let _ = writeln!(
         s,
-        "\nBOOT (GPIO{}) is the setup button: hold it 3 s to open the setup window, 10 s to factory reset.",
-        p.board.boot_pin
+        "\n{button} is the setup button: hold it 3 s to open {}, 10 s to factory reset.",
+        if p.thread() { "a Matter pairing window" } else { "the setup window" }
     );
+    if p.sleepy() {
+        s.push_str(
+            "Until it has reached Home Assistant once, and for 10 minutes after holding the button 3 s, it stays awake\n\
+             (pairing mode). A button on a low-power pin also wakes it: a press sends a report.\n",
+        );
+    }
+    if p.answers.status != Indicator::Off {
+        s.push_str(
+            "The status LED blinks slowly while it waits to be set up, fast while it connects, twice while it updates.\n",
+        );
+    }
     if p.parts.is_empty() {
         s.push_str(
             "\nNo parts yet: add entities in `src/main.rs` (see https://tanguy-c.github.io/iotkit/entities.html).\n",
@@ -764,17 +881,28 @@ pub fn readme(p: &Project) -> String {
     s.push_str(
         "\n## Build and flash\n\n```bash\ncargo iotkit flash --release   # over USB, then the serial monitor\n```\n\n",
     );
+    if p.thread() {
+        s.push_str("OpenThread is C code: the build needs `clang` and `cmake`.\n\n");
+    }
     s.push_str("`keys/ota.key` signs the updates: keep it (it is git-ignored); a device only installs updates signed with it.\n\n");
 
-    s.push_str("## Wi-Fi and Home Assistant\n\n");
-    if a.wifi_ssid.is_some() {
+    if p.thread() {
+        s.push_str(
+            "## Thread\n\nThe device has no Wi-Fi: pair it over Bluetooth from a Matter controller with a Thread border router\n\
+             (Home Assistant with its OpenThread Border Router add-on, an Apple or Google hub); it then joins that controller's\n\
+             Thread network.\n",
+        );
+    } else if a.wifi_ssid.is_some() {
+        s.push_str("## Wi-Fi and Home Assistant\n\n");
         s.push_str("The Wi-Fi network is built in (`.cargo/secrets.toml`) and stored at the first boot.\n");
     } else {
+        s.push_str("## Wi-Fi and Home Assistant\n\n");
         s.push_str(
             "At its first boot the device opens a setup window: join its access point `iotkit-XXXX` from a phone, or use\nImprov (https://improv-wifi.com) over USB or Bluetooth.\n",
         );
     }
     match &a.mqtt_host {
+        _ if p.thread() => {}
         _ if p.esphome() => {
             s.push_str("Home Assistant reaches it over the ESPHome API, with no broker: *Settings > Devices* shows it as\ndiscovered (or *Add integration > ESPHome* with its address, port 6053). ");
             match &p.esphome_key {
@@ -790,9 +918,17 @@ pub fn readme(p: &Project) -> String {
             "Set the MQTT broker (Home Assistant's Mosquitto add-on) with `mqtt 192.168.1.10` on the USB console;\nHome Assistant finds the device by itself.\n",
         ),
     }
-    if p.battery() {
+    if p.sleepy() && p.esphome() {
+        s.push_str(
+            "\nAsleep, the device does not answer: Home Assistant knows it sleeps and keeps its last states. At each wake-up it\nconnects and gets the new readings; commands reach the device only while it is awake.\n",
+        );
+    } else if p.sleepy() {
         s.push_str(
             "\nAsleep, the device does not answer: commands from Home Assistant are kept by the broker and applied at the\nnext wake-up. Its readings show as unavailable after twice the interval without news.\n",
+        );
+    } else if p.icd() {
+        s.push_str(
+            "\nOn battery it is a sleepy Thread device: its radio asks its parent for messages every 5 s, so a command\ntakes up to 5 s (`IOTKIT_ICD_POLL_MS` at build time), and the chip sleeps in between. For now its receiver\nstays on between polls (openthread 0.4): a charge lasts days, not months yet.\n",
         );
     }
 
@@ -806,15 +942,30 @@ pub fn readme(p: &Project) -> String {
                     setup.manual_code_pretty()
                 );
             }
+            // Thread builds have no console.
+            None if p.thread() => s.push_str("Each device draws its pairing code at its first boot: it is in the boot log.\n"),
             None => s.push_str(
                 "Each device draws its pairing code at its first boot: it is in the boot log, and `matter` on the console prints it.\n",
             ),
         }
-        s.push_str(
-            "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. `matter pair` on the console lets\nanother controller pair for 15 minutes.\n",
-        );
+        s.push_str(if p.thread() {
+            "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. Holding BOOT 3 s lets another\ncontroller pair for 15 minutes.\n"
+        } else {
+            "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. `matter pair` on the console lets\nanother controller pair for 15 minutes.\n"
+        });
     }
 
+    if p.thread() {
+        let _ = write!(
+            s,
+            "\n## Updates\n\n```bash\n# bump `version` in Cargo.toml, then:\ncargo iotkit ota build --release   # dist/{0}/{0}-<version>.ota, and its .json for a provider\n```\n\n\
+             A Matter OTA provider serves the `.ota` file: Home Assistant's Matter server with `--ota-provider-dir` set to\n\
+             `dist/{0}/` offers it on the device's update entity. The device checks the signature, installs it, and keeps it once it\n\
+             rejoins Thread and its controller (else the previous firmware comes back).\n",
+            a.package
+        );
+        return s;
+    }
     s.push_str("\n## Updates\n\n```bash\n# bump `version` in Cargo.toml, then:\ncargo iotkit ota push --host <device-ip>      # straight to the device\n");
     match &a.updates_url {
         Some(url) => {
@@ -853,13 +1004,23 @@ Pins and wiring: the table in README.md. {}
             "Each part's code is a `TODO(<entity id>)` in `src/main.rs`."
         }
     );
-    if p.battery() {
+    if p.sleepy() {
         s.push_str(
             "On battery (`iotkit::start_sleepy`): parts are read once per wake-up in `main`, then it sleeps.\n\
              Read analog values before `start_sleepy`, as the battery level: Wi-Fi's load lowers the voltage.\n",
         );
+    } else if p.icd() {
+        s.push_str(
+            "On battery (`matter-icd`, a sleepy Thread device): always on, its CPU sleeps whenever nothing runs, so\n\
+             wait on interrupts or long timers rather than polling.\n",
+        );
     }
-    if a.matter != MatterMode::Off {
+    if p.thread() {
+        s.push_str(
+            "Matter over Thread (`matter-thread`, `matter-ota`): no Wi-Fi, MQTT or console; the 8 MB partition table;\n\
+             OpenThread needs `clang` and `cmake`. Updates: `cargo iotkit ota build`, served by a Matter OTA provider.\n",
+        );
+    } else if a.matter != MatterMode::Off {
         s.push_str("Matter (`matter-wifi` feature) needs the 8 MB partition table.\n");
     }
     if p.esphome() {
@@ -904,8 +1065,13 @@ Never read or print `keys/ota.key` or `.cargo/secrets.toml`.
 - iotkit: the guide https://tanguy-c.github.io/iotkit/ (index: `llms.txt` there); `cargo doc -p iotkit`
   (HTML in `target/*/doc/iotkit/`); source in {source}.
 - esp-hal: `~/.cargo/registry/src/*/esp-hal-1.2.2/`.
-- Examples: `apps/devkit` (plugged in) and `apps/sleepy` (battery) in {}.
+- Examples: {} in {}.
 ",
+        if p.thread() {
+            "`apps/thread-light` (Matter over Thread)"
+        } else {
+            "`apps/devkit` (plugged in) and `apps/sleepy` (battery)"
+        },
         crate::new::IOTKIT_GIT
     );
     s

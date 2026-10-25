@@ -100,6 +100,16 @@ pub const BOARDS: &[Board] = &[
         rgb_led: None,
     },
     Board {
+        id: "other-esp32h2",
+        label: "A board with an ESP32-H2 (Thread only: Matter over Thread; 8 MB of flash)",
+        chip: "esp32h2",
+        model: "ESP32-H2 board",
+        chip_label: "ESP32-H2",
+        flash: None,
+        boot_pin: 9,
+        rgb_led: None,
+    },
+    Board {
         id: "esp32-devkitc",
         label: "ESP32-DevKitC (WROOM-32: the original ESP32; no Matter, no Bluetooth setup yet)",
         chip: "esp32",
@@ -129,6 +139,16 @@ impl Board {
     /// Matter over Wi-Fi fits and builds (see `iotkit`'s compile errors).
     pub fn matter(&self) -> bool {
         self.chip == "esp32c6"
+    }
+
+    /// An 802.15.4 radio: Matter over Thread.
+    pub fn thread(&self) -> bool {
+        matches!(self.chip, "esp32c6" | "esp32h2")
+    }
+
+    /// Wi-Fi: no Thread-only chip.
+    pub fn wifi(&self) -> bool {
+        self.chip != "esp32h2"
     }
 }
 
@@ -214,6 +234,17 @@ fn pins(chip: &str) -> Pins {
             adc1: 32..=39,
             input_only: Some(34..=39),
         },
+        "esp32h2" => Pins {
+            max: 27,
+            reserved: &[(15..=21, "used by the flash"), (26..=27, "the USB port (console, flashing)")],
+            warn: &[
+                (2..=3, "a strapping pin"),
+                (8..=9, "a strapping pin (BOOT, the LED)"),
+                (25..=25, "a strapping pin"),
+            ],
+            adc1: 1..=5,
+            input_only: None,
+        },
         // esp32c6
         _ => Pins {
             max: 30,
@@ -273,6 +304,19 @@ pub fn check_pin(board: &Board, pin: u8, kind: PinUse, taken: &[u8]) -> PinCheck
     }
 }
 
+impl Board {
+    /// The pins that wake the chip from deep sleep (its low-power ones).
+    pub fn wake_pins(&self) -> Option<RangeInclusive<u8>> {
+        match self.chip {
+            "esp32c6" => Some(0..=7),
+            "esp32c3" => Some(0..=5),
+            "esp32c5" => Some(0..=6),
+            "esp32s3" => Some(0..=21),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +357,9 @@ mod tests {
         assert!(matches!(check_pin(esp32, 35, PinUse::Output, &[]), PinCheck::Refused(_)), "input only");
         assert_eq!(check_pin(esp32, 35, PinUse::Analog, &[]), PinCheck::Ok);
         assert!(matches!(check_pin(esp32, 25, PinUse::Analog, &[]), PinCheck::Refused(_)), "ADC2");
+        let h2 = board("other-esp32h2").unwrap();
+        assert!(matches!(check_pin(h2, 16, PinUse::Input, &[]), PinCheck::Refused(_)), "flash");
+        assert_eq!(check_pin(h2, 10, PinUse::Output, &[]), PinCheck::Ok);
         for b in BOARDS {
             assert!(crate::CHIPS.iter().any(|c| c.name == b.chip), "{}", b.id);
         }

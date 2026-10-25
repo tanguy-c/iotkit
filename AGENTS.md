@@ -9,17 +9,23 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
   re-exported `iotkit-image`), `runtime` (health check).
 - `crates/iotkit-image`: signed update images and manifests, shared by the device and the CLI
   (which signs with it).
-- `crates/iotkit`: what apps depend on. Modules `config::esp`, `diag`, `net`, `ota`, `provision`,
-  `mqtt` (Home Assistant discovery, `ha.rs`), `esphome` (the ESPHome native API, `api.rs`),
-  `matter`, `components` (ready-made parts over embedded-hal); `app.rs` (`start`, `Board`,
-  `Config`, `init!`), re-exported at the root. Each module's chip code is in its `esp.rs`, behind
-  `feature = "_esp"` or, on the Wi-Fi side, `cfg(esp_wifi)` (a chip and `wifi`, set by
-  `build.rs`); the rest builds on the host.
+- `crates/iotkit`: what apps depend on. Modules `config::esp`, `diag`, `health` (the checks and
+  the supervisor that keeps or rolls back an update), `net`, `ota` (the engine in `esp.rs`, HTTP in
+  `esp/http.rs`), `provision`, `mqtt` (Home Assistant discovery, `ha.rs`), `esphome` (the ESPHome
+  native API, `api.rs`), `matter` (`ota.rs`: the OTA Requestor, `matter-ota`; `icd.rs`: on
+  battery, `matter-icd`, its sleepy Thread driver in `icd/thread.rs`), `components` (ready-made
+  parts over embedded-hal); `app.rs` (`Config`, `init!`; `start` and `Board` in
+  `app/wifi.rs` or `app/thread.rs`), re-exported at the root. Each module's chip code is in its
+  `esp.rs`, behind `feature = "_esp"` or, on the Wi-Fi side, `cfg(esp_wifi)` (a chip and `wifi`),
+  `cfg(esp_ota)` for `ota::esp` (a chip and `wifi` or `matter-ota`), both set by `build.rs`; the
+  rest builds on the host.
 - `crates/iotkit-build`: the apps' build.rs helper.
 - `docs/`: the user guide. User-facing explanations live there, once; the README stays a short
   landing page.
 - `apps/`: `devkit` (reference firmware, the default member), `showcase` (most entity kinds),
-  `sleepy` (deep sleep), `lean` (opt-out features), `thread-light` (Matter over Thread, uses the crates directly).
+  `sleepy` (deep sleep), `lean` (opt-out features), `thread-light` (Matter over Thread with
+  Matter OTA: `cargo iotkit new --answers xtask/answers/thread.toml`'s output, keep them in step),
+  `ble-beacon` (BTHome over Bluetooth, no network or OTA: the crates assembled by hand).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
   its `new` wizard in `xtask/src/new/`; `test-server/`: Home Assistant, Mosquitto, an update server
   and a Matter controller in compose.

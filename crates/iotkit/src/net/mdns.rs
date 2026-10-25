@@ -36,7 +36,7 @@ pub fn answer(query: &[u8], host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<u
 
 /// An unsolicited response with our address, to send when the IP address is set.
 pub fn announcement(host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<usize> {
-    let mut w = Writer { out, len: 0 };
+    let mut w = Writer { out, len: 0, ttl: TTL_S };
     // id 0, flags: response + authoritative; 0 questions, 1 answer.
     w.put(&[0, 0, 0x84, 0, 0, 0, 0, 1, 0, 0, 0, 0])?;
     for label in [host, "local"] {
@@ -96,10 +96,21 @@ impl Service {
 
     /// An unsolicited response with the service, to send when the address is set.
     pub fn announcement(&self, host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<usize> {
+        self.records(host, ip, TTL_S, out)
+    }
+
+    /// The same with a time to live of 0 (RFC 6762 §10.1), before going away: resolvers forget
+    /// the service, so the next announcement is new to them (Home Assistant then reconnects at
+    /// once instead of at its next retry).
+    pub fn goodbye(&self, host: &str, ip: [u8; 4], out: &mut [u8]) -> Option<usize> {
+        self.records(host, ip, 0, out)
+    }
+
+    fn records(&self, host: &str, ip: [u8; 4], ttl: u32, out: &mut [u8]) -> Option<usize> {
         let service = [self.name, "_tcp", "local"];
         let instance = [host, self.name, "_tcp", "local"];
         let target = [host, "local"];
-        let mut w = Writer { out, len: 0 };
+        let mut w = Writer { out, len: 0, ttl };
         // id 0, flags: response + authoritative; 0 questions, 4 answers.
         w.put(&[0, 0, 0x84, 0, 0, 0, 0, 4, 0, 0, 0, 0])?;
         // The PTR is shared (other devices answer it too): no cache flush.
@@ -135,6 +146,8 @@ fn questions(query: &[u8], mut question: impl FnMut(&[u8], usize) -> Option<(boo
 struct Writer<'a> {
     out: &'a mut [u8],
     len: usize,
+    /// Of the records written.
+    ttl: u32,
 }
 
 impl Writer<'_> {
@@ -166,7 +179,7 @@ impl Writer<'_> {
         self.name(name)?;
         self.put(&rtype.to_be_bytes())?;
         self.put(&class.to_be_bytes())?;
-        self.put(&TTL_S.to_be_bytes())?;
+        self.put(&self.ttl.to_be_bytes())?;
         let at = self.len;
         self.put(&[0, 0])?;
         data(self)?;
@@ -310,6 +323,11 @@ mod tests {
             assert_eq!(service.answer(&q[..n], "iotkit-aefc", IP, &mut out), None, "{name:?} {qtype}");
         }
         assert!(Service::new("_x", 1, &[core::str::from_utf8(&[b'a'; 200]).unwrap()]).is_none(), "TXT too long");
+        // Goodbye: the same records, a time to live of 0.
+        let n = service.goodbye("iotkit-aefc", IP, &mut out).unwrap();
+        let srv = b"\x00\x21\x80\x01\x00\x00\x00\x00\x00\x19";
+        assert!(out[..n].windows(srv.len()).any(|w| w == srv), "SRV with TTL 0");
+        assert_eq!(n, service.announcement("iotkit-aefc", IP, &mut [0; 512]).unwrap());
     }
 
     fn vec_query() -> heapless::Vec<u8, 128> {

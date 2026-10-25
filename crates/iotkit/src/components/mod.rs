@@ -26,6 +26,7 @@
 
 pub mod filter;
 mod gpio;
+mod indicator;
 mod pwm;
 mod sensor;
 #[cfg(feature = "smartled")]
@@ -33,6 +34,11 @@ mod smartled;
 
 pub use filter::Filter;
 pub use gpio::{PressTiming, binary_input, button, relay};
+#[cfg(feature = "_esp")]
+pub use indicator::status_led;
+#[cfg(all(feature = "_esp", feature = "smartled"))]
+pub use indicator::status_rgb;
+pub use indicator::{Pattern, color, pattern};
 pub use pwm::{dimmer, fan};
 pub use sensor::poll;
 #[cfg(feature = "smartled")]

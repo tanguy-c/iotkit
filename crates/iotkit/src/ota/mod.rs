@@ -12,12 +12,43 @@
 //! and the firmware switches back itself (so the image only has to reach `esp::boot`). A
 //! bootloader built with rollback works too.
 
-#[cfg(esp_wifi)]
+#[cfg(esp_ota)]
 pub mod esp;
 
 use crate::config::{Setting, keys};
-use crate::image::Version;
+use crate::image::{PublicKey, Version};
 use serde::{Deserialize, Serialize};
+
+/// The running firmware, as updates must match it.
+#[derive(Clone, Copy)]
+pub struct Firmware {
+    /// Package name, also the manifest's `product` and the image's project name.
+    pub product: &'static str,
+    /// `major.minor.patch` from `Cargo.toml`.
+    pub version: Version,
+    /// [`version`](Self::version) as written in `Cargo.toml`.
+    pub version_text: &'static str,
+    /// Public key of `keys/ota.pub`.
+    pub key: &'static PublicKey,
+}
+
+/// The [`Firmware`] of the calling crate: its package name and version, and `$key`. Fails to
+/// build on a version that is not `major.minor.patch`.
+#[macro_export]
+macro_rules! firmware {
+    ($key:expr) => {
+        $crate::ota::Firmware {
+            product: env!("CARGO_PKG_NAME"),
+            version: match $crate::ota::__version(env!("CARGO_PKG_VERSION")) {
+                Some(v) if $crate::ota::__fits(v) => v,
+                Some(_) => panic!("CARGO_PKG_VERSION: Matter OTA takes a minor and patch up to 255"),
+                None => panic!("CARGO_PKG_VERSION is not major.minor.patch"),
+            },
+            version_text: env!("CARGO_PKG_VERSION"),
+            key: $key,
+        }
+    };
+}
 
 /// Boots an update gets to pass its health check before the previous slot comes back:
 /// `IOTKIT_UPDATE_TRIAL_BOOTS` at build time (1 to 10), 3 by default.
@@ -34,7 +65,7 @@ pub const UPDATE_TIMEOUT_S: u32 = match number(env!("IOTKIT_UPDATE_TIMEOUT")) {
 };
 
 /// A decimal number, for the build-time settings.
-const fn number(s: &str) -> Option<u32> {
+pub(crate) const fn number(s: &str) -> Option<u32> {
     let b = s.as_bytes();
     if b.is_empty() || b.len() > 9 {
         return None;
@@ -72,6 +103,42 @@ impl Pending {
     /// Version of the update.
     pub fn version(&self) -> Version {
         Version::new(self.version.0, self.version.1, self.version.2)
+    }
+}
+
+/// A downloaded and checked image, in the spare slot but not selected: Matter's provider has not
+/// said to apply it yet. Other updates may overwrite the slot meanwhile, so it is hashed again
+/// before it is selected; it survives restarts and deep sleep (no download again).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Staged {
+    /// OTA slot number holding it.
+    pub slot: u8,
+    /// Size of the image.
+    pub size: u32,
+    /// SHA-256 of the image.
+    pub sha256: [u8; 32],
+    /// Version of the image.
+    pub version: (u16, u16, u16),
+    /// SHA-256 of what was downloaded (a Matter OTA file's payload), to recognise it when offered
+    /// again.
+    pub source: [u8; 32],
+}
+
+impl Setting for Staged {
+    const KEY: u16 = keys::OTA_STAGED;
+    const VERSION: u8 = 1;
+}
+
+impl Staged {
+    /// Version of the image.
+    pub fn version(&self) -> Version {
+        Version::new(self.version.0, self.version.1, self.version.2)
+    }
+
+    /// Whether it may still be applied: newer than `running`, in `target` (the slot an update
+    /// goes to now), and not on trial (the spare slot then holds the firmware to go back to).
+    pub fn usable(&self, target: u8, running: Version, on_trial: bool) -> bool {
+        !on_trial && self.slot == target && self.version() > running
     }
 }
 
@@ -143,21 +210,28 @@ pub fn on_boot(pending: Option<&Pending>, booted_slot: Option<u8>) -> BootAction
 
 /// Boots of an unconfirmed update the early guard allows: [`on_boot`] rolls back on boot
 /// `MAX_TRIAL_BOOTS + 1`, so past this the update never reached it.
-#[cfg(any(esp_wifi, test))]
+#[cfg(any(esp_ota, test))]
 pub(crate) const EARLY_LIMIT: u32 = 2 * MAX_TRIAL_BOOTS as u32;
 /// Marks [`early_check`]'s counter as set (RTC memory holds garbage after a power cut).
-#[cfg(any(esp_wifi, test))]
+#[cfg(any(esp_ota, test))]
 pub(crate) const EARLY_MAGIC: u32 = 0x07a0_ea71;
 
 /// The early guard's decision, from whether the running firmware is unconfirmed and the boot
 /// counter in RTC memory (magic, count): the counter to keep, and whether to roll back.
-#[cfg(any(esp_wifi, test))]
+#[cfg(any(esp_ota, test))]
 pub(crate) fn early_check(unconfirmed: bool, counter: [u32; 2]) -> ([u32; 2], bool) {
     if !unconfirmed {
         return ([0; 2], false);
     }
     let boots = if counter[0] == EARLY_MAGIC { counter[1].saturating_add(1) } else { 1 };
     ([EARLY_MAGIC, boots], boots > EARLY_LIMIT)
+}
+
+/// `v` can run: under `matter-ota`, it must be a Matter `SoftwareVersion`, or updates would
+/// compare against 0 (downgrades) and never confirm.
+#[doc(hidden)]
+pub const fn __fits(v: Version) -> bool {
+    !cfg!(feature = "matter-ota") || crate::image::matter::version(v).is_some()
 }
 
 #[doc(hidden)]
@@ -195,6 +269,15 @@ mod tests {
 
     fn pending(boots: u8) -> Pending {
         Pending { slot: 1, previous: 0, version: (1, 2, 0), boots }
+    }
+
+    #[test]
+    fn staged_policy() {
+        let s = Staged { slot: 1, size: 10, sha256: [0; 32], version: (1, 2, 0), source: [0; 32] };
+        assert!(s.usable(1, Version::new(1, 1, 0), false));
+        assert!(!s.usable(1, Version::new(1, 1, 0), true), "on trial");
+        assert!(!s.usable(0, Version::new(1, 1, 0), false), "another slot is the target now");
+        assert!(!s.usable(1, Version::new(1, 2, 0), false), "not newer");
     }
 
     #[test]
@@ -270,5 +353,5 @@ mod tests {
     }
 }
 
-#[cfg(esp_wifi)]
+#[cfg(esp_ota)]
 pub(crate) use crate::atomic;

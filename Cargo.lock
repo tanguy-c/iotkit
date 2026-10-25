@@ -328,6 +328,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "ble-beacon"
+version = "0.1.0"
+dependencies = [
+ "bt-hci 0.10.1",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "esp-alloc",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+ "esp-println",
+ "esp-radio",
+ "esp-rtos",
+ "iotkit",
+ "iotkit-build",
+ "log",
+ "static_cell",
+ "trouble-host",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3143,7 +3165,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bt-hci 0.10.1",
  "chacha20poly1305",
@@ -3189,11 +3211,11 @@ dependencies = [
 
 [[package]]
 name = "iotkit-build"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "iotkit-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "critical-section",
  "embassy-futures",
@@ -3210,7 +3232,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit-image"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "ed25519-compact",
  "serde",
@@ -4883,10 +4905,12 @@ dependencies = [
  "embassy-futures",
  "embassy-time",
  "esp-hal",
+ "esp-hal-smartled",
  "esp-rtos",
  "iotkit",
  "iotkit-build",
  "log",
+ "smart-leds",
 ]
 
 [[package]]
@@ -5206,21 +5230,15 @@ version = "0.1.0"
 dependencies = [
  "embassy-executor",
  "embassy-futures",
- "embassy-sync 0.8.0",
  "embassy-time",
- "esp-alloc",
- "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-hal-smartled",
- "esp-println",
  "esp-radio",
  "esp-rtos",
- "heapless 0.9.3",
  "iotkit",
  "iotkit-build",
  "log",
  "smart-leds",
- "static_cell",
 ]
 
 [[package]]

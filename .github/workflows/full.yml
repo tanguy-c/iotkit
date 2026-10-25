@@ -122,12 +122,15 @@ jobs:
             (cd "$RUNNER_TEMP/ci-$chip" && cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify)
           done
       # `cargo iotkit new` from answers files: every part kind with Matter on the C6, a battery C3,
-      # a C6 over the ESPHome API.
+      # a C6 over the ESPHome API, a C6 over Thread (its Matter OTA file too), and battery C6s over
+      # Thread and the ESPHome API.
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: |
-          for c in c6 c3 esphome; do
+          for c in c6 c3 esphome thread thread-battery esphome-battery; do
             cargo iotkit new "$RUNNER_TEMP/new-$c" --answers xtask/answers/$c.toml --iotkit-path "$GITHUB_WORKSPACE"
             (cd "$RUNNER_TEMP/new-$c" && cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify)
           done
+          (cd "$RUNNER_TEMP/new-thread" && cargo iotkit ota build --release --no-build)
 
   fuzz:
     name: Fuzz the parsers (short)

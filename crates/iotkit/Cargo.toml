@@ -36,12 +36,25 @@ ota-push = ["wifi"]
 ## Updates from Home Assistant: a `firmware` update entity; the device checks the manifest URL
 ## set with `update-url` (or `OTA_MANIFEST_URL` at build time) and installs on request.
 ha-update = ["wifi"]
-## Deep-sleeping devices over MQTT (`start_sleepy`): fast reconnect, retained commands, sleep.
+## Deep-sleeping devices (`start_sleepy`) over MQTT (retained commands) or the ESPHome API
+## (`esphome-api`): fast reconnect, report, sleep.
 deep-sleep = ["wifi"]
 ## Matter over Wi-Fi, next to MQTT (8 MB flash: about 2.1 MB of firmware).
 matter-wifi = ["wifi", "_matter", "embassy-net?/proto-ipv6", "rs-matter-embassy?/embassy-net", "rs-matter-embassy?/rustcrypto", "rs-matter-embassy?/trouble"]
 ## Matter over Thread (`matter::thread`; C code: needs clang and cmake).
-matter-thread = ["_matter", "rs-matter-embassy?/openthread", "rs-matter-embassy?/mbedtls", "rs-matter-embassy?/openthread-heap-int-8192", "rs-matter-embassy?/esp", "rs-matter-embassy?/trouble", "dep:tinyrlibc"]
+matter-thread = ["_matter", "rs-matter-embassy?/openthread", "rs-matter-embassy?/mbedtls", "rs-matter-embassy?/openthread-heap-int-8192", "rs-matter-embassy?/esp", "rs-matter-embassy?/trouble", "dep:tinyrlibc", "panic-handler"]
+## Matter on battery: an Intermittently Connected Device (short idle time), a sleepy end device
+## over Thread (the radio off between polls of its parent) whose CPU light-sleeps when idle.
+## With `matter-thread` (over Wi-Fi it waits for an esp-radio release: see `lib.rs`). For now
+## the receiver stays on between polls (openthread 0.4): not months on a battery yet.
+matter-icd = ["_matter"]
+## Updates over Matter (`matter::ota`): the OTA Requestor, which downloads `.ota` files from
+## a Matter OTA provider over BDX. Their payload carries the signed manifest (`cargo iotkit ota
+## build`). With `matter-wifi` or `matter-thread`.
+matter-ota = ["_matter"]
+## `matter-ota` for bare app images (from `ota_image_tool.py`): only the Matter header's SHA-256
+## is checked, no signature, so any administrator of any fabric can install firmware.
+matter-ota-unsigned = ["matter-ota"]
 ## TLS 1.3 for MQTT (port 8883) and `https://` downloads; the servers' CA (DER) from
 ## `IOTKIT_TLS_CA` at build time. About 21 KB of RAM per connection.
 tls = ["wifi", "dep:embedded-tls", "dep:rand_core"]
@@ -50,7 +63,7 @@ tls = ["wifi", "dep:embedded-tls", "dep:rand_core"]
 esphome-api = ["iotkit-core/extra-bindings", "dep:chacha20poly1305", "dep:ed25519-compact", "dep:hkdf", "dep:sha2"]
 ## Addressable LEDs (WS2812) as a light: `components::rgb_light`.
 smartled = ["dep:smart-leds"]
-## Records panics (and their backtrace) for the next boot; on with `wifi`.
+## Records panics (and their backtrace) for the next boot; on with `wifi` and `matter-thread`.
 panic-handler = []
 ## Atomics for chips without compare-and-swap (ESP32-C3).
 portable-atomic = ["dep:portable-atomic", "iotkit-core/portable-atomic"]

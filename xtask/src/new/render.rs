@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn every_chip_renders() {
-        for chip in ["esp32c6", "esp32c3", "esp32c5", "esp32s3", "esp32"] {
+        for chip in ["esp32c6", "esp32c3", "esp32c5", "esp32s3", "esp32", "esp32h2"] {
             for (path, source) in FILES {
                 let out = render(path, source, "my-device", chip, "/opt/iotkit").unwrap();
                 assert!(!out.contains("{%") && !out.contains("{{project"), "{chip} {path}");

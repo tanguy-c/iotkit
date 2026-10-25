@@ -3,7 +3,20 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
-## To the next release (from 0.1)
+## To 0.2 (from 0.1)
+
+### `matter_task` takes the firmware
+
+Only for an app that starts Matter itself (without `iotkit::start`): the version Matter reports
+now comes from the firmware, as Matter updates compare it.
+
+```rust
+let product = Product { name: "My light", version: env!("CARGO_PKG_VERSION"), version_number: 1 }; // remove
+spawner.spawn(matter_task(peripherals, store, "My light", iotkit::firmware!(&OTA_KEY), name, device).unwrap());
+```
+
+Over Thread, `iotkit::start` now does it all with the Thread `Board`: see
+[Home Assistant](home-assistant.md#matter-over-thread).
 
 ### `Board` has no `flash` field
 
@@ -34,7 +47,7 @@ iotkit::config::esp::with(|flash| flash.read(range.start, &mut buf)).unwrap();
 ```
 
 An app that drives the flash entirely by itself does not use `init!` or `start`: see
-[thread-light](examples.md), which sets the chip up itself.
+[ble-beacon](examples.md), which sets the chip up itself.
 
 ### `iotkit::start` needs `iotkit::init!`
 

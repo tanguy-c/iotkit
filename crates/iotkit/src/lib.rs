@@ -48,9 +48,18 @@ compile_error!(
 compile_error!("iotkit: enable only one chip feature");
 #[cfg(all(feature = "esp32c5", feature = "matter-wifi"))]
 compile_error!("iotkit: `matter-wifi` is not supported on the ESP32-C5 yet (no TRNG in esp-hal 1.2)");
-// Matter does not sleep (an always-on controller session).
+// Matter keeps its sessions: on battery it stays reachable as an ICD (`matter-icd`) instead.
 #[cfg(all(feature = "deep-sleep", feature = "matter-wifi"))]
-compile_error!("iotkit: `deep-sleep` is for MQTT devices; not with `matter-wifi`");
+compile_error!("iotkit: `deep-sleep` is not for Matter: `matter-icd` keeps a Matter device on battery");
+#[cfg(all(feature = "matter-icd", not(any(feature = "matter-thread", feature = "matter-wifi"))))]
+compile_error!("iotkit: `matter-icd` needs `matter-thread`");
+// esp-radio 1.0.0-beta.1 stops the Wi-Fi power controller's clock at every doze on the C6, so
+// the radio misses every beacon in power save and the device drops off the network (fixed on
+// esp-hal `main`). Lift with the esp-radio release that has the fix (`net::esp::power_save`).
+#[cfg(all(feature = "matter-icd", feature = "matter-wifi"))]
+compile_error!(
+    "iotkit: `matter-icd` over Wi-Fi waits for an esp-radio release that keeps the radio's power save working: use `matter-thread`, or deep sleep over MQTT or the ESPHome API"
+);
 // Matter over Wi-Fi needs about 21 KB more internal RAM than the ESP32-S3 has left (PSRAM
 // support would fix it; not done yet).
 // Not tried on the original ESP32: Matter (RAM, rs-matter support) and deep sleep (its code
@@ -75,6 +84,11 @@ compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-C3's RAM (use MQ
 compile_error!("iotkit: `esphome-api` needs `wifi`");
 #[cfg(all(feature = "esp32h2", feature = "wifi"))]
 compile_error!("iotkit: the ESP32-H2 has no Wi-Fi: `default-features = false` with `matter-thread`");
+#[cfg(all(feature = "matter-ota", not(any(feature = "matter-wifi", feature = "matter-thread"))))]
+compile_error!("iotkit: `matter-ota` needs `matter-wifi` or `matter-thread`");
+// One esp-radio build: devkit's Wi-Fi and Thread's 802.15.4 do not mix.
+#[cfg(all(feature = "matter-thread", feature = "wifi"))]
+compile_error!("iotkit: `matter-thread` is without Wi-Fi: `default-features = false`");
 
 // With no setup path, only a network given at build time can be joined.
 #[cfg(all(feature = "wifi", not(any(feature = "improv-ble", feature = "softap", feature = "improv-serial"))))]
@@ -92,23 +106,28 @@ pub(crate) use core::sync::atomic;
 #[cfg(all(feature = "_esp", feature = "portable-atomic"))]
 pub(crate) use portable_atomic as atomic;
 
-pub use iotkit_core::{image, model, runtime};
+pub use iotkit_core::{image, model, runtime, time};
 
+#[cfg(esp_scheduled)]
+pub mod clock;
 pub mod components;
 pub mod config;
 pub mod diag;
 #[cfg(feature = "esphome-api")]
 pub mod esphome;
+#[cfg(feature = "_esp")]
+pub mod health;
 #[cfg(feature = "_matter")]
 pub mod matter;
 pub mod mqtt;
 pub mod net;
 pub mod ota;
 pub mod provision;
+pub mod status;
 
-#[cfg(esp_wifi)]
+#[cfg(any(esp_wifi, all(feature = "_esp", feature = "matter-thread")))]
 mod app;
-#[cfg(esp_wifi)]
+#[cfg(any(esp_wifi, all(feature = "_esp", feature = "matter-thread")))]
 pub use app::*;
 
 pub use components::Active;
@@ -120,8 +139,7 @@ pub use image::{PublicKey, public_key};
 pub use model::*;
 #[cfg(esp_wifi)]
 pub use net::esp::Net;
-#[cfg(esp_wifi)]
-pub use ota::esp::Firmware;
+pub use ota::Firmware;
 pub use runtime::{Check, Health};
 
 #[cfg(feature = "_esp")]

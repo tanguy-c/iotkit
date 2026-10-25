@@ -72,6 +72,8 @@ pub enum Error {
     WrongChip,
     /// The app descriptor's project or version differs from the manifest.
     Mismatch,
+    /// Not a Matter OTA file, or a header iotkit cannot read.
+    Matter,
 }
 
 impl fmt::Display for Error {
@@ -91,6 +93,7 @@ impl fmt::Display for Error {
             Error::NotAnImage => "not an ESP app image",
             Error::WrongChip => "app image for another chip",
             Error::Mismatch => "app image project or version differs from the manifest",
+            Error::Matter => "not a Matter OTA file iotkit can read",
         })
     }
 }
@@ -316,6 +319,8 @@ impl<'a> Manifest<'a> {
         Ok(())
     }
 }
+
+pub mod matter;
 
 /// The header of an ESP-IDF app image (`espflash save-image` output).
 pub mod app {

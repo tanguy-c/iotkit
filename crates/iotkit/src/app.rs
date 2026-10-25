@@ -1,75 +1,38 @@
 //! The kit in one call: [`start`], the [`Board`] and [`Config`], the console, deep sleep and
-//! updates from Home Assistant. Re-exported at the crate root.
+//! updates from Home Assistant. Re-exported at the crate root. `start` runs the kit over Wi-Fi
+//! (`wifi`), or Matter over Thread (`matter-thread`).
 
 pub mod battery;
+#[cfg(esp_wifi)]
 mod console;
 #[cfg(feature = "deep-sleep")]
-mod sleep;
+pub(crate) mod sleep;
+#[cfg(feature = "matter-thread")]
+mod thread;
 #[cfg(feature = "ha-update")]
 mod update;
+#[cfg(esp_wifi)]
+mod wifi;
 
 #[cfg(feature = "deep-sleep")]
 pub use sleep::{SleepConfig, SleepyApp, WakeReason, start_sleepy, wake_reason};
+#[cfg(feature = "matter-thread")]
+pub use thread::{Board, start};
+#[cfg(esp_wifi)]
+pub use wifi::{Board, start};
 
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
-use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Instant, Timer};
-#[cfg(feature = "improv-ble")]
-use esp_hal::peripherals::BT;
-use esp_hal::{
-    gpio::{AnyPin, Input, InputConfig, Pull},
-    peripherals::{FLASH, TIMG1, WIFI},
-    timer::timg::TimerGroup,
-};
-#[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
-use esp_hal::{peripherals::UART0, uart::Uart};
-#[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
-use esp_hal::{peripherals::USB_DEVICE, usb::usb_serial_jtag::UsbSerialJtag};
-use log::{error, info, warn};
+use embassy_time::{Duration, Instant};
+use esp_hal::peripherals::FLASH;
+use log::warn;
 
-use crate::atomic::{AtomicBool, Ordering};
-use crate::{BootStats, Check, Device, Entity, Firmware, Health, Net, Setting, SharedStore, TaskWatch};
-use static_cell::StaticCell;
+#[cfg(esp_wifi)]
+use crate::Net;
+use crate::{BootStats, Check, Entity, Firmware, Setting, SharedStore, TaskWatch};
 
+pub use crate::health::{APP_CHECKS, BROKER, ESPHOME, HEALTH, MATTER, NETWORK, RECORDED};
+#[cfg(esp_wifi)]
 pub use console::ConsoleExtension;
-
-/// The boot was counted in flash.
-pub const RECORDED: Check = Check(0);
-/// Wi-Fi joined, with an address (passed at once while no network is stored).
-pub const NETWORK: Check = Check(1);
-/// Connected to the MQTT broker (passed at once when none is set).
-pub const BROKER: Check = Check(2);
-/// First check number free for the app's own ([`Config::checks`]).
-pub const APP_CHECKS: u8 = 8;
-
-/// The health check: the kit's checks, and the app's added by [`start`].
-pub static HEALTH: Health = Health::new(&[RECORDED, NETWORK, BROKER]);
-
-/// The peripherals the kit takes; the app keeps the rest.
-pub struct Board {
-    /// The Wi-Fi radio.
-    pub wifi: WIFI<'static>,
-    /// Bluetooth LE, for Improv (`improv-ble`).
-    #[cfg(feature = "improv-ble")]
-    pub bt: BT<'static>,
-    /// Its watchdog backs the task watchdog.
-    pub timg1: TIMG1<'static>,
-    /// The USB serial port: console and Improv (`console`, `improv-serial`).
-    #[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
-    pub usb: USB_DEVICE<'static>,
-    /// The ESP32's console port (UART0, behind the board's USB bridge), for the console and
-    /// Improv (`console`, `improv-serial`).
-    #[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
-    pub uart: UART0<'static>,
-    /// UART0's RX pin: GPIO3.
-    #[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
-    pub uart_rx: AnyPin<'static>,
-    /// The BOOT button (active low; GPIO9 on the ESP32-C6-DevKitC-1): the setup window and
-    /// factory reset ([`provision::gesture`]); a short press goes to the app
-    /// ([`provision::esp::wait_press`]).
-    pub boot_button: Option<AnyPin<'static>>,
-}
 
 /// What the device is: `Config::new(iotkit::firmware!(&OTA_KEY))`, then the builders.
 ///
@@ -95,8 +58,10 @@ pub struct Config {
     /// The app's own health checks (numbers from [`APP_CHECKS`]), passed with `HEALTH.pass`.
     pub checks: &'static [Check],
     /// Extra console commands.
+    #[cfg(esp_wifi)]
     pub console: Option<ConsoleExtension>,
     /// [`CHIP`]; read through the config, which is smaller code than the constant.
+    #[cfg(esp_wifi)]
     chip: &'static str,
 }
 
@@ -111,7 +76,9 @@ impl Config {
             entities: &[],
             watches: &[],
             checks: &[],
+            #[cfg(esp_wifi)]
             console: None,
+            #[cfg(esp_wifi)]
             chip: CHIP,
         }
     }
@@ -146,6 +113,7 @@ impl Config {
         self
     }
     /// See [`Config::console`](Self#structfield.console).
+    #[cfg(esp_wifi)]
     pub const fn console(mut self, console: ConsoleExtension) -> Self {
         self.console = Some(console);
         self
@@ -161,6 +129,8 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
     "ESP32-C5"
 } else if cfg!(feature = "esp32") {
     "ESP32"
+} else if cfg!(feature = "esp32h2") {
+    "ESP32-H2"
 } else {
     "ESP32-S3"
 };
@@ -171,6 +141,7 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
 #[doc(hidden)]
 pub fn __early_boot(flash: FLASH<'static>) {
     crate::config::esp::init(flash);
+    #[cfg(esp_ota)]
     crate::ota::esp::early_guard();
 }
 
@@ -178,7 +149,8 @@ pub fn __early_boot(flash: FLASH<'static>) {
 /// full speed, the flash, the rollback of an update that keeps crashing
 /// ([`early_guard`](crate::ota::esp::early_guard)), the heap (64 KB reclaimed from the bootloader
 /// plus `heap`, 96 KB by default; the Wi-Fi and Bluetooth drivers allocate) and the RTOS timer.
-/// Declares `$p`, the peripherals (`FLASH`, `TIMG0` and `FROM_CPU_INTR0` are taken). The app
+/// Declares `$p`, the peripherals (`FLASH`, `TIMG0` and `FROM_CPU_INTR0` are taken; `LPWR` too
+/// on a Thread device on battery, `matter-icd`, whose CPU light-sleeps when idle). The app
 /// reaches the flash through [`config::esp::with`](crate::config::esp::with) (its own partition:
 /// [`config::esp::find_partition`](crate::config::esp::find_partition)), or keeps settings with
 /// [`App::save`].
@@ -209,7 +181,30 @@ macro_rules! init {
         $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: 64 * 1024);
         $crate::__private::esp_alloc::heap_allocator!(size: $heap);
         let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
-        $crate::__private::esp_rtos::start(timg0.timer0, $p.FROM_CPU_INTR0);
+        $crate::__start_rtos!($p, timg0.timer0);
+    };
+}
+
+/// Starts the RTOS for [`init!`].
+#[cfg(not(all(feature = "matter-thread", feature = "matter-icd")))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __start_rtos {
+    ($p:ident, $timer:expr) => {
+        $crate::__private::esp_rtos::start($timer, $p.FROM_CPU_INTR0);
+    };
+}
+
+/// Starts the RTOS for [`init!`], the CPU in light sleep whenever no task runs and nothing holds
+/// it awake (the Bluetooth stack during pairing, the 802.15.4 radio while it listens:
+/// [`matter::icd`](crate::matter::icd)). Takes `LPWR`.
+#[cfg(all(feature = "matter-thread", feature = "matter-icd"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __start_rtos {
+    ($p:ident, $timer:expr) => {
+        let sleep = $crate::__private::esp_rtos::sleep::configure($p.LPWR);
+        $crate::__private::esp_rtos::start_with_idle_hook($timer, $p.FROM_CPU_INTR0, sleep.light_sleep_hook);
     };
 }
 
@@ -247,6 +242,7 @@ pub struct App {
     /// The settings in flash, shared with the kit (load and save the app's own).
     pub store: &'static SharedStore,
     /// `None` if the radio did not start.
+    #[cfg(esp_wifi)]
     pub net: Option<Net>,
     /// Boot and crash counters (`crashes_in_a_row` lets an app stop a boot loop).
     pub stats: Option<BootStats>,
@@ -272,248 +268,11 @@ impl App {
     }
 }
 
-/// Starts the kit (see the [crate] docs). Call first in `main`, right after [`init!`]. Panics
-/// without it, or if the `config` partition is missing.
-pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> App {
-    // The crash record: a crash before this (in `init!`, say) does not overwrite it.
-    let boot = crate::diag::esp::boot();
-    esp_println::logger::init_logger_from_env();
-    let fw = config.firmware;
-    info!("{} {} booted, reset cause: {:?}", fw.product, fw.version, boot.cause);
-    if let Some(crash) = &boot.crash {
-        error!("previous run crashed: {crash}");
-    }
-    for &check in config.checks {
-        HEALTH.require(check);
-    }
-
-    static STORE: StaticCell<SharedStore> = StaticCell::new();
-    let store = match crate::config::esp::open().await {
-        Ok(store) => &*STORE.init(Mutex::new(store)),
-        Err(e) => panic!("config: {e}"),
-    };
-    let stats = match crate::diag::record_boot(&mut *store.lock().await, &boot).await {
-        Ok((stats, last)) => {
-            info!("boot #{}, {} crashes ({} in a row)", stats.boots, stats.crashes, stats.crashes_in_a_row);
-            if let Some(last) = last {
-                info!("last crash: {last}");
-            }
-            HEALTH.pass(RECORDED);
-            Some(stats)
-        }
-        Err(e) => {
-            warn!("could not record the boot: {e}");
-            None
-        }
-    };
-    // After the boot is recorded (a crashing update still counts its crashes): may switch back
-    // to the previous firmware and restart.
-    crate::ota::esp::boot(store, fw.version).await;
-
-    spawn(spawner, crate::diag::esp::watchdog_task(TimerGroup::new(board.timg1).wdt, config.watches));
-
-    let credentials = crate::net::esp::credentials(store).await;
-    if credentials.is_none() {
-        // No network until provisioned: the health check cannot wait for it.
-        warn!("no Wi-Fi network stored: join the setup access point, or use Improv (Bluetooth, USB serial)");
-        HEALTH.pass(NETWORK);
-    }
-    #[cfg(feature = "improv-ble")]
-    let bt = board.bt;
-    #[cfg(not(feature = "improv-ble"))]
-    let bt = ();
-    let provisioner = match crate::net::esp::start(spawner, board.wifi, credentials.clone()) {
-        Ok(net) => Some(start_services(spawner, net, store, bt, config, credentials.is_none()).await),
-        Err(e) => {
-            error!("Wi-Fi: {e:?}");
-            radio_failed();
-            None
-        }
-    };
-    spawn(spawner, supervisor_task(store, fw.version));
-    if let Some(pin) = board.boot_button {
-        let button = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
-        spawn(spawner, crate::provision::esp::button_task(button, store));
-    }
-    #[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
-    spawn_console(spawner, board.usb, store, provisioner, config);
-    #[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
-    spawn_console(spawner, (board.uart, board.uart_rx), store, provisioner, config);
-
-    App { store, net: provisioner.map(|p| p.net), stats }
-}
-
-/// Everything on the network: links, OTA, provisioning.
-async fn start_services(
-    spawner: Spawner,
-    net: Net,
-    store: &'static SharedStore,
-    bt: Ble,
-    config: &'static Config,
-    unprovisioned: bool,
-) -> crate::provision::esp::Provisioner {
-    spawn(spawner, network_check_task(net));
-    // With `ha-update`, the kit's firmware entity after the app's.
-    #[cfg(feature = "ha-update")]
-    let entities = update::with_update(config.entities);
-    #[cfg(not(feature = "ha-update"))]
-    let entities = config.entities;
-    static DEVICE: StaticCell<Device> = StaticCell::new();
-    let device = &*DEVICE.init(Device {
-        name: net.hostname,
-        manufacturer: config.manufacturer,
-        model: config.model,
-        sw_version: config.firmware.version_text,
-        entities,
-    });
-    #[cfg(feature = "matter-wifi")]
-    {
-        let v = config.firmware.version;
-        let product = crate::matter::wifi::Product {
-            name: config.product_name,
-            version: config.firmware.version_text,
-            version_number: (v.major as u32) << 16 | (v.minor as u32) << 8 | v.patch as u32,
-        };
-        spawn(spawner, crate::matter::wifi::matter_task(net, store, product, device));
-    }
-    match crate::mqtt::esp::broker(store).await {
-        Some(broker) => {
-            spawn(spawner, crate::mqtt::esp::mqtt_task(net, device, broker));
-            spawn(spawner, broker_check_task());
-        }
-        None => {
-            // With the ESPHome API, no broker is the normal setup: nothing to say.
-            #[cfg(not(feature = "esphome-api"))]
-            warn!("no MQTT broker: set one with `mqtt HOST[:PORT]` on the console");
-            HEALTH.pass(BROKER);
-        }
-    }
-    #[cfg(feature = "esphome-api")]
-    spawn(spawner, crate::esphome::esp::api_task(net, device, crate::esphome::esp::key(store).await));
-    #[cfg(feature = "ota-push")]
-    spawn(spawner, crate::ota::esp::serve_task(net, store, config.firmware));
-    #[cfg(all(feature = "ha-update", not(feature = "ota-push")))]
-    spawn(spawner, crate::ota::esp::install_task(net, store, config.firmware));
-    #[cfg(feature = "ha-update")]
-    spawn(spawner, update::update_task(net, store, config.firmware));
-    let provisioner = provisioner(net, store, config);
-    spawn_provisioning(spawner, bt, provisioner, unprovisioned);
-    provisioner
-}
-
-/// Bluetooth for Improv: the peripheral with `improv-ble`, nothing without.
-#[cfg(feature = "improv-ble")]
-type Ble = BT<'static>;
-#[cfg(not(feature = "improv-ble"))]
-type Ble = ();
-
-/// What provisioning needs.
-fn provisioner(net: Net, store: &'static SharedStore, config: &Config) -> crate::provision::esp::Provisioner {
-    let info = crate::provision::esp::DeviceInfo {
-        firmware: config.firmware.product,
-        version: config.firmware.version_text,
-        chip: config.chip,
-    };
-    crate::provision::esp::Provisioner { net, store, info }
-}
-
-/// The setup windows (Improv over Bluetooth, the access point), open at once while no network
-/// is stored.
-#[cfg_attr(not(feature = "improv-ble"), allow(unused_variables))]
-fn spawn_provisioning(spawner: Spawner, bt: Ble, p: crate::provision::esp::Provisioner, unprovisioned: bool) {
-    #[cfg(feature = "improv-ble")]
-    spawn(spawner, crate::provision::esp::window_task(bt, p));
-    #[cfg(not(feature = "improv-ble"))]
-    spawn(spawner, crate::provision::esp::window_task(p));
-    #[cfg(feature = "softap")]
-    {
-        spawn(spawner, crate::provision::esp::dhcp_task(p));
-        spawn(spawner, crate::provision::esp::dns_task(p));
-        spawn(spawner, crate::provision::esp::portal_task(p));
-        spawn(spawner, crate::provision::esp::portal_job_task(p));
-    }
-    if unprovisioned {
-        crate::provision::esp::open_window();
-    }
-}
-
-/// The port the console reads: USB-Serial-JTAG, or the ESP32's UART0 and its RX pin.
-#[cfg(all(any(feature = "console", feature = "improv-serial"), not(feature = "esp32")))]
-type ConsolePort = USB_DEVICE<'static>;
-#[cfg(all(any(feature = "console", feature = "improv-serial"), feature = "esp32"))]
-type ConsolePort = (UART0<'static>, AnyPin<'static>);
-
-/// The console's serial port: console commands and Improv frames.
-#[cfg(any(feature = "console", feature = "improv-serial"))]
-fn spawn_console(
-    spawner: Spawner,
-    port: ConsolePort,
-    store: &'static SharedStore,
-    p: Option<crate::provision::esp::Provisioner>,
-    config: &'static Config,
-) {
-    #[cfg(not(feature = "esp32"))]
-    let (rx, _tx) = UsbSerialJtag::new(port).into_async().split();
-    // The bootloader set UART0 up at 115 200 baud; esp-println writes to it directly.
-    #[cfg(feature = "esp32")]
-    let (rx, _tx) = match Uart::new(port.0, esp_hal::uart::Config::default()) {
-        Ok(uart) => uart.with_rx(port.1).into_async().split(),
-        Err(e) => return log::error!("console: UART0: {e:?}"),
-    };
-    spawn(spawner, console::console_task(rx, store, p, config));
-}
-
 /// Spawns a kit task; each runs once, so a failure is a bug.
-fn spawn<S>(spawner: Spawner, token: Result<embassy_executor::SpawnToken<S>, embassy_executor::SpawnError>) {
+pub(crate) fn spawn<S>(spawner: Spawner, token: Result<embassy_executor::SpawnToken<S>, embassy_executor::SpawnError>) {
     match token {
         Ok(token) => spawner.spawn(token),
         Err(e) => panic!("iotkit-app: task spawned twice: {e:?}"),
-    }
-}
-
-#[embassy_executor::task]
-async fn network_check_task(net: Net) {
-    net.wait_online().await;
-    HEALTH.pass(NETWORK);
-}
-
-#[embassy_executor::task]
-async fn broker_check_task() {
-    crate::mqtt::esp::wait_connected().await;
-    HEALTH.pass(BROKER);
-}
-
-/// Wi-Fi did not start: [`supervisor_task`] gives up an update on trial at once.
-static NO_RADIO: AtomicBool = AtomicBool::new(false);
-
-/// Wi-Fi did not start: its checks cannot pass, so they are skipped. Not for an update on trial:
-/// the previous firmware had a radio (it received the update), and this one, kept, could not be
-/// updated again but over USB.
-fn radio_failed() {
-    if crate::ota::esp::on_trial() {
-        error!("ota: the update cannot start Wi-Fi, back to the previous firmware");
-        NO_RADIO.store(true, Ordering::Release);
-        return;
-    }
-    HEALTH.pass(NETWORK);
-    HEALTH.pass(BROKER);
-}
-
-/// Once healthy: the boot is stable, and an update just installed is kept (rolled back if not
-/// healthy in time).
-#[embassy_executor::task]
-async fn supervisor_task(store: &'static SharedStore, version: crate::image::Version) {
-    if crate::ota::esp::on_trial() {
-        let timeout = if NO_RADIO.load(Ordering::Acquire) { 0 } else { crate::ota::UPDATE_TIMEOUT_S };
-        if let Either::Second(()) = select(HEALTH.healthy(), Timer::after_secs(timeout.into())).await {
-            crate::ota::esp::give_up(store, HEALTH.missing(), version, timeout).await;
-        }
-    }
-    HEALTH.healthy().await;
-    crate::ota::esp::confirm(store).await;
-    match BootStats::mark_stable(&mut *store.lock().await).await {
-        Ok(()) => info!("healthy"),
-        Err(e) => warn!("could not mark the boot stable: {e}"),
     }
 }
 

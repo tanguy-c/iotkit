@@ -18,7 +18,7 @@ mod new;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
-use iotkit_core::image::{Manifest, Version, app, hex_decode, hex_encode, sha256};
+use iotkit_core::image::{Manifest, Version, app, hex_decode, hex_encode, matter, sha256};
 
 /// The chips iotkit builds for: name (cargo feature and `espflash --chip`), ESP Web Tools' chip
 /// family, target, image id.
@@ -224,6 +224,40 @@ enum Ota {
         #[arg(long, default_value = "keys/ota.key")]
         key: PathBuf,
     },
+    /// Build, then write the Matter OTA file `dist/<package>/<package>-<version>.ota` (its payload:
+    /// the signed manifest, then the image) and its description for a Matter OTA provider
+    /// (`<package>-<version>.json`: python-matter-server's `--ota-provider-dir` format).
+    Build {
+        #[command(flatten)]
+        app: App,
+        /// Use the last build instead of building.
+        #[arg(long)]
+        no_build: bool,
+        #[arg(long, default_value = "0.0.0")]
+        min_version: String,
+        #[command(flatten)]
+        release: Release,
+        #[arg(long, default_value = "keys/ota.key")]
+        key: PathBuf,
+        /// The device's Matter vendor id (the test vendor's by default, as the firmware).
+        #[arg(long, default_value = "0xFFF1", value_parser = parse_u16)]
+        vid: u16,
+        /// The device's Matter product id.
+        #[arg(long, default_value = "0x8001", value_parser = parse_u16)]
+        pid: u16,
+        /// The bare image as the payload, for firmware built with `matter-ota-unsigned`.
+        #[arg(long)]
+        unsigned: bool,
+    },
+}
+
+/// `0x8001` or `32769`.
+fn parse_u16(s: &str) -> Result<u16, String> {
+    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => u16::from_str_radix(hex, 16),
+        None => s.parse(),
+    }
+    .map_err(|e| format!("{s}: {e}"))
 }
 
 fn main() -> Result<()> {
@@ -263,6 +297,13 @@ fn main() -> Result<()> {
             println!("open http://localhost:{port}/{}/web/ in Chrome or Edge (Ctrl-C stops)", app.package);
             serve_dist(listener);
             Ok(())
+        }
+        Cmd::Ota(Ota::Build { app, no_build, min_version, release, key, vid, pid, unsigned }) => {
+            let app = Build::new(app)?;
+            if !no_build {
+                build(&app, &min_version, &release, &key)?;
+            }
+            matter_ota(&Path::new("dist").join(&app.package), vid, pid, unsigned).map(|_| ())
         }
         Cmd::Ota(Ota::Publish { to, base_url, app, no_build, min_version, release, key }) => {
             let app = Build::new(app)?;
@@ -486,6 +527,64 @@ fn build(app: &Build, min_version: &str, release: &Release, key: &Path) -> Resul
     fs::write(&path, &buf[..n])?;
     println!("{}: {} {version}, {} bytes, signed", path.display(), app.package, data.len());
     web(app, &dir.join("web"), version_str)
+}
+
+/// Writes the Matter OTA file of the build in `dir` (from its manifest and image) and the
+/// provider's description of it; returns the file's path.
+fn matter_ota(dir: &Path, vid: u16, pid: u16, unsigned: bool) -> Result<PathBuf> {
+    let json = fs::read(dir.join("manifest.json")).with_context(|| format!("reading {}", dir.display()))?;
+    let manifest = Manifest::parse(&json).map_err(|e| anyhow::anyhow!("{}: {e}", dir.display()))?;
+    let image = fs::read(dir.join(manifest.url)).context("reading the image")?;
+    let version = matter::version(manifest.version)
+        .with_context(|| format!("version {}: Matter's needs minor and patch up to 255", manifest.version))?;
+    let max = version.checked_sub(1).context("version 0.0.0: no older firmware to update")?;
+    let mut payload = Vec::new();
+    if !unsigned {
+        payload.extend(matter::bundle::prefix(json.len()).map_err(|e| anyhow::anyhow!("manifest: {e}"))?);
+        payload.extend(&json);
+    }
+    payload.extend(&image);
+    let version_text = manifest.version.to_string();
+    let min = matter::version(manifest.min_version)
+        .with_context(|| format!("min_version {}: Matter's needs minor and patch up to 255", manifest.min_version))?;
+    let header = matter::Header {
+        vendor_id: vid,
+        product_id: pid,
+        version,
+        version_text: &version_text,
+        payload_size: payload.len() as u64,
+        min_applicable: (min > 0).then_some(min),
+        max_applicable: Some(max),
+        release_notes_url: manifest.release_url,
+        digest: sha256(&payload),
+    };
+    let mut file = vec![0; matter::PREFIX_LEN + matter::MAX_HEADER_LEN];
+    let n = header.encode(&mut file).map_err(|e| anyhow::anyhow!("Matter OTA header: {e}"))?;
+    file.truncate(n);
+    file.extend(&payload);
+
+    let name = format!("{}-{version_text}", manifest.product);
+    let path = dir.join(format!("{name}.ota"));
+    fs::write(&path, &file)?;
+    // The provider reads `file:///<name>` from its own folder, and checks the whole file's SHA-256.
+    let description = serde_json::json!({
+        "modelVersion": {
+            "vid": vid,
+            "pid": pid,
+            "softwareVersion": version,
+            "softwareVersionString": version_text,
+            "otaUrl": format!("file:///{name}.ota"),
+            "otaChecksum": new::base64(&sha256(&file)),
+            "otaChecksumType": 1,
+            "minApplicableSoftwareVersion": min,
+            "maxApplicableSoftwareVersion": max,
+            "releaseNotesUrl": manifest.release_url,
+        }
+    });
+    fs::write(dir.join(format!("{name}.json")), serde_json::to_string_pretty(&description)? + "\n")?;
+    let kind = if unsigned { "bare image" } else { "signed manifest and image" };
+    println!("{}: Matter OTA file, {vid:#06x}/{pid:#06x} version {version:#x} ({kind})", path.display());
+    Ok(path)
 }
 
 /// The browser install (ESP Web Tools): a merged image to flash at 0 (bootloader, partition
@@ -731,4 +830,63 @@ fn hex(bytes: &[u8]) -> String {
 fn read_hex<const N: usize>(path: &Path) -> Result<[u8; N]> {
     let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     hex_decode(text.trim()).map_err(|_| anyhow::anyhow!("{}: expected {} hex bytes", path.display(), N))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Matter OTA file reads back as the firmware reads it: the header, then the signed
+    /// manifest and the image; its description has the provider's checksum.
+    #[test]
+    fn matter_ota_file() {
+        let dir = std::env::temp_dir().join(format!("iotkit-matter-ota-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let image = b"\xe9 an app image".repeat(100);
+        let pair = ed25519_compact::KeyPair::generate();
+        let mut m = Manifest {
+            product: "light",
+            version: Version::new(1, 2, 3),
+            min_version: Version::new(1, 0, 0),
+            size: image.len() as u32,
+            sha256: sha256(&image),
+            url: "light-1.2.3.bin",
+            summary: "",
+            release_url: "",
+            signature: [0; 64],
+        };
+        m.sign(&pair.sk).unwrap();
+        let mut buf = [0; 1024];
+        let n = m.to_json(&mut buf).unwrap();
+        fs::write(dir.join("manifest.json"), &buf[..n]).unwrap();
+        fs::write(dir.join(m.url), &image).unwrap();
+
+        let file = fs::read(matter_ota(&dir, 0xfff1, 0x8001, false).unwrap()).unwrap();
+        let prefix = matter::Prefix::parse(file[..matter::PREFIX_LEN].try_into().unwrap()).unwrap();
+        let body = matter::PREFIX_LEN + prefix.header_size as usize;
+        let header = matter::Header::parse(&file[matter::PREFIX_LEN..body]).unwrap();
+        header.check_prefix(prefix).unwrap();
+        assert_eq!(
+            (header.version, header.min_applicable, header.max_applicable),
+            (0x01_02_03, Some(0x01_00_00), Some(0x01_02_02))
+        );
+        header.check_update(0xfff1, 0x8001, 0x01_00_00).unwrap();
+        let payload = &file[body..];
+        assert_eq!(sha256(payload), header.digest);
+        let len = matter::bundle::manifest_len(payload[..6].try_into().unwrap()).unwrap();
+        let bundled = Manifest::parse(&payload[6..6 + len]).unwrap();
+        bundled.verify(&pair.pk).unwrap();
+        assert_eq!(&payload[6 + len..], &image[..]);
+
+        let description: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join("light-1.2.3.json")).unwrap()).unwrap();
+        let model = &description["modelVersion"];
+        assert_eq!(model["softwareVersion"], 0x01_02_03);
+        assert_eq!(model["otaUrl"], "file:///light-1.2.3.ota");
+        assert_eq!(model["otaChecksum"], new::base64(&sha256(&file)));
+
+        let bare = fs::read(matter_ota(&dir, 0xfff1, 0x8001, true).unwrap()).unwrap();
+        assert!(bare.ends_with(&image) && bare.len() < file.len());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

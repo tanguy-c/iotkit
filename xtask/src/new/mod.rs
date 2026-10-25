@@ -31,6 +31,8 @@ pub struct Answers {
     pub board: String,
     /// `4mb` or `8mb`, for another board.
     pub flash_size: Option<String>,
+    /// How it talks to the home: Wi-Fi, or Matter over Thread.
+    pub transport: Transport,
     pub power: Power,
     /// Battery: how often it wakes up.
     pub report_every_min: u32,
@@ -39,6 +41,13 @@ pub struct Answers {
     pub battery_curve: Curve,
     /// The board's RGB LED as a light (plugged-in devkits).
     pub status_led: bool,
+    /// What shows the device's status (pairing, connecting, updates).
+    pub status: Indicator,
+    /// With `status = "led"`: the LED's pin (to ground through a resistor).
+    pub status_pin: Option<u8>,
+    /// The setup button (to ground; default: the board's BOOT). On battery, a low-power pin
+    /// wakes the chip with a press.
+    pub button_pin: Option<u8>,
     pub wifi_ssid: Option<String>,
     pub wifi_password: Option<String>,
     pub mqtt_host: Option<String>,
@@ -67,11 +76,15 @@ impl Default for Answers {
             maker: "Me".into(),
             board: "esp32c6-devkitc-1".into(),
             flash_size: None,
+            transport: Transport::Wifi,
             power: Power::Plugged,
             report_every_min: 5,
             battery_pin: None,
             battery_curve: Curve::Lipo,
             status_led: true,
+            status: Indicator::Off,
+            status_pin: None,
+            button_pin: None,
             wifi_ssid: None,
             wifi_password: None,
             mqtt_host: None,
@@ -87,6 +100,15 @@ impl Default for Answers {
             ai_agents: false,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Transport {
+    /// Wi-Fi: Home Assistant over MQTT or the ESPHome API, Matter optional, updates over HTTP.
+    Wifi,
+    /// Matter over Thread (an 802.15.4 chip): paired over Bluetooth, updates over Matter.
+    Thread,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +134,17 @@ pub enum MatterMode {
     Fixed,
     /// Each device draws its own at its first boot.
     PerDevice,
+}
+
+/// What shows the device's status (`iotkit::status`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Indicator {
+    Off,
+    /// The board's RGB LED (`components::status_rgb`).
+    Rgb,
+    /// A LED on `status_pin` (`components::status_led`).
+    Led,
 }
 
 /// The ESPHome native API (`esphome-api`): Home Assistant connects to the device, no broker.
@@ -166,17 +199,48 @@ impl Project {
         self.answers.power == Power::Battery
     }
 
+    /// On battery without Matter: wakes up, reports and deep-sleeps (`start_sleepy`), over MQTT or
+    /// the ESPHome API.
+    pub fn sleepy(&self) -> bool {
+        self.battery() && self.answers.matter == MatterMode::Off
+    }
+
+    /// On battery with Matter: stays reachable as a Matter ICD (`matter-icd`), a sleepy end device
+    /// over Thread.
+    pub fn icd(&self) -> bool {
+        self.battery() && self.answers.matter != MatterMode::Off
+    }
+
     pub fn esphome(&self) -> bool {
         self.answers.esphome != EsphomeMode::Off
     }
 
+    /// Matter over Thread, no Wi-Fi.
+    pub fn thread(&self) -> bool {
+        self.answers.transport == Transport::Thread
+    }
+
     /// How Home Assistant reaches it, for summaries.
     pub fn ha_link(&self) -> &'static str {
-        if self.esphome() { "Home Assistant (ESPHome API)" } else { "Home Assistant (MQTT)" }
+        if self.thread() {
+            "Matter over Thread"
+        } else if self.esphome() {
+            "Home Assistant (ESPHome API)"
+        } else {
+            "Home Assistant (MQTT)"
+        }
     }
 
     pub fn status_led(&self) -> bool {
-        self.answers.status_led && !self.battery() && self.board.rgb_led.is_some()
+        self.answers.status_led
+            && !self.battery()
+            && self.board.rgb_led.is_some()
+            && self.answers.status != Indicator::Rgb
+    }
+
+    /// The setup button's pin.
+    pub fn button_pin(&self) -> u8 {
+        self.answers.button_pin.unwrap_or(self.board.boot_pin)
     }
 
     /// Checks the answers: board, pins, what the chip can do.
@@ -197,20 +261,41 @@ impl Project {
             (None, None) => "4mb".into(),
         };
         let battery = answers.power == Power::Battery;
-        if answers.matter != MatterMode::Off {
+        if answers.transport == Transport::Thread {
+            ensure!(
+                board.thread(),
+                "Thread needs an 802.15.4 radio: an ESP32-C6 or ESP32-H2 (not the {})",
+                board.chip_label
+            );
+            ensure!(
+                !(battery && answers.battery_pin.is_some()),
+                "on Thread, the ADC is the random number generator's entropy: no battery level yet (remove `battery_pin`)"
+            );
+            ensure!(
+                answers.matter != MatterMode::Off,
+                "Thread devices talk Matter: set `matter = \"fixed\"` or `\"per-device\"`"
+            );
+            ensure!(flash == "8mb", "Matter needs 8 MB of flash");
+            ensure!(
+                answers.wifi_ssid.is_none() && answers.mqtt_host.is_none() && answers.esphome == EsphomeMode::Off,
+                "Thread has no Wi-Fi, MQTT or ESPHome API: remove `wifi_ssid`, `mqtt_host` and `esphome`"
+            );
+            ensure!(
+                answers.updates_url.is_none(),
+                "Thread devices update over Matter (`cargo iotkit ota build`, then a Matter OTA provider): remove `updates_url`"
+            );
+        } else {
+            ensure!(board.chip != "esp32h2", "the ESP32-H2 has no Wi-Fi: set `transport = \"thread\"`");
+        }
+        if answers.matter != MatterMode::Off && answers.transport == Transport::Wifi {
             ensure!(
                 board.matter(),
                 "Matter needs an ESP32-C6 (the {} has not the RAM or the drivers yet)",
                 board.chip_label
             );
-            ensure!(!battery, "Matter devices stay awake: choose `power = \"plugged\"` or no Matter");
             ensure!(flash == "8mb", "Matter needs 8 MB of flash");
         }
         if answers.esphome != EsphomeMode::Off {
-            ensure!(
-                !battery,
-                "the ESPHome API needs the device awake: choose `power = \"plugged\"`, or MQTT (the broker keeps commands while it sleeps)"
-            );
             ensure!(
                 answers.mqtt_host.is_none(),
                 "the ESPHome API or MQTT, not both (Home Assistant would show the device twice): remove `mqtt_host`"
@@ -220,6 +305,11 @@ impl Project {
             ensure!(!battery, "deep sleep is not supported on the ESP32 yet: choose `power = \"plugged\"`");
         }
         ensure!((1..=24 * 60).contains(&answers.report_every_min), "report_every_min: 1 to 1440");
+        // iotkit's `matter-icd` over Wi-Fi waits for an esp-radio release (crates/iotkit/src/lib.rs).
+        ensure!(
+            !(battery && answers.matter != MatterMode::Off && answers.transport == Transport::Wifi),
+            "Matter over Wi-Fi on battery is not supported yet: choose `transport = \"thread\"`, or no Matter (deep sleep over MQTT or the ESPHome API)"
+        );
 
         let mut warnings = Vec::new();
         if answers.esphome != EsphomeMode::Off && answers.matter != MatterMode::Off {
@@ -229,8 +319,25 @@ impl Project {
         }
         let mut taken: Vec<u8> = Vec::new();
         let led = answers.status_led && !battery;
-        if let (true, Some(pin)) = (led, board.rgb_led) {
+        if let (true, Some(pin)) = (led || answers.status == Indicator::Rgb, board.rgb_led) {
             taken.push(pin);
+        }
+        match answers.status {
+            Indicator::Rgb => {
+                ensure!(
+                    board.rgb_led.is_some(),
+                    "the {} has no RGB LED: set `status = \"led\"` and `status_pin`",
+                    board.model
+                );
+                if led {
+                    warnings.push("the RGB LED shows the status: no status light".into());
+                }
+                if battery {
+                    warnings.push("a WS2812 draws about 1 mA even dark: on battery, a plain LED (`status = \"led\"`) lasts longer".into());
+                }
+            }
+            Indicator::Led => ensure!(answers.status_pin.is_some(), "`status = \"led\"` needs `status_pin`"),
+            Indicator::Off => ensure!(answers.status_pin.is_none(), "`status_pin` needs `status = \"led\"`"),
         }
         let take = |pin: u8, kind: PinUse, what: &str, taken: &mut Vec<u8>, warnings: &mut Vec<String>| -> Result<()> {
             match check_pin(board, pin, kind, taken) {
@@ -243,6 +350,24 @@ impl Project {
         };
         if battery && let Some(pin) = answers.battery_pin {
             take(pin, PinUse::Analog, "Battery level", &mut taken, &mut warnings)?;
+        }
+        if let (Indicator::Led, Some(pin)) = (answers.status, answers.status_pin) {
+            take(pin, PinUse::Output, "Status LED", &mut taken, &mut warnings)?;
+        }
+        let button = answers.button_pin.unwrap_or(board.boot_pin);
+        if button != board.boot_pin {
+            take(button, PinUse::Input, "Setup button", &mut taken, &mut warnings)?;
+        }
+        let sleeps = battery && answers.matter == MatterMode::Off;
+        if sleeps && !board.wake_pins().is_some_and(|r| r.contains(&button)) {
+            warnings.push(match board.wake_pins() {
+                Some(r) => format!(
+                    "the setup button (GPIO{button}) cannot wake the chip: a button on GPIO{} to GPIO{} (`button_pin`) can",
+                    r.start(),
+                    r.end()
+                ),
+                None => format!("the setup button (GPIO{button}) cannot wake the chip"),
+            });
         }
         let mut ids: Vec<String> = vec!["firmware".into(), "status_led".into(), "battery".into()];
         let mut parts = Vec::new();
@@ -261,11 +386,24 @@ impl Project {
                 n += 1;
             }
             ids.push(id.clone());
+            // Without Wi-Fi, ADC1 feeds the random number generator.
+            ensure!(
+                !(answers.transport == Transport::Thread && kind.pin_use() == PinUse::Analog),
+                "{name}: on Thread, the ADC is the random number generator's entropy: no analog parts yet"
+            );
             if let Some(pin) = a.pin {
                 take(pin, kind.pin_use(), &name, &mut taken, &mut warnings)?;
             }
-            if battery && !kind.is_reading() {
-                warnings.push(format!("{name}: on a battery device, commands apply at the next wake-up"));
+            if battery && answers.matter == MatterMode::Off && !kind.is_reading() {
+                let when = match answers.esphome {
+                    // Home Assistant has nothing to send them to while it sleeps.
+                    EsphomeMode::Off => "commands apply at the next wake-up",
+                    _ => "commands reach it only while it is awake",
+                };
+                warnings.push(format!("{name}: on a battery device, {when}"));
+            }
+            if answers.transport == Transport::Thread && kind.matter.is_none() {
+                warnings.push(format!("{name}: Matter has no such device type, so it does not show over Thread"));
             }
             parts.push(Part { kind, konst: id.to_uppercase(), name, id, pin: a.pin });
         }
@@ -302,7 +440,7 @@ fn random_key() -> Result<String> {
     Ok(base64(&bytes))
 }
 
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     let mut s = String::new();
     for chunk in bytes.chunks(3) {
         let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
@@ -509,46 +647,47 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
             .prompt()?;
         a.flash_size = Some(if f.starts_with('4') { "4mb" } else { "8mb" }.into());
     }
+    a.transport = if !board.wifi() {
+        println!("  (the {} has no Wi-Fi: Matter over Thread)", board.chip_label);
+        Transport::Thread
+    } else if board.thread()
+        && Select::new(
+            "Which network?",
+            vec!["Wi-Fi: Home Assistant (MQTT or ESPHome), Matter optional", "Thread: Matter only, low power mesh"],
+        )
+        .with_help_message("Thread needs a border router (Home Assistant's OpenThread add-on, an Apple or Google hub)")
+        .prompt()?
+        .starts_with("Thread")
+    {
+        Transport::Thread
+    } else {
+        Transport::Wifi
+    };
+    let thread = a.transport == Transport::Thread;
 
     // 3. Power.
-    let battery = Select::new(
-        "How is it powered?",
-        vec!["Plugged in (USB or mains): always on", "Battery: wakes up, reports, sleeps"],
-    )
-    .with_help_message("A battery device sleeps between reports to last months, and answers commands only when awake")
-    .prompt()?
-    .starts_with("Battery");
-    a.power = if battery { Power::Battery } else { Power::Plugged };
-    if battery {
-        let every = Select::new(
-            "How often should it report?",
-            vec!["Every minute", "Every 5 minutes", "Every 15 minutes", "Every hour"],
+    let (battery_label, battery_help) = if thread {
+        (
+            "Battery: a sleepy Thread device, reachable within seconds",
+            "Its radio listens every few seconds and the chip sleeps in between: months on a battery",
         )
-        .with_starting_cursor(1)
-        .with_help_message("More often drains the battery faster")
-        .prompt()?;
-        a.report_every_min = match every {
-            "Every minute" => 1,
-            "Every 15 minutes" => 15,
-            "Every hour" => 60,
-            _ => 5,
-        };
-        if Confirm::new("Report the battery level?")
-            .with_default(true)
-            .with_help_message("Needs two resistors from the battery to an analog pin")
-            .prompt()?
-        {
-            a.battery_pin = ask_pin(board, "Analog pin for the battery level?", PinUse::Analog, &[], false)?;
-            let curve =
-                Select::new("Which battery?", vec!["LiPo / Li-ion cell (3.0–4.2 V)", "2 × AA alkaline (2.0–3.2 V)"])
-                    .prompt()?;
-            a.battery_curve = if curve.starts_with('2') { Curve::TwoAa } else { Curve::Lipo };
-        }
-    }
+    } else {
+        (
+            "Battery: wakes up, reports, sleeps",
+            "A battery device sleeps between reports to last months, and answers commands only when awake",
+        )
+    };
+    let battery = Select::new("How is it powered?", vec!["Plugged in (USB or mains): always on", battery_label])
+        .with_help_message(battery_help)
+        .prompt()?
+        .starts_with("Battery");
+    a.power = if battery { Power::Battery } else { Power::Plugged };
 
     // 4. Connectivity.
     println!("\nHow it talks to your home:");
-    if Confirm::new("Enter your Wi-Fi now?")
+    if thread {
+        println!("  (Thread: paired over Bluetooth from a Matter controller, updated over Matter)");
+    } else if Confirm::new("Enter your Wi-Fi now?")
         .with_default(false)
         .with_help_message(
             "Saved in .cargo/secrets.toml (not committed). Otherwise you set it from a phone at the first boot.",
@@ -564,20 +703,21 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         );
     }
     a.esphome = EsphomeMode::Off;
-    if battery {
-        println!("  (Home Assistant: battery devices use MQTT, as the broker keeps commands while they sleep)");
-    } else if Select::new(
-        "How does Home Assistant reach it?",
-        vec![
-            "MQTT, through a broker (the Mosquitto add-on)",
-            "ESPHome API: Home Assistant's ESPHome integration, no broker",
-        ],
-    )
-    .with_help_message(
-        "Both show the same entities. ESPHome: Home Assistant finds the device and connects to it directly.",
-    )
-    .prompt()?
-    .starts_with("ESPHome")
+    if !thread
+        && Select::new(
+            "How does Home Assistant reach it?",
+            vec![
+                "MQTT, through a broker (the Mosquitto add-on)",
+                "ESPHome API: Home Assistant's ESPHome integration, no broker",
+            ],
+        )
+        .with_help_message(if battery {
+            "Both show the same entities. On battery, MQTT's broker keeps commands until the device wakes up; over ESPHome they only reach it awake."
+        } else {
+            "Both show the same entities. ESPHome: Home Assistant finds the device and connects to it directly."
+        })
+        .prompt()?
+        .starts_with("ESPHome")
     {
         let fixed = Select::new(
             "Which encryption key?",
@@ -588,7 +728,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         .starts_with("One");
         a.esphome = if fixed { EsphomeMode::Fixed } else { EsphomeMode::PerDevice };
     }
-    let broker = if a.esphome != EsphomeMode::Off {
+    let broker = if a.esphome != EsphomeMode::Off || thread {
         String::new()
     } else {
         Text::new("Home Assistant's MQTT broker (IP or host name)?")
@@ -607,14 +747,17 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         }
     }
     a.matter = MatterMode::Off;
-    if !board.matter() {
+    if !thread && !board.matter() {
         println!("  (Matter: not on the {} yet)", board.chip_label);
-    } else if battery {
-        println!("  (Matter: not on battery devices, as Matter devices stay awake)");
-    } else if Confirm::new("Also work with Matter (Apple Home, Google Home, Alexa, Home Assistant)?")
-        .with_default(false)
-        .with_help_message("Next to Home Assistant's link. Paired with a code; uses about 2 MB of flash and more RAM.")
-        .prompt()?
+    } else if battery && !thread {
+        println!("  (Matter: not on battery over Wi-Fi yet; Thread devices take it on battery)");
+    } else if thread
+        || Confirm::new("Also work with Matter (Apple Home, Google Home, Alexa, Home Assistant)?")
+            .with_default(false)
+            .with_help_message(
+                "Next to Home Assistant's link. Paired with a code; uses about 2 MB of flash and more RAM.",
+            )
+            .prompt()?
     {
         let fixed = Select::new(
             "Which Matter pairing code?",
@@ -625,36 +768,81 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         .starts_with("One");
         a.matter = if fixed { MatterMode::Fixed } else { MatterMode::PerDevice };
     }
+    if battery {
+        ask_battery(&mut a, board, thread)?;
+    }
     let package = if a.package.is_empty() { slug(&a.name, '-') } else { a.package.clone() };
     let default_url =
         a.mqtt_host.as_deref().map(|h| format!("http://{h}:8080/{package}/manifest.json")).unwrap_or_default();
-    let url = Text::new("Where will you publish updates (manifest URL)?")
-        .with_default(&default_url)
-        .with_help_message(
-            "Home Assistant then offers new versions; `cargo iotkit ota publish` fills it. Leave empty to skip.",
-        )
-        .prompt()?;
-    a.updates_url = (!url.trim().is_empty()).then(|| url.trim().to_string());
+    a.updates_url = None;
+    if !thread {
+        let url = Text::new("Where will you publish updates (manifest URL)?")
+            .with_default(&default_url)
+            .with_help_message(
+                "Home Assistant then offers new versions; `cargo iotkit ota publish` fills it. Leave empty to skip.",
+            )
+            .prompt()?;
+        a.updates_url = (!url.trim().is_empty()).then(|| url.trim().to_string());
+    }
 
     // 5. Parts.
     a.status_led = board.rgb_led.is_some()
         && !battery
         && Confirm::new("Keep the board's RGB LED as a status light?")
             .with_default(true)
-            .with_help_message("A light in Home Assistant; a short press of BOOT toggles it")
+            .with_help_message("A light in your home app; a short press of BOOT toggles it")
             .prompt()?;
-    println!("\nWhat does it do? Add its parts one by one (sensors, relays, buttons...).");
     let mut taken: Vec<u8> = a.battery_pin.into_iter().collect();
-    if a.status_led
+    let mut shows = vec!["Nothing"];
+    if board.rgb_led.is_some() && !a.status_led {
+        shows.push("The board's RGB LED");
+    }
+    shows.push("A LED on a pin");
+    let show = Select::new("What shows its status (pairing, connecting, updates)?", shows)
+        .with_help_message("Blinks while it waits to be set up, and while it connects or updates")
+        .prompt()?;
+    a.status = match show {
+        "Nothing" => Indicator::Off,
+        "A LED on a pin" => Indicator::Led,
+        _ => Indicator::Rgb,
+    };
+    if (a.status_led || a.status == Indicator::Rgb)
         && let Some(led) = board.rgb_led
     {
         taken.push(led);
     }
+    a.status_pin = None;
+    if a.status == Indicator::Led {
+        a.status_pin =
+            ask_pin(board, "Which GPIO for the LED? (to ground through a resistor)", PinUse::Output, &taken, false)?;
+        taken.extend(a.status_pin);
+    }
+    a.button_pin = None;
+    if battery
+        && a.matter == MatterMode::Off
+        && let Some(wake) = board.wake_pins()
+        && !wake.contains(&board.boot_pin)
+    {
+        let question = format!(
+            "A wake-up button on GPIO{}-{}? (BOOT, GPIO{}, cannot wake the chip)",
+            wake.start(),
+            wake.end(),
+            board.boot_pin
+        );
+        a.button_pin = ask_pin(board, &question, PinUse::Input, &taken, true)?;
+        taken.extend(a.button_pin);
+    }
+    println!("\nWhat does it do? Add its parts one by one (sensors, relays, buttons...).");
     a.parts.clear();
     loop {
         let mut options: Vec<String> = vec!["Done".into()];
+        let mut kinds: Vec<&Kind> = Vec::new();
         for g in [Group::Measures, Group::Detects, Group::Controls, Group::Inputs] {
-            options.extend(KINDS.iter().filter(|k| k.group == g).map(|k| format!("{}: {}", g.label(), k.label)));
+            // On Thread, the ADC feeds the random number generator.
+            for k in KINDS.iter().filter(|k| k.group == g && !(thread && k.pin_use() == PinUse::Analog)) {
+                options.push(format!("{}: {}", g.label(), k.label));
+                kinds.push(k);
+            }
         }
         let prompt = if a.parts.is_empty() { "Add a part?" } else { "Add another part?" };
         let choice = Select::new(prompt, options.clone())
@@ -664,7 +852,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         if choice == "Done" {
             break;
         }
-        let kind = &KINDS[options.iter().position(|o| *o == choice).expect("chosen") - 1];
+        let kind = kinds[options.iter().position(|o| *o == choice).expect("chosen") - 1];
         let name = Text::new("Its name?")
             .with_default(kind.name)
             .with_help_message("As Home Assistant shows it, e.g. \"Kitchen temperature\"")
@@ -697,6 +885,41 @@ fn non_empty(s: &str) -> Result<Validation, inquire::CustomUserError> {
 }
 
 /// A GPIO number, checked for the chip (refused pins are asked again, warnings shown).
+/// The battery questions: how often a sleeping device reports, and its level's pin.
+fn ask_battery(a: &mut Answers, board: &'static Board, thread: bool) -> Result<()> {
+    if a.matter == MatterMode::Off {
+        let every = Select::new(
+            "How often should it report?",
+            vec!["Every minute", "Every 5 minutes", "Every 15 minutes", "Every hour"],
+        )
+        .with_starting_cursor(1)
+        .with_help_message("More often drains the battery faster")
+        .prompt()?;
+        a.report_every_min = match every {
+            "Every minute" => 1,
+            "Every 15 minutes" => 15,
+            "Every hour" => 60,
+            _ => 5,
+        };
+    }
+    if thread {
+        // The ADC feeds the random number generator.
+        return Ok(());
+    }
+    if Confirm::new("Report the battery level?")
+        .with_default(true)
+        .with_help_message("Needs two resistors from the battery to an analog pin")
+        .prompt()?
+    {
+        a.battery_pin = ask_pin(board, "Analog pin for the battery level?", PinUse::Analog, &[], false)?;
+        let curve =
+            Select::new("Which battery?", vec!["LiPo / Li-ion cell (3.0–4.2 V)", "2 × AA alkaline (2.0–3.2 V)"])
+                .prompt()?;
+        a.battery_curve = if curve.starts_with('2') { Curve::TwoAa } else { Curve::Lipo };
+    }
+    Ok(())
+}
+
 fn ask_pin(board: &'static Board, question: &str, kind: PinUse, taken: &[u8], optional: bool) -> Result<Option<u8>> {
     let taken = taken.to_vec();
     let help = if optional { "A GPIO number, or empty to decide later" } else { "A GPIO number" };
@@ -734,8 +957,10 @@ fn summary(p: &Project) {
     let a = &p.answers;
     println!("\n{} ({}), by {}", a.name, p.package, a.maker);
     println!("  board    {} ({}, {} flash)", p.board.model, p.board.chip_label, p.flash.to_uppercase());
-    if p.battery() {
+    if p.sleepy() {
         println!("  power    battery, reports every {} min", a.report_every_min);
+    } else if p.icd() {
+        println!("  power    battery, a Matter ICD (`matter-icd`)");
     } else {
         println!("  power    plugged in");
     }
@@ -778,7 +1003,7 @@ mod tests {
     fn checks() {
         let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
         assert!(err("board = \"esp32c3-devkitm-1\"\nmatter = \"fixed\"").contains("ESP32-C6"));
-        assert!(err("power = \"battery\"\nmatter = \"fixed\"").contains("awake"));
+        assert!(err("board = \"esp32-devkitc\"\npower = \"battery\"").contains("deep sleep"));
         assert!(err("[[parts]]\nkind = \"relay\"\npin = 12").contains("USB"));
         assert!(err("status_led = true\n[[parts]]\nkind = \"relay\"\npin = 8").contains("already used"));
         assert!(err("[[parts]]\nkind = \"kettle\"").contains("unknown part"));
@@ -864,7 +1089,6 @@ mod tests {
     #[test]
     fn esphome() {
         let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
-        assert!(err("esphome = \"fixed\"\npower = \"battery\"").contains("awake"));
         assert!(err("esphome = \"per-device\"\nmqtt_host = \"10.0.0.1\"").contains("not both"));
         assert!(err("esphome = \"fixed\"\nesphome_key = \"abc=\"").contains("base64"));
 
@@ -893,6 +1117,98 @@ mod tests {
         assert_eq!(base64(&[0; 32]), zero);
         assert_eq!(project(&format!("esphome = \"fixed\"\nesphome_key = \"{zero}\"")).esphome_key, Some(zero));
         assert!(!valid_key(&format!("{}B=", "A".repeat(42))), "unused bits set");
+    }
+
+    /// Matter over Thread: its board and features, Matter updates, and the combinations refused.
+    #[test]
+    fn thread() {
+        let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
+        let thread = "transport = \"thread\"\nmatter = \"fixed\"\n";
+        assert!(err(&format!("{thread}board = \"esp32c3-devkitm-1\"")).contains("802.15.4"));
+        assert!(err("transport = \"thread\"").contains("talk Matter"));
+        assert!(err(&format!("{thread}power = \"battery\"\nbattery_pin = 2")).contains("ADC"));
+        assert!(err(&format!("{thread}mqtt_host = \"10.0.0.1\"")).contains("no Wi-Fi"));
+        assert!(err(&format!("{thread}updates_url = \"http://h/m.json\"")).contains("over Matter"));
+        assert!(err(&format!("{thread}[[parts]]\nkind = \"soil_moisture\"\npin = 2")).contains("ADC"));
+        assert!(err("board = \"other-esp32h2\"\nflash_size = \"8mb\"").contains("no Wi-Fi"));
+
+        let p = project(include_str!("../../answers/thread.toml"));
+        let main = codegen::main_rs(&p);
+        assert!(
+            main.contains("radio: p.IEEE802154") && main.contains("adc1: p.ADC1") && !main.contains("WIFI"),
+            "{main}"
+        );
+        assert!(main.contains("gesture::wait_press") && main.contains("over Matter"), "{main}");
+        let cargo = codegen::cargo_toml(
+            &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c6", "/opt/iotkit").unwrap(),
+            &p,
+        )
+        .unwrap();
+        assert!(
+            cargo.contains("default-features = false, features = [\"esp32c6\", \"matter-thread\", \"matter-ota\"]"),
+            "{cargo}"
+        );
+        assert!(
+            cargo.contains("esp-radio") && cargo.contains("\"ieee802154\"") && !cargo.contains("matter-wifi"),
+            "{cargo}"
+        );
+        let readme = codegen::readme(&p);
+        assert!(readme.contains("ota build") && readme.contains("clang") && !readme.contains("ota push"), "{readme}");
+        assert!(!readme.contains("Wi-Fi and Home Assistant") && readme.contains("pairing window"), "{readme}");
+        assert!(p.matter_setup.is_none() && codegen::secrets(&p).is_none_or(|s| !s.contains("WIFI")));
+
+        let h2 =
+            project("board = \"other-esp32h2\"\nflash_size = \"8mb\"\ntransport = \"thread\"\nmatter = \"per-device\"");
+        assert!(codegen::main_rs(&h2).contains("radio: p.IEEE802154"));
+        let part = project(&format!("{thread}[[parts]]\nkind = \"setting\""));
+        assert!(part.warnings.iter().any(|w| w.contains("does not show over Thread")), "{:?}", part.warnings);
+    }
+
+    fn cargo_toml(p: &Project) -> String {
+        let rendered = render::render("Cargo.toml", render::FILES[1].1, &p.package, p.board.chip, "/opt/iotkit");
+        codegen::cargo_toml(&rendered.unwrap(), p).unwrap()
+    }
+
+    /// On battery, the mode that suits the link: deep sleep over the ESPHome API (or MQTT), a
+    /// Matter ICD over Thread; Matter over Wi-Fi refused (esp-radio).
+    #[test]
+    fn battery_modes() {
+        let p = project(include_str!("../../answers/esphome-battery.toml"));
+        assert!(p.sleepy() && !p.icd());
+        let main = codegen::main_rs(&p);
+        assert!(main.contains("start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP)"), "{main}");
+        assert!(main.contains("Battery::new(p.ADC1, p.GPIO2, 2.0)") && !main.contains("battery_task"), "{main}");
+        assert!(cargo_toml(&p).contains("features = [\"esp32c6\", \"ha-update\", \"deep-sleep\", \"esphome-api\"]"));
+        assert!(codegen::readme(&p).contains("knows it sleeps"));
+        // The wake-up button and the status LED.
+        assert!(main.contains("boot_button: Some(p.GPIO3.into())") && !p.warnings.iter().any(|w| w.contains("wake")));
+        assert!(
+            main.contains("components::status_led(led, Active::High, iotkit::status::Show::All)")
+                && main.contains("p.GPIO6, Level::Low")
+        );
+        assert!(codegen::readme(&p).contains("The button on GPIO3"));
+        let boot = project(&include_str!("../../answers/esphome-battery.toml").replace("button_pin = 3\n", ""));
+        assert!(boot.warnings.iter().any(|w| w.contains("cannot wake the chip")), "{:?}", boot.warnings);
+
+        let p = project(include_str!("../../answers/thread-battery.toml"));
+        assert!(p.icd() && !p.sleepy());
+        let main = codegen::main_rs(&p);
+        assert!(main.contains("iotkit::start(spawner, board, &CONFIG).await") && !main.contains("SleepConfig"));
+        assert!(main.contains("components::button(&BUTTON"), "ready-made parts, as plugged in: {main}");
+        let cargo = cargo_toml(&p);
+        assert!(
+            cargo.contains("[\"esp32c6\", \"matter-thread\", \"matter-ota\", \"matter-icd\", \"smartled\"]"),
+            "{cargo}"
+        );
+        assert!(
+            main.contains("components::status_rgb(led, 1, 32, iotkit::status::Show::All)")
+                && !main.contains("Light::new(\"status_led\"")
+        );
+        assert!(codegen::readme(&p).contains("sleepy Thread device"));
+
+        // Matter over Wi-Fi on battery waits for esp-radio.
+        let err = Project::new(toml::from_str("power = \"battery\"\nmatter = \"fixed\"").unwrap(), "/x".into());
+        assert!(err.err().unwrap().to_string().contains("not supported yet"));
     }
 
     /// No parts: still the answers' maker, name and LED id (as the README), not the template's.

@@ -25,6 +25,34 @@ spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default()
 
 `cargo iotkit new` uses them where it can, and leaves a `TODO` with hints for the other parts.
 
+## Status LED
+
+`iotkit::status` says what the device is doing, in two families:
+
+- **Pairing:** `Pairing` (a setup or pairing window is open, or a battery device is in pairing
+  mode) and `Held` while the button is held past 3 s or 10 s.
+- **Diagnostic:** `Connecting`, `Online`, `Offline`, `Installing` and `Trial` (an update not kept
+  yet).
+
+A LED shows one family or both (`status::Show::Pairing`, `Diagnostic` or `All`, pairing first),
+with a blink pattern per status (`components::pattern`). On a battery device, `Show::Pairing`
+keeps it dark at each wake-up and lights it only to set the device up. Two parts show it:
+
+```rust,ignore
+#[embassy_executor::task]
+async fn status_task(led: Output<'static>) {
+    components::status_led(led, Active::High, Show::All).await // a LED and a resistor to GND
+}
+// or the board's WS2812 (feature `smartled`), in colours (`components::color`):
+//     components::status_rgb(rmt_leds, 1, 32, Show::Pairing).await
+```
+
+To show it another way, follow it: `let mut status = iotkit::status::watch(Show::All);` then
+`status.next().await` in a loop (at once, then at each change; `None` when nothing of the family
+is to be shown; up to 4 watchers). Both parts leave the LED dark between patterns and before a
+deep sleep or restart, so a battery device sleeps; a WS2812 still draws about 1 mA dark.
+`cargo iotkit new` asks for one (`status = "rgb"` or `"led"` with `status_pin`).
+
 ## Filters
 
 `poll` passes each reading through a filter chain; `None` drops it.

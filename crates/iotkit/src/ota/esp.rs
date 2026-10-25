@@ -1,22 +1,13 @@
-//! OTA on the chip: slots, download into flash, boot handling, confirmation, and a small HTTP
-//! endpoint (`cargo xtask ota push`).
+//! OTA on the chip: slots, writing an image into flash, boot handling and confirmation. The
+//! transports feed [`Install`]: HTTP (`http`, `cargo xtask ota push` and Home Assistant) and Matter
+//! (`matter::ota`).
 
-use core::fmt::{self, Write as _};
+use core::fmt;
 
 use crate::config::esp::{EspStore, SharedStore, with};
-use crate::image::{Digest, Manifest, PublicKey, Sha256, Version, app};
-use crate::net::{
-    esp::{GetError, Net, Sink, get, get_from},
-    http,
-};
-#[cfg(any(not(feature = "ha-update"), not(feature = "ota-push")))]
-use embassy_futures::select::{Either, select};
+use crate::image::{Digest, Manifest, Sha256, Version, app};
 #[cfg(feature = "ha-update")]
-use embassy_futures::select::{Either3, select3};
-use embassy_net::tcp::TcpSocket;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
-use embassy_time::{Duration, Timer, with_timeout};
-use embedded_io_async::Write;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use esp_bootloader_esp_idf::{
     ota::{Ota, OtaImageState},
     partitions::{
@@ -26,13 +17,19 @@ use esp_bootloader_esp_idf::{
 };
 use esp_println::println;
 use esp_storage::FlashStorage;
-use heapless::String;
 
+#[cfg(esp_stage)]
+pub use crate::ota::Staged;
 use crate::ota::{
     BootAction, LastUpdate, Outcome, Pending,
     atomic::{AtomicBool, Ordering},
     early_check, on_boot,
 };
+
+#[cfg(esp_wifi)]
+mod http;
+#[cfg(esp_wifi)]
+pub use http::*;
 
 /// The chip this firmware runs on, as the image header names it.
 #[cfg(feature = "esp32c6")]
@@ -45,46 +42,24 @@ const CHIP_ID: u16 = app::ESP32C5;
 const CHIP_ID: u16 = app::ESP32S3;
 #[cfg(feature = "esp32")]
 const CHIP_ID: u16 = app::ESP32;
+#[cfg(feature = "esp32h2")]
+const CHIP_ID: u16 = app::ESP32H2;
 
 /// Raw subtype of `ota_0`; `ota_n` is this plus n.
 const OTA_SUBTYPE: u8 = 0x10;
 const SECTOR: usize = FlashStorage::SECTOR_SIZE as usize;
-/// Largest manifest accepted.
-const MAX_MANIFEST: usize = 1024;
-/// Downloads of the image, the first included, before giving up.
-const ATTEMPTS: u32 = 5;
-/// Port of the push endpoint.
-pub const PORT: u16 = 80;
 
-/// The running firmware, as updates must match it.
-#[derive(Clone, Copy)]
-pub struct Firmware {
-    /// Package name, also the manifest's `product` and the image's project name.
-    pub product: &'static str,
-    /// `major.minor.patch` from `Cargo.toml`.
-    pub version: Version,
-    /// [`version`](Self::version) as written in `Cargo.toml`.
-    pub version_text: &'static str,
-    /// Public key of `keys/ota.pub`.
-    pub key: &'static PublicKey,
+/// Whether an update is being installed, or the running one is on trial: no other may start.
+pub fn busy() -> bool {
+    on_trial() || BUSY.load(Ordering::Acquire)
 }
 
-/// The [`Firmware`] of the calling crate: its package name and version, and `$key`. Fails to
-/// build on a version that is not `major.minor.patch`.
-#[macro_export]
-macro_rules! firmware {
-    ($key:expr) => {
-        $crate::ota::esp::Firmware {
-            product: env!("CARGO_PKG_NAME"),
-            version: match $crate::ota::__version(env!("CARGO_PKG_VERSION")) {
-                Some(v) => v,
-                None => panic!("CARGO_PKG_VERSION is not major.minor.patch"),
-            },
-            version_text: env!("CARGO_PKG_VERSION"),
-            key: $key,
-        }
-    };
+/// Whether an update is being written (or waits for the restart).
+pub fn writing() -> bool {
+    BUSY.load(Ordering::Acquire)
 }
+
+pub use super::Firmware;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Why an update failed.
@@ -95,7 +70,11 @@ pub enum OtaError {
     /// No `otadata` and two OTA app partitions, or the running app is not in one.
     NoSlots,
     /// The manifest or image could not be downloaded.
-    Download(GetError<()>),
+    #[cfg(esp_wifi)]
+    Download(crate::net::esp::GetError<()>),
+    /// The transfer over Matter (query, BDX download) failed.
+    #[cfg(feature = "matter-ota")]
+    Matter(rs_matter_embassy::matter::error::ErrorCode),
     /// The manifest is invalid, badly signed, or not an update for this firmware.
     Manifest(crate::image::Error),
     /// The image does not match the manifest.
@@ -111,7 +90,10 @@ impl fmt::Display for OtaError {
         match self {
             OtaError::Busy => f.write_str("an update is running or on trial"),
             OtaError::NoSlots => f.write_str("no OTA partitions (see partitions.csv)"),
+            #[cfg(esp_wifi)]
             OtaError::Download(e) => write!(f, "download failed: {e:?}"),
+            #[cfg(feature = "matter-ota")]
+            OtaError::Matter(e) => write!(f, "Matter transfer failed: {e:?}"),
             OtaError::Manifest(e) => write!(f, "manifest: {e}"),
             OtaError::Image(e) => write!(f, "image: {e}"),
             OtaError::TooLarge => f.write_str("image larger than the OTA slot"),
@@ -203,6 +185,7 @@ pub async fn boot(store: &SharedStore, version: Version) -> BootAction {
                 crate::ota::UPDATE_TIMEOUT_S
             );
             TRIAL.store(true, Ordering::Release);
+            crate::status::notify();
             if store.save(&Pending { boots: boot, ..p }).await.is_err() {
                 log::error!("ota: cannot count the trial boot");
             }
@@ -349,79 +332,252 @@ pub async fn confirm(store: &SharedStore) {
         log::info!("ota: {} confirmed", p.version());
     }
     TRIAL.store(false, Ordering::Release);
+    crate::status::notify();
 }
-
 static BUSY: AtomicBool = AtomicBool::new(false);
 
-/// An install is asked for, running, or done and waiting for the restart (a deep-sleeping
-/// device does not sleep then).
-pub fn installing() -> bool {
-    BUSY.load(Ordering::Acquire) || REQUEST.signaled()
-}
-/// An install asked for by [`request_install`], run by [`serve_task`] (or `install_task`).
-static REQUEST: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
-static RESULT: Signal<CriticalSectionRawMutex, Result<Version, OtaError>> = Signal::new();
-/// One [`request_install`] at a time.
-static REQUESTING: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
+/// The right to install: one at a time, none while an update is on trial. Take it before the
+/// first await of an install, so a sleepy device stays awake while the manifest is checked.
+/// Dropped, it frees the slot.
+pub struct Claim(());
 
-/// Has [`serve_task`] or `install_task` (one must run) install the update whose manifest is at
-/// `manifest_url`. On success the new firmware is selected: restart to boot it (on trial). Only
-/// that task runs an install, so its large buffers exist once.
-pub async fn request_install(manifest_url: &str) -> Result<Version, OtaError> {
-    let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
-    if on_trial() || BUSY.load(Ordering::Acquire) {
-        return Err(OtaError::Busy);
+impl Claim {
+    /// Takes the right to install, or `Busy`.
+    pub fn take() -> Result<Self, OtaError> {
+        if on_trial() || BUSY.swap(true, Ordering::Acquire) {
+            return Err(OtaError::Busy);
+        }
+        crate::status::notify();
+        Ok(Self(()))
     }
-    let url = String::try_from(manifest_url).map_err(|_| OtaError::Download(GetError::Url(http::Error::Url)))?;
-    RESULT.reset();
-    REQUEST.signal(url);
-    RESULT.wait().await
 }
 
-/// A newer release, from its manifest.
-#[cfg(feature = "ha-update")]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Release {
-    /// Its version.
-    pub version: Version,
-    /// What it changes (empty: none).
-    pub summary: String<{ crate::image::MAX_SUMMARY_LEN }>,
-    /// Where its notes are (empty: none).
-    pub release_url: String<{ crate::image::MAX_RELEASE_URL_LEN }>,
+impl Drop for Claim {
+    fn drop(&mut self) {
+        BUSY.store(false, Ordering::Release);
+        crate::status::notify();
+    }
 }
 
-/// A check asked for by [`request_check`], run by [`serve_task`] (or `install_task`).
-#[cfg(feature = "ha-update")]
-static CHECK: Signal<CriticalSectionRawMutex, String<{ http::MAX_URL }>> = Signal::new();
-#[cfg(feature = "ha-update")]
-static CHECKED: Signal<CriticalSectionRawMutex, Result<Option<Release>, OtaError>> = Signal::new();
-
-/// Has [`serve_task`] or `install_task` fetch and verify the manifest at `manifest_url`: the
-/// release if it is an update for this firmware, `None` if it is not newer.
-#[cfg(feature = "ha-update")]
-pub async fn request_check(manifest_url: &str) -> Result<Option<Release>, OtaError> {
-    let Ok(_one) = REQUESTING.try_lock() else { return Err(OtaError::Busy) };
-    let url = String::try_from(manifest_url).map_err(|_| OtaError::Download(GetError::Url(http::Error::Url)))?;
-    CHECKED.reset();
-    CHECK.signal(url);
-    CHECKED.wait().await
+/// What an [`Install`] writes, and how to check it.
+#[derive(Clone, Copy)]
+pub enum Image<'m> {
+    /// The image a signed manifest describes. Check the manifest first (`verify`, then
+    /// `check_update`).
+    Signed(&'m Manifest<'m>),
+    /// A bare app image from a Matter OTA file (`matter-ota-unsigned`), for `product`: its
+    /// header gives the size, version and SHA-256. Check the header first (`check_update`).
+    #[cfg(feature = "matter-ota-unsigned")]
+    Bare {
+        /// The Matter OTA header.
+        header: &'m crate::image::matter::Header<'m>,
+        /// The running firmware's product, which the app descriptor must name.
+        product: &'static str,
+    },
 }
 
-#[cfg(feature = "ha-update")]
-async fn check(net: Net, fw: Firmware, manifest_url: &str) -> Result<Option<Release>, OtaError> {
-    let mut collect = Collect { buf: [0; MAX_MANIFEST], len: 0 };
-    get(net.stack, manifest_url, &mut collect).await.map_err(|e| OtaError::Download(drop_sink(e)))?;
-    let manifest = Manifest::parse(&collect.buf[..collect.len]).map_err(OtaError::Manifest)?;
-    manifest.verify(fw.key).map_err(OtaError::Manifest)?;
-    match manifest.check_update(fw.product, fw.version) {
-        Ok(()) => Ok(Some(Release {
-            version: manifest.version,
-            // Both fit: the manifest's lengths are checked when parsed.
-            summary: String::try_from(manifest.summary).unwrap_or_default(),
-            release_url: String::try_from(manifest.release_url).unwrap_or_default(),
-        })),
-        Err(crate::image::Error::NotNewer) => Ok(None),
-        Err(e) => Err(OtaError::Manifest(e)),
+impl Image<'_> {
+    fn size(&self) -> u32 {
+        match self {
+            Image::Signed(m) => m.size,
+            // Larger than any slot: `Install::begin` refuses it.
+            #[cfg(feature = "matter-ota-unsigned")]
+            Image::Bare { header, .. } => u32::try_from(header.payload_size).unwrap_or(u32::MAX),
+        }
+    }
+
+    fn version(&self) -> Version {
+        match self {
+            Image::Signed(m) => m.version,
+            #[cfg(feature = "matter-ota-unsigned")]
+            Image::Bare { header, .. } => crate::image::matter::from_version(header.version),
+        }
+    }
+
+    fn check_head(&self, head: &[u8]) -> Result<(), crate::image::Error> {
+        match self {
+            Image::Signed(m) => m.check_app(head, CHIP_ID),
+            #[cfg(feature = "matter-ota-unsigned")]
+            Image::Bare { header, product } => header.check_app(head, CHIP_ID, product),
+        }
+    }
+
+    fn check(&self, size: u32, sha256: &[u8; 32]) -> Result<(), crate::image::Error> {
+        match self {
+            Image::Signed(m) => m.check_image(size, sha256),
+            #[cfg(feature = "matter-ota-unsigned")]
+            Image::Bare { header, .. } if u64::from(size) != header.payload_size => Err(crate::image::Error::Size),
+            #[cfg(feature = "matter-ota-unsigned")]
+            Image::Bare { header, .. } if sha256 != &header.digest => Err(crate::image::Error::Hash),
+            #[cfg(feature = "matter-ota-unsigned")]
+            Image::Bare { .. } => Ok(()),
+        }
+    }
+}
+
+/// An update being written into the spare slot. One at a time, and none while an update is on
+/// trial (the spare slot holds the firmware to go back to). Dropped before [`commit`](Self::commit),
+/// it erases what it wrote: never a bootable partial image.
+pub struct Install<'m> {
+    layout: Layout,
+    previous: u8,
+    sink: FlashSink<'m>,
+    /// `None` once committed: the selected image keeps the slot until the restart.
+    claim: Option<Claim>,
+}
+
+impl<'m> Install<'m> {
+    /// Starts writing `image` into the spare slot, a sector at a time through `sector`.
+    pub fn begin(claim: Claim, image: Image<'m>, sector: &'m mut Sector) -> Result<Self, OtaError> {
+        let (layout, previous) = with(Layout::read).and_then(|layout| {
+            let previous = layout.booted.ok_or(OtaError::NoSlots)?;
+            if image.size() > layout.target_len {
+                return Err(OtaError::TooLarge);
+            }
+            Ok((layout, previous))
+        })?;
+        log::info!("ota: installing {} ({} KiB) into ota_{}", image.version(), image.size() / 1024, layout.target);
+        let sink = FlashSink::new(image, sector, layout.target_offset, layout.target_len);
+        Ok(Self { layout, previous, sink, claim: Some(claim) })
+    }
+
+    /// Bytes written so far.
+    pub fn received(&self) -> u32 {
+        self.sink.received
+    }
+
+    /// The image's size.
+    pub fn size(&self) -> u32 {
+        self.sink.size
+    }
+
+    /// Checks that `len` more bytes (when known) complete the image.
+    pub fn expect(&self, len: Option<u32>) -> Result<(), OtaError> {
+        match len {
+            Some(len) if self.sink.received + len != self.sink.size => Err(OtaError::Image(crate::image::Error::Size)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Writes the next bytes of the image.
+    pub async fn write(&mut self, bytes: &[u8]) -> Result<(), OtaError> {
+        self.sink.data(bytes)
+    }
+
+    /// Checks the whole image, then selects it for the next boot (on trial). Restart to run it.
+    pub async fn commit(mut self, store: &SharedStore) -> Result<Version, OtaError> {
+        let (size, sha256) = self.sink.finish();
+        self.sink.image.check(size, &sha256).map_err(OtaError::Image)?;
+        let version = self.sink.image.version();
+        select_update(&self.layout, self.previous, version, store).await?;
+        // The selected image waits for the restart: no other install may overwrite it.
+        core::mem::forget(self.claim.take());
+        Ok(version)
+    }
+
+    /// Checks the whole image, then keeps it in the spare slot without selecting it, for
+    /// [`apply_staged`] once the provider says so; other installs may run meanwhile. `source`:
+    /// the SHA-256 of what was downloaded, to recognise it when offered again.
+    #[cfg(esp_stage)]
+    pub async fn stage(mut self, store: &SharedStore, source: [u8; 32]) -> Result<Staged, OtaError> {
+        let (size, sha256) = self.sink.finish();
+        self.sink.image.check(size, &sha256).map_err(OtaError::Image)?;
+        let version = triple(self.sink.image.version());
+        let staged = Staged { slot: self.layout.target, size, sha256, version, source };
+        store.lock().await.save(&staged).await.map_err(|_| OtaError::Flash)?;
+        log::info!("ota: {} downloaded, kept to install later", self.sink.image.version());
+        // Not erased on drop, and not bootable either: otadata does not select it.
+        drop(self.claim.take());
+        Ok(staged)
+    }
+}
+
+/// The image kept by [`Install::stage`], if it may still be applied over `running`.
+#[cfg(esp_stage)]
+pub async fn staged(store: &SharedStore, running: Version) -> Option<Staged> {
+    let mut store = store.lock().await;
+    let staged = store.load::<Staged>().await.ok().flatten()?;
+    let target = with(Layout::read).ok()?.target;
+    if staged.usable(target, running, on_trial()) {
+        return Some(staged);
+    }
+    let _ = store.remove::<Staged>().await;
+    None
+}
+
+/// Forgets the image kept by [`Install::stage`] (left in the spare slot, unselected).
+#[cfg(esp_stage)]
+pub async fn forget_staged(store: &SharedStore) {
+    let _ = store.lock().await.remove::<Staged>().await;
+}
+
+/// Selects the image kept by [`Install::stage`] for the next boot (on trial), once hashed again:
+/// another install may have written the slot since. Restart to run it.
+#[cfg(esp_stage)]
+pub async fn apply_staged(store: &SharedStore, staged: &Staged, sector: &mut Sector) -> Result<Version, OtaError> {
+    let claim = Claim::take()?;
+    let layout = with(Layout::read)?;
+    let previous = layout.booted.ok_or(OtaError::NoSlots)?;
+    let mut hasher = Sha256::new();
+    let mut at = 0;
+    while at < staged.size && staged.size <= layout.target_len && layout.target == staged.slot {
+        let n = (staged.size - at).min(SECTOR as u32) as usize;
+        with(|flash| flash.read(layout.target_offset + at, &mut sector[..n])).map_err(|_| OtaError::Flash)?;
+        hasher.update(&sector[..n]);
+        at += n as u32;
+        // About a second for a whole slot: let the stack run.
+        embassy_futures::yield_now().await;
+    }
+    if at != staged.size || <[u8; 32]>::from(hasher.finalize()) != staged.sha256 {
+        log::warn!("ota: the downloaded {} was overwritten", staged.version());
+        let _ = store.lock().await.remove::<Staged>().await;
+        return Err(OtaError::Image(crate::image::Error::Hash));
+    }
+    select_update(&layout, previous, staged.version(), store).await?;
+    core::mem::forget(claim);
+    Ok(staged.version())
+}
+
+/// Selects the image in the target slot for the next boot, on trial.
+async fn select_update(layout: &Layout, previous: u8, version: Version, store: &SharedStore) -> Result<(), OtaError> {
+    // `Pending` first, then the switch: a power cut in between boots the old slot, which
+    // forgets the update (`Abandoned`). The other order could boot the update with no trial
+    // count.
+    let mut store = store.lock().await;
+    let triple = triple(version);
+    store
+        .save(&Pending { slot: layout.target, previous, version: triple, boots: 0 })
+        .await
+        .map_err(|_| OtaError::Flash)?;
+    let switched = with(|flash| {
+        let mut ota = layout.ota(flash)?;
+        // Blank OTA data (just flashed over USB) selects no slot: record the running one
+        // first, so the switch counts from it.
+        if ota.current_app_partition().map_err(|_| OtaError::Flash)? == AppPartitionSubType::Factory {
+            ota.set_current_app_partition(subtype(previous)?).map_err(|_| OtaError::Flash)?;
+        }
+        ota.set_current_app_partition(subtype(layout.target)?).map_err(|_| OtaError::Flash)?;
+        ota.set_current_ota_state(OtaImageState::New).map_err(|_| OtaError::Flash)
+    });
+    if let Err(e) = switched {
+        let _ = store.remove::<Pending>().await;
+        return Err(e);
+    }
+    // A staged image is selected now, or overwritten.
+    #[cfg(esp_stage)]
+    let _ = store.remove::<Staged>().await;
+    let _ = store.save(&LastUpdate { outcome: Outcome::Installed, version: triple }).await;
+    log::info!("ota: {version} installed, restart to run it");
+    Ok(())
+}
+
+impl Drop for Install<'_> {
+    fn drop(&mut self) {
+        // Erased before the claim (a field) is dropped and frees the slot.
+        if self.claim.is_some() && self.sink.written > 0 {
+            let at = self.layout.target_offset;
+            let _ = with(|flash| flash.erase(at, at + SECTOR as u32));
+        }
     }
 }
 
@@ -435,149 +591,16 @@ pub async fn wait_progress() -> u8 {
     PROGRESS.wait().await
 }
 
-/// Downloads and installs the update described by the manifest at `manifest_url`. On success
-/// the new firmware is selected: restart to boot it (on trial).
-async fn install(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
-    /// Clears [`BUSY`] however the install fails, a dropped future included. After a success it
-    /// stays set: the selected image waits for the restart, and must not be overwritten.
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            BUSY.store(false, Ordering::Release);
-        }
-    }
-    // On trial, the spare slot holds the firmware a rollback goes back to.
-    if on_trial() || BUSY.swap(true, Ordering::Acquire) {
-        return Err(OtaError::Busy);
-    }
-    let guard = Guard;
-    let installed = install_inner(net, store, fw, manifest_url).await;
-    if installed.is_ok() {
-        core::mem::forget(guard);
-    }
-    installed
-}
-
-async fn install_inner(net: Net, store: &SharedStore, fw: Firmware, manifest_url: &str) -> Result<Version, OtaError> {
-    let mut collect = Collect { buf: [0; MAX_MANIFEST], len: 0 };
-    get(net.stack, manifest_url, &mut collect).await.map_err(|e| OtaError::Download(drop_sink(e)))?;
-    let manifest = Manifest::parse(&collect.buf[..collect.len]).map_err(OtaError::Manifest)?;
-    manifest.verify(fw.key).map_err(OtaError::Manifest)?;
-    manifest.check_update(fw.product, fw.version).map_err(OtaError::Manifest)?;
-
-    let layout = with(Layout::read)?;
-    let previous = layout.booted.ok_or(OtaError::NoSlots)?;
-    if manifest.size > layout.target_len {
-        return Err(OtaError::TooLarge);
-    }
-    let url = http::Url::parse(manifest_url)
-        .and_then(|base| base.join(manifest.url))
-        .map_err(|e| OtaError::Download(GetError::Url(e)))?;
-    log::info!(
-        "ota: installing {} {} ({} KiB) into ota_{}",
-        manifest.product,
-        manifest.version,
-        manifest.size / 1024,
-        layout.target
-    );
-
-    let mut sink = FlashSink::new(&manifest, layout.target_offset, layout.target_len);
-    let started = embassy_time::Instant::now();
-    let mut downloaded = Ok(());
-    for attempt in 1..=ATTEMPTS {
-        downloaded = get_from(net.stack, &url, sink.received, &mut sink).await;
-        match downloaded {
-            // A dropped connection: carry on from where it stopped.
-            Err(GetError::Truncated { .. } | GetError::Connect | GetError::Io) if attempt < ATTEMPTS => {
-                log::warn!(
-                    "ota: download interrupted at {} of {} bytes ({:?}), resuming",
-                    sink.received,
-                    manifest.size,
-                    downloaded
-                );
-                Timer::after_secs(1).await;
-            }
-            _ => break,
-        }
-    }
-    let (size, sha256) = sink.finish();
-    let ms = started.elapsed().as_millis().max(1) as u32;
-    log::info!("ota: {size} bytes in {}.{:01} s ({} KiB/s)", ms / 1000, ms % 1000 / 100, size / ms * 1000 / 1024);
-    let checked = match downloaded {
-        Ok(()) => manifest.check_image(size, &sha256).map_err(OtaError::Image),
-        Err(GetError::Sink(e)) => Err(e),
-        Err(e) => Err(OtaError::Download(drop_sink(e))),
-    };
-    if let Err(e) = checked {
-        // Never leave a bootable partial image behind.
-        let _ = with(|flash| flash.erase(layout.target_offset, layout.target_offset + SECTOR as u32));
-        return Err(e);
-    }
-
-    // `Pending` first, then the switch: a power cut in between boots the old slot, which forgets
-    // the update (`Abandoned`). The other order could boot the update with no trial count.
-    let mut store = store.lock().await;
-    let version = triple(manifest.version);
-    store.save(&Pending { slot: layout.target, previous, version, boots: 0 }).await.map_err(|_| OtaError::Flash)?;
-    let switched = with(|flash| {
-        let mut ota = layout.ota(flash)?;
-        // Blank OTA data (just flashed over USB) selects no slot: record the running one first,
-        // so the switch counts from it.
-        if ota.current_app_partition().map_err(|_| OtaError::Flash)? == AppPartitionSubType::Factory {
-            ota.set_current_app_partition(subtype(previous)?).map_err(|_| OtaError::Flash)?;
-        }
-        ota.set_current_app_partition(subtype(layout.target)?).map_err(|_| OtaError::Flash)?;
-        ota.set_current_ota_state(OtaImageState::New).map_err(|_| OtaError::Flash)
-    });
-    if let Err(e) = switched {
-        let _ = store.remove::<Pending>().await;
-        return Err(e);
-    }
-    let _ = store.save(&LastUpdate { outcome: Outcome::Installed, version }).await;
-    log::info!("ota: {} installed, restart to run it", manifest.version);
-    Ok(manifest.version)
-}
-
-fn drop_sink<E>(e: GetError<E>) -> GetError<()> {
-    match e {
-        GetError::Url(e) => GetError::Url(e),
-        GetError::Dns => GetError::Dns,
-        GetError::Connect => GetError::Connect,
-        #[cfg(feature = "tls")]
-        GetError::Tls => GetError::Tls,
-        GetError::Io => GetError::Io,
-        GetError::BadResponse(e) => GetError::BadResponse(e),
-        GetError::Status(s) => GetError::Status(s),
-        GetError::Truncated { received, expected } => GetError::Truncated { received, expected },
-        GetError::Sink(_) => GetError::Sink(()),
-    }
-}
-
-/// Keeps the manifest in memory.
-struct Collect {
-    buf: [u8; MAX_MANIFEST],
-    len: usize,
-}
-
-impl Sink for Collect {
-    type Error = ();
-    fn begin(&mut self, len: Option<u32>) -> Result<(), ()> {
-        if len.is_some_and(|l| l as usize > MAX_MANIFEST) { Err(()) } else { Ok(()) }
-    }
-    async fn data(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        let dst = self.buf.get_mut(self.len..self.len + bytes.len()).ok_or(())?;
-        dst.copy_from_slice(bytes);
-        self.len += bytes.len();
-        Ok(())
-    }
-}
+/// A flash sector's worth of image, for [`Install::begin`].
+pub type Sector = [u8; SECTOR];
 
 /// Writes the image to the target slot sector by sector, checking its header and hashing it.
 struct FlashSink<'m> {
-    manifest: &'m Manifest<'m>,
+    image: Image<'m>,
+    size: u32,
     offset: u32,
     capacity: u32,
-    sector: [u8; SECTOR],
+    sector: &'m mut Sector,
     fill: usize,
     written: u32,
     received: u32,
@@ -586,12 +609,13 @@ struct FlashSink<'m> {
 }
 
 impl<'m> FlashSink<'m> {
-    fn new(manifest: &'m Manifest<'m>, offset: u32, capacity: u32) -> Self {
+    fn new(image: Image<'m>, sector: &'m mut Sector, offset: u32, capacity: u32) -> Self {
         Self {
-            manifest,
+            size: image.size(),
+            image,
             offset,
             capacity,
-            sector: [0xff; SECTOR],
+            sector,
             fill: 0,
             written: 0,
             received: 0,
@@ -617,12 +641,12 @@ impl<'m> FlashSink<'m> {
             OtaError::Flash
         })?;
         #[cfg(feature = "ha-update")]
-        let before = self.written * 20 / self.manifest.size.max(1);
+        let before = self.written * 20 / self.size.max(1);
         self.written += self.fill as u32;
         self.fill = 0;
         #[cfg(feature = "ha-update")]
         {
-            let step = self.written * 20 / self.manifest.size.max(1);
+            let step = self.written * 20 / self.size.max(1);
             if step != before {
                 PROGRESS.signal((step * 5).min(100) as u8);
             }
@@ -635,22 +659,10 @@ impl<'m> FlashSink<'m> {
         let digest = core::mem::take(&mut self.hasher).finalize().into();
         (self.received, digest)
     }
-}
 
-impl Sink for FlashSink<'_> {
-    type Error = OtaError;
-
-    /// `len`: what is left of the image (all of it, or the rest after a resume).
-    fn begin(&mut self, len: Option<u32>) -> Result<(), OtaError> {
-        match len {
-            Some(len) if self.received + len != self.manifest.size => Err(OtaError::Image(crate::image::Error::Size)),
-            _ => Ok(()),
-        }
-    }
-
-    async fn data(&mut self, mut bytes: &[u8]) -> Result<(), OtaError> {
+    fn data(&mut self, mut bytes: &[u8]) -> Result<(), OtaError> {
         self.received += bytes.len() as u32;
-        if self.received > self.capacity || self.received > self.manifest.size {
+        if self.received > self.capacity || self.received > self.size {
             return Err(OtaError::TooLarge);
         }
         self.hasher.update(bytes);
@@ -660,146 +672,20 @@ impl Sink for FlashSink<'_> {
             self.fill += n;
             bytes = &bytes[n..];
             if !self.header_checked && self.written == 0 && self.fill >= app::HEAD_LEN {
-                self.manifest.check_app(&self.sector[..self.fill], CHIP_ID).map_err(OtaError::Image)?;
+                self.image.check_head(&self.sector[..self.fill]).map_err(OtaError::Image)?;
                 self.header_checked = true;
             }
             if self.fill == SECTOR {
                 self.flush()?;
             }
         }
-        // Keep `received` and the flash in step at the end of the body.
-        if self.received == self.manifest.size {
+        // Keep `received` and the flash in step at the end of the image.
+        if self.received == self.size {
             if !self.header_checked {
                 return Err(OtaError::Image(crate::image::Error::NotAnImage));
             }
             self.flush()?;
         }
         Ok(())
-    }
-}
-
-/// HTTP endpoint on port 80, and the installs of [`request_install`]:
-/// - `GET /` answers `<product> <version>`;
-/// - `GET /ota?manifest=<url>` installs that update, answers the result, then restarts.
-#[embassy_executor::task]
-pub async fn serve_task(net: Net, store: &'static SharedStore, fw: Firmware) {
-    let (mut rx, mut tx) = ([0u8; 1024], [0u8; 512]);
-    loop {
-        let mut socket = TcpSocket::new(net.stack, &mut rx, &mut tx);
-        socket.set_timeout(Some(Duration::from_secs(10)));
-        #[cfg(not(feature = "ha-update"))]
-        match select(socket.accept(PORT), REQUEST.wait()).await {
-            Either::First(Ok(())) => {}
-            Either::First(Err(_)) => continue,
-            Either::Second(url) => {
-                drop(socket);
-                RESULT.signal(install(net, store, fw, &url).await);
-                continue;
-            }
-        }
-        #[cfg(feature = "ha-update")]
-        match select3(socket.accept(PORT), REQUEST.wait(), CHECK.wait()).await {
-            Either3::First(Ok(())) => {}
-            Either3::First(Err(_)) => continue,
-            Either3::Second(url) => {
-                drop(socket);
-                RESULT.signal(install(net, store, fw, &url).await);
-                continue;
-            }
-            Either3::Third(url) => {
-                drop(socket);
-                CHECKED.signal(check(net, fw, &url).await);
-                continue;
-            }
-        }
-        let mut buf = [0u8; 512];
-        let mut filled = 0;
-        let head_end = loop {
-            match with_timeout(Duration::from_secs(5), socket.read(&mut buf[filled..])).await {
-                Ok(Ok(n)) if n > 0 => filled += n,
-                _ => break None,
-            }
-            if let Some(end) = buf[..filled].windows(4).position(|w| w == b"\r\n\r\n") {
-                break Some(end);
-            }
-            if filled == buf.len() {
-                break None;
-            }
-        };
-        let Some(end) = head_end else {
-            socket.abort();
-            continue;
-        };
-        let line = core::str::from_utf8(&buf[..end]).ok().and_then(|h| h.lines().next()).unwrap_or("");
-        let mut url: String<{ http::MAX_URL }> = String::new();
-        let mut reply: String<192> = String::new();
-        let (status, restart) = match http::parse_request_line(line) {
-            Some(("GET", "/")) => {
-                let _ = writeln!(reply, "{} {}", fw.product, fw.version);
-                ("200 OK", false)
-            }
-            Some(("GET", target)) if http::target_path(target) == "/ota" => {
-                match http::query_param(target, "manifest").map(|m| url.push_str(m)) {
-                    Some(Ok(())) => {
-                        log::info!("ota: push from the network: {url}");
-                        // The client waits, silent, for the whole install.
-                        socket.set_timeout(None);
-                        match install(net, store, fw, &url).await {
-                            Ok(v) => {
-                                let _ = writeln!(reply, "installed {v}, restarting");
-                                ("200 OK", true)
-                            }
-                            Err(e) => {
-                                log::error!("ota: {e}");
-                                let _ = writeln!(reply, "{e}");
-                                ("500 Internal Server Error", false)
-                            }
-                        }
-                    }
-                    _ => {
-                        let _ = reply.push_str("usage: /ota?manifest=http://host:port/path/manifest.json\n");
-                        ("400 Bad Request", false)
-                    }
-                }
-            }
-            _ => {
-                let _ = reply.push_str("not found\n");
-                ("404 Not Found", false)
-            }
-        };
-        let mut head: String<128> = String::new();
-        let _ = write!(head, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.len());
-        let _ = socket.write_all(head.as_bytes()).await;
-        let _ = socket.write_all(reply.as_bytes()).await;
-        let _ = socket.flush().await;
-        socket.close();
-        // Wait for the client's FIN: dropping the socket earlier would leave it waiting.
-        let _ = with_timeout(Duration::from_secs(2), async {
-            let mut rest = [0u8; 64];
-            while let Ok(n) = socket.read(&mut rest).await {
-                if n == 0 {
-                    break;
-                }
-            }
-        })
-        .await;
-        if restart {
-            // Let the reply leave first.
-            Timer::after_millis(500).await;
-            crate::diag::esp::restart().await;
-        }
-    }
-}
-
-/// The installs and checks of [`request_install`] and [`request_check`] without the port-80
-/// endpoint: `ha-update` without `ota-push`.
-#[cfg(all(feature = "ha-update", not(feature = "ota-push")))]
-#[embassy_executor::task]
-pub async fn install_task(net: Net, store: &'static SharedStore, fw: Firmware) {
-    loop {
-        match select(REQUEST.wait(), CHECK.wait()).await {
-            Either::First(url) => RESULT.signal(install(net, store, fw, &url).await),
-            Either::Second(url) => CHECKED.signal(check(net, fw, &url).await),
-        }
     }
 }

@@ -71,6 +71,7 @@ pub static IDENTIFY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub fn open_window() {
     ACTIVE.store(true, Ordering::Relaxed);
     CHANGED.signal(());
+    crate::status::notify();
 }
 
 /// Whether a provisioning window is open.
@@ -78,9 +79,10 @@ pub fn window_open() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
-fn close_window() {
+pub(crate) fn close_window() {
     ACTIVE.store(false, Ordering::Relaxed);
     CHANGED.signal(());
+    crate::status::notify();
 }
 
 impl Provisioner {
@@ -183,6 +185,9 @@ fn send_result(id: u8, strings: &[&str]) {
 /// (`ble`) while a window is open, both off otherwise.
 #[embassy_executor::task]
 pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: Provisioner) {
+    // Once: its attribute values are static cells, which cannot be made twice.
+    #[cfg(feature = "improv-ble")]
+    let server = ble::server(&p);
     loop {
         while !window_open() {
             CHANGED.wait().await;
@@ -200,7 +205,7 @@ pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: 
             }
         };
         #[cfg(feature = "improv-ble")]
-        select(ble::run_ble(bt.reborrow(), &p), window).await;
+        select(ble::run_ble(bt.reborrow(), &p, server.as_ref()), window).await;
         #[cfg(not(feature = "improv-ble"))]
         window.await;
         closed().await;
@@ -399,49 +404,30 @@ async fn finish(socket: &mut TcpSocket<'_>) {
     .await;
 }
 
-/// How long the BOOT button has been held, for the app's LED: 0 not held or under 3 s,
-/// 1 past [`PROVISION_MS`](crate::provision::gesture::PROVISION_MS), 2 past
-/// [`FACTORY_RESET_MS`](crate::provision::gesture::FACTORY_RESET_MS).
-pub static HELD: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
-
-/// A short press of the BOOT button (under [`PROVISION_MS`](crate::provision::gesture::PROVISION_MS)),
-/// for the app.
-static PRESSED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-
-/// Waits for a short press of the BOOT button ([`button_task`] must run).
-pub async fn wait_press() {
-    PRESSED.wait().await
-}
+pub use crate::provision::gesture::{HELD, wait_press};
 
 /// BOOT button (active low): runs the [gestures](crate::provision::gesture); a factory reset forgets every
 /// setting and Matter pairing.
 #[embassy_executor::task]
-pub async fn button_task(button: esp_hal::gpio::Input<'static>, store: &'static SharedStore) {
-    use crate::provision::gesture::{FACTORY_RESET_MS, Gesture, PROVISION_MS, on_release};
+pub async fn button_task(mut button: esp_hal::gpio::Input<'static>, store: &'static SharedStore) {
+    use crate::provision::gesture::Gesture;
     loop {
-        while button.is_high() {
-            Timer::after_millis(50).await;
-        }
-        let pressed = embassy_time::Instant::now();
-        while button.is_low() {
-            let held = pressed.elapsed().as_millis() as u32;
-            HELD.store(u8::from(held >= PROVISION_MS) + u8::from(held >= FACTORY_RESET_MS), Ordering::Relaxed);
-            Timer::after_millis(50).await;
-        }
-        HELD.store(0, Ordering::Relaxed);
-        match on_release(pressed.elapsed().as_millis() as u32) {
-            Gesture::Press => PRESSED.signal(()),
+        match crate::provision::gesture::next(&mut button, None).await {
+            Gesture::Press => crate::provision::gesture::pressed(),
             Gesture::Provision => {
-                log::info!("provision: BOOT held, window open");
+                log::info!("provision: button held, window open");
                 open_window();
             }
-            Gesture::FactoryReset => {
-                log::warn!("provision: BOOT held 10 s, erasing all settings");
-                if let Err(e) = crate::config::esp::factory_reset(store).await {
-                    log::error!("provision: factory reset failed: {e}");
-                }
-                crate::diag::esp::restart().await;
-            }
+            Gesture::FactoryReset => factory_reset(store).await,
         }
     }
+}
+
+/// The button held 10 s: forgets every setting and Matter pairing, and restarts.
+pub(crate) async fn factory_reset(store: &SharedStore) -> ! {
+    log::warn!("provision: button held 10 s, erasing all settings");
+    if let Err(e) = crate::config::esp::factory_reset(store).await {
+        log::error!("provision: factory reset failed: {e}");
+    }
+    crate::diag::esp::restart().await
 }

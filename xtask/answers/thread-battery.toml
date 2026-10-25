@@ -1,0 +1,19 @@
+# `cargo iotkit new --answers answers/thread-battery.toml`: a battery ESP32-C6 over Thread, a sleepy
+# end device (`matter-icd`) with a door contact and a button; the RGB LED shows its status. CI
+# generates and builds it.
+name    = "Door sensor"
+maker   = "CI"
+board   = "esp32c6-devkitc-1"
+transport = "thread"
+matter    = "per-device"
+power     = "battery"
+status    = "rgb"
+
+[[parts]]
+kind = "contact"
+name = "Door"
+pin = 5
+
+[[parts]]
+kind = "button"
+pin = 7
