@@ -30,7 +30,7 @@ app.sleep().await   // sends the states, disconnects, sleeps `interval`
 
 - **A wake-up is short** (about 2 s from wake to sleep on the C6 over MQTT): the access point,
   channel and address of the last wake-up are kept in RTC memory (no scan, no DHCP; the lease is
-  reused for 30 minutes), boots are not written to flash, and discovery is sent only when it
+  reused for 30 minutes), so is the radio's calibration (no full calibration), boots are not written to flash, and discovery is sent only when it
   changed.
 - **Over MQTT** the device has no availability in Home Assistant (asleep is not offline); its
   readings expire after twice the interval plus a minute. Commands are retained, so a switch

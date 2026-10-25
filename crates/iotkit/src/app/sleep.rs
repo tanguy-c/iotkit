@@ -11,8 +11,8 @@
 //! The full, compiled version: `apps/sleepy/src/main.rs`.
 //!
 //! What a wake-up does differently from [`start`](super::start): the access point and the
-//! address of the last wake-up are reused (no scan, no DHCP; kept in RTC memory, lost on power
-//! loss); boots are not written to flash. Over MQTT: no last will (asleep is not offline),
+//! address of the last wake-up are reused (no scan, no DHCP; kept in RTC memory with the radio's
+//! calibration, lost on power loss); boots are not written to flash. Over MQTT: no last will (asleep is not offline),
 //! commands are retained (Home Assistant's command waits for the next wake-up), readings expire
 //! after twice the interval, and the discovery is sent only when it changed. Over the ESPHome API
 //! (`esphome-api`): the device says it sleeps (Home Assistant keeps its states), and the wake-up
@@ -123,6 +123,44 @@ fn rtc<R>(f: impl FnOnce(&mut [u32; WORDS]) -> R) -> R {
     let rtc: *mut [u32; WORDS] = &raw mut RTC;
     // SAFETY: core 0 only, from tasks (never an interrupt), never across an await.
     f(unsafe { &mut *rtc })
+}
+
+/// The radio's calibration (esp-phy's `esp_phy_calibration_data_t`; a wrong size fails to
+/// build), after a magic word. Without it each wake-up calibrates from scratch; the PHY checks
+/// the data itself and calibrates again (and [`save_phy_calibration`] keeps the new data) if it
+/// does not fit.
+const PHY_CAL_LEN: usize = 1904;
+const PHY_CAL_MAGIC: u32 = 0x5143_0001;
+
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut PHY_CAL_VALID: u32 = 0;
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut PHY_CAL: [u8; PHY_CAL_LEN] = [0; PHY_CAL_LEN];
+
+fn phy_cal<R>(f: impl FnOnce(&mut u32, &mut [u8; PHY_CAL_LEN]) -> R) -> R {
+    let (magic, cal) = (&raw mut PHY_CAL_VALID, &raw mut PHY_CAL);
+    // SAFETY: as `rtc`.
+    f(unsafe { &mut *magic }, unsafe { &mut *cal })
+}
+
+/// Hands the kept calibration to the radio, before it starts.
+fn restore_phy_calibration() {
+    phy_cal(|magic, data| {
+        if *magic == PHY_CAL_MAGIC {
+            esp_radio::set_phy_calibration_data(data);
+        }
+    });
+}
+
+/// Keeps the radio's calibration for the next wake-up, unless the kept one was used as is.
+fn save_phy_calibration() {
+    let used = esp_radio::last_calibration_result();
+    phy_cal(|magic, data| {
+        if *magic != PHY_CAL_MAGIC || matches!(used, Some(esp_radio::CalibrationResult::DataCheckFailed)) {
+            esp_radio::phy_calibration_data(data);
+            *magic = PHY_CAL_MAGIC;
+        }
+    });
 }
 
 /// Validates the block (cleared after a power loss or any boot that is not a wake-up), counts
@@ -396,6 +434,7 @@ pub async fn start_sleepy(
     let bt = board.bt;
     #[cfg(not(feature = "improv-ble"))]
     let bt = ();
+    restore_phy_calibration();
     let net = match crate::net::esp::start_fast(spawner, board.wifi, credentials, fast_connect()) {
         Ok(net) => {
             start_services(spawner, net, store, bt, config, sleep, unprovisioned).await;
@@ -597,6 +636,7 @@ async fn remember_task(net: Net, store: &'static SharedStore) {
     drop(settings);
     CONNECTED_AT.lock(|c| c.set(Some(Instant::now())));
     remember(net);
+    save_phy_calibration();
     info!("sleep: link up {} ms after the start", Instant::now().as_millis());
 }
 
