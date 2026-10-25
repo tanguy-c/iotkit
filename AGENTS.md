@@ -62,6 +62,8 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 ## Hardware gotchas
 
 - Never toggle DTR/RTS on the C6's USB serial: it resets the chip (reset loops).
+- The C6's LP core (`LpCore`, `load_lp_code!`) overwrites iotkit's RTC records (early rollback,
+  crash record, deep-sleep state): not supported yet (`docs/src/battery.md`).
 - Never run espflash while a monitor holds `/dev/ttyACM0`: it hangs on "Connecting".
 - `partitions.csv` is 8 MB: flash with `--flash-size 8mb`. 4 MB boards use `partitions-4mb.csv`,
   without Matter.
