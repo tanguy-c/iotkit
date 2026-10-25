@@ -145,6 +145,7 @@ fn rtc_init(woke: bool) -> u32 {
 static SLEEPY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Seconds since power-up, counted on through deep sleep by the RTC timer.
+#[cfg(feature = "ha-update")]
 fn rtc_seconds() -> u32 {
     // SAFETY: only read, as esp-hal's own sleep code borrows it.
     let rtc = esp_hal::rtc_cntl::Rtc::new(unsafe { esp_hal::peripherals::RTC_TIMER::steal() });
@@ -153,6 +154,7 @@ fn rtc_seconds() -> u32 {
 
 /// Seconds since the release was last checked for, across deep sleeps: `None` if never this
 /// power-up, or not started with [`start_sleepy`].
+#[cfg(feature = "ha-update")]
 pub(crate) fn since_check() -> Option<u32> {
     if !SLEEPY.load(core::sync::atomic::Ordering::Relaxed) {
         return None;
@@ -161,6 +163,7 @@ pub(crate) fn since_check() -> Option<u32> {
 }
 
 /// The release was checked for now; `ago`: as if `ago` seconds before (to check again sooner).
+#[cfg(feature = "ha-update")]
 pub(crate) fn checked(ago: u32) {
     if SLEEPY.load(core::sync::atomic::Ordering::Relaxed) {
         let at = rtc_seconds().saturating_sub(ago);
