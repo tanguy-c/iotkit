@@ -111,6 +111,8 @@ pub struct Meta {
     pub category: Category,
     /// Sensors: decimals to show.
     pub precision: Option<u8>,
+    /// Keeps its state across restarts (`remember` feature: [`crate::remember`]).
+    pub remember: bool,
 }
 
 /// Longest entity id: it goes into topics and unique ids of fixed size.
@@ -137,6 +139,7 @@ impl Meta {
             icon: None,
             category: Category::Primary,
             precision: None,
+            remember: false,
         }
     }
 }
@@ -334,9 +337,12 @@ impl Binding {
     pub const MQTT: Binding = Binding(0);
     /// Matter.
     pub const MATTER: Binding = Binding(1);
+    /// The flash, for the entities that [remember](crate::remember) their state.
+    #[cfg(feature = "remember")]
+    pub const STORE: Binding = Binding(2);
 
     /// A binding of its own, for another transport: call it once, at start. `None` once the
-    /// six there can be are taken.
+    /// ones there can be are taken (six, five with `remember`).
     #[cfg(feature = "extra-bindings")]
     pub fn allocate() -> Option<Binding> {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -348,12 +354,15 @@ impl Binding {
     }
 }
 
+/// Bindings iotkit itself uses: MQTT, Matter, and the flash with `remember`.
+const OWN_BINDINGS: u8 = if cfg!(feature = "remember") { 3 } else { 2 };
+
 /// Bindings there can be: one bit each in [`Dirty`].
-const BINDINGS: usize = if cfg!(feature = "extra-bindings") { 8 } else { 2 };
+const BINDINGS: usize = if cfg!(feature = "extra-bindings") { 8 } else { OWN_BINDINGS as usize };
 
 /// The next binding [`Binding::allocate`] hands out.
 #[cfg(feature = "extra-bindings")]
-static NEXT: AtomicU8 = AtomicU8::new(2);
+static NEXT: AtomicU8 = AtomicU8::new(OWN_BINDINGS);
 
 static CHANGED: [Signal<CriticalSectionRawMutex, ()>; BINDINGS] = [const { Signal::new() }; BINDINGS];
 

@@ -75,6 +75,12 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
     crate::ota::esp::boot(store, fw.version).await;
 
     spawn(spawner, crate::diag::esp::watchdog_task(TimerGroup::new(board.timg1).wdt, config.watches));
+    // Before the app starts: its first command is the state saved before the restart.
+    #[cfg(feature = "remember")]
+    {
+        let saved = crate::remember::esp::restore(store, config.entities).await;
+        spawn(spawner, crate::remember::esp::remember_task(store, config.entities, saved));
+    }
 
     static NAME: StaticCell<heapless::String<16>> = StaticCell::new();
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or_default();

@@ -29,7 +29,9 @@ fn metadata() {
 fn extra_bindings_have_their_own_flags() {
     static S: Sensor = Sensor::new("s", "S");
     let first = Binding::allocate().unwrap();
-    assert!((0..5).all(|_| Binding::allocate().is_some()) && Binding::allocate().is_none(), "six in all");
+    // Six in all, five with `remember` (which takes one for the flash).
+    let left = if cfg!(feature = "remember") { 4 } else { 5 };
+    assert!((0..left).all(|_| Binding::allocate().is_some()) && Binding::allocate().is_none());
     S.set(1.0);
     assert!(S.take_dirty(first) && !S.take_dirty(first) && S.take_dirty(Binding::MQTT));
 }

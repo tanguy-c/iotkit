@@ -40,6 +40,7 @@ no tls: no TLS code;strings;TLS with;devkit;devkit-tls
 no esphome-api: no API server;syms;api_task|esphome;devkit;devkit-esphome
 no matter-icd: no sleepy Thread driver;syms;iotkit::matter::icd::;thread-light;thread-icd
 no matter-ota: no OTA requestor;syms;iotkit::matter::ota::|ota_req::OtaRequestorHandler;devkit-matter;thread-light
+no remember: no saved states;syms;iotkit::remember::|iotkit_core::remember::;devkit;thread-light
 no way to update: no OTA engine;syms;iotkit::ota::esp::;ble-beacon;devkit
 no wifi: no IP stack;syms;embassy_net::|smoltcp::;ble-beacon;devkit'
 

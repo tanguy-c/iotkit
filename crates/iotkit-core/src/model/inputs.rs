@@ -12,7 +12,7 @@ use heapless::String;
 use crate::model::{
     Binding, Command, Dirty, Entity, Kind, Meta, Spec, State,
     atomic::{AtomicU8, AtomicU32, Ordering},
-    entities::builders,
+    entities::{builders, remembers},
 };
 
 /// Longest text of a [`TextSensor`], in bytes.
@@ -38,6 +38,7 @@ pub struct Number {
 }
 
 builders!(Number);
+remembers!(Number);
 
 impl Number {
     /// From `min` to `max`, in steps of `step` (shown as a box; see [`slider`](Self::slider)).
@@ -135,6 +136,7 @@ pub struct Select {
 }
 
 builders!(Select);
+remembers!(Select);
 
 impl Select {
     /// A new entity (`id`: see [`Meta::id`]) with 1 to 254 `options` (checked at build time).

@@ -74,6 +74,9 @@ compile_error!(
 );
 #[cfg(all(feature = "esp32", feature = "deep-sleep"))]
 compile_error!("iotkit: `deep-sleep` is not supported on the original ESP32 yet");
+// A wake-up is a restart: every state would be read and written to flash at each one.
+#[cfg(all(feature = "remember", feature = "deep-sleep"))]
+compile_error!("iotkit: `remember` is not for `deep-sleep` devices yet");
 #[cfg(all(feature = "esp32s3", feature = "matter-wifi"))]
 compile_error!("iotkit: `matter-wifi` does not fit in the ESP32-S3's internal RAM yet (use MQTT, or a C6)");
 // Matter over Wi-Fi needs about 24 KB more static RAM than the ESP32-C3 has.
@@ -123,6 +126,8 @@ pub mod mqtt;
 pub mod net;
 pub mod ota;
 pub mod provision;
+#[cfg(feature = "remember")]
+pub mod remember;
 pub mod status;
 
 #[cfg(any(esp_wifi, all(feature = "_esp", feature = "matter-thread")))]
