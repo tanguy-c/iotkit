@@ -1,0 +1,10 @@
+label    = "Seeed Studio XIAO ESP32-C3 (ESP32-C3, 4 MB; Wi-Fi, tiny; no user LED)"
+chip     = "esp32c3"
+model    = "XIAO ESP32-C3"
+flash    = "4mb"
+boot_pin = 9
+order    = 61
+sources  = [
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/seeed/xiao_esp32c3/xiao_esp32c3.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/XIAO_ESP32C3/pins_arduino.h",
+]

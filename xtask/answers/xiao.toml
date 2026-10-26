@@ -1,0 +1,10 @@
+# `cargo iotkit new --answers answers/xiao.toml`: a Seeed Studio XIAO ESP32-C6 (4 MB, its antenna
+# switch set in `main`), its yellow LED (active low) showing the status. CI generates and builds it.
+name  = "Xiao sensor"
+maker = "CI"
+board = "xiao-esp32c6"
+
+[[parts]]
+kind = "relay"
+name = "Relay"
+pin  = 2

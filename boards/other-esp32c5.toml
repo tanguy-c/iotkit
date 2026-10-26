@@ -1,0 +1,6 @@
+# Another board: its flash is asked, its LED left to the app.
+label    = "Another board with an ESP32-C5"
+chip     = "esp32c5"
+model    = "ESP32-C5 board"
+boot_pin = 28
+order    = 902

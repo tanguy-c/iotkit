@@ -1,0 +1,17 @@
+# Two versions: 8 MB without PSRAM, or 4 MB with 2 MB of PSRAM (asked).
+label    = "Adafruit QT Py ESP32-S3 (ESP32-S3, 8 MB, or 4 MB with PSRAM; tiny, a NeoPixel; no Matter yet)"
+chip     = "esp32s3"
+model    = "Adafruit QT Py ESP32-S3"
+boot_pin = 0
+order    = 111
+led      = { kind = "rgb", pin = 39 }
+sources  = [
+    "https://learn.adafruit.com/adafruit-qt-py-esp32-s3/pinouts",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/adafruit/qt_py_esp32s3/adafruit_qt_py_esp32s3_procpu.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/adafruit_qtpy_esp32s3_nopsram/pins_arduino.h",
+]
+
+[[init]]
+pin   = 38
+level = "high"
+why   = "powers the NeoPixel"

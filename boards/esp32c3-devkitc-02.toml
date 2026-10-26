@@ -1,0 +1,12 @@
+label    = "Espressif ESP32-C3-DevKitC-02 (ESP32-C3, 4 MB; Wi-Fi; no Matter)"
+chip     = "esp32c3"
+model    = "ESP32-C3-DevKitC-02"
+flash    = "4mb"
+boot_pin = 9
+order    = 21
+led      = { kind = "rgb", pin = 8 }
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/esp32-c3-devkitc-02/user_guide.html",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/espressif/esp32c3_devkitc/esp32c3_devkitc.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/esp32c3/pins_arduino.h",
+]

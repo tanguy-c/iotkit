@@ -1,0 +1,10 @@
+label    = "Espressif ESP32-DevKitC (ESP32, WROOM-32: the original ESP32; no Matter, no Bluetooth setup yet)"
+chip     = "esp32"
+model    = "ESP32-DevKitC"
+flash    = "4mb"
+boot_pin = 0
+order    = 50
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32/esp32-devkitc/user_guide.html",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/espressif/esp32_devkitc/esp32_devkitc_procpu.dts",
+]

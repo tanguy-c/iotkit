@@ -29,7 +29,8 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
   Matter OTA: `cargo iotkit new --answers xtask/answers/thread.toml`'s output, keep them in step),
   `ble-beacon` (BTHome over Bluetooth, no network or OTA: the crates assembled by hand).
 - `template/`: the cargo-generate project; `xtask/`: the `cargo iotkit` CLI (`cargo xtask` here),
-  its `new` wizard in `xtask/src/new/`; `test-server/`: Home Assistant, Mosquitto, an update server
+  its `new` wizard in `xtask/src/new/` (the chips' pin rules in `boards.rs`), the boards it knows
+  in `boards/` (one TOML file each, two sources per fact: see its README); `test-server/`: Home Assistant, Mosquitto, an update server
   and a Matter controller in compose.
 
 ## Commands

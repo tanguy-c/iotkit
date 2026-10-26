@@ -1,0 +1,18 @@
+# Also a blue LED (GPIO7, active high) and an IR LED (GPIO3), left to the app.
+label    = "M5Stack NanoC6 (ESP32-C6, 4 MB; Wi-Fi 6, tiny, cased; no Matter in 4 MB)"
+chip     = "esp32c6"
+model    = "M5Stack NanoC6"
+flash    = "4mb"
+boot_pin = 9
+order    = 100
+led      = { kind = "rgb", pin = 20 }
+sources  = [
+    "https://docs.m5stack.com/en/core/M5NanoC6",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/m5stack/m5stack_nanoc6/m5stack_nanoc6_hpcore.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/m5stack_nanoc6/pins_arduino.h",
+]
+
+[[init]]
+pin   = 19
+level = "high"
+why   = "powers the RGB LED"

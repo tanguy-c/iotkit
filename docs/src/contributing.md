@@ -9,6 +9,7 @@
 | `apps/` | the [examples](examples.md); `cargo xtask ...` here is `cargo iotkit` |
 | `template/` | the `cargo generate` template; `check-sync.sh` keeps its copies in step |
 | `xtask/` | the `cargo iotkit` CLI |
+| `boards/` | what `cargo iotkit new` knows about each board, one file per board ([its README](https://github.com/tanguy-c/iotkit/tree/main/boards)): a new board is a new file |
 | `docs/` | this guide (`mdbook serve docs`) |
 | `test-server/` | broker, Home Assistant, update server and Matter controller for tests |
 | `fuzz/`, `tools/` | fuzz targets for the network parsers; size, link and hardware checks |

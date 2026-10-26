@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use boards::{BOARDS, Board, PinCheck, PinUse, check_pin};
+use boards::{Board, PinCheck, PinUse, boards, check_pin};
 use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text, validator::Validation};
 use parts::{Group, KINDS, Kind, slug};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,9 @@ pub struct Answers {
     pub status: Indicator,
     /// With `status = "led"`: the LED's pin (to ground through a resistor).
     pub status_pin: Option<u8>,
+    /// With `status = "led"`: `low` if a low level lights the LED (default: the board's own LED's
+    /// polarity on its pin, else `high`).
+    pub status_active: Option<Level>,
     /// The setup button (to ground; default: the board's BOOT). On battery, a low-power pin
     /// wakes the chip with a press.
     pub button_pin: Option<u8>,
@@ -86,6 +89,7 @@ impl Default for Answers {
             status_led: true,
             status: Indicator::Auto,
             status_pin: None,
+            status_active: None,
             button_pin: None,
             wifi_ssid: None,
             wifi_password: None,
@@ -149,6 +153,14 @@ pub enum Indicator {
     Rgb,
     /// A LED on `status_pin` (`components::status_led`).
     Led,
+}
+
+/// A pin's level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Level {
+    High,
+    Low,
 }
 
 /// The ESPHome native API (`esphome-api`): Home Assistant connects to the device, no broker.
@@ -248,7 +260,7 @@ impl Project {
     /// Checks the answers: board, pins, what the chip can do.
     pub fn new(mut answers: Answers, iotkit_path: String) -> Result<Self> {
         let Some(board) = boards::board(&answers.board) else {
-            let ids: Vec<_> = BOARDS.iter().map(|b| b.id).collect();
+            let ids: Vec<_> = boards().iter().map(|b| b.id).collect();
             bail!("unknown board `{}` (one of {ids:?})", answers.board);
         };
         let package = if answers.package.is_empty() { slug(&answers.name, '-') } else { answers.package.clone() };
@@ -264,9 +276,21 @@ impl Project {
         };
         let battery = answers.power == Power::Battery;
         if answers.status == Indicator::Auto {
-            // On battery, a WS2812 draws even dark: a status there is asked for.
-            let rgb = board.rgb_led.is_some() && !battery;
-            answers.status = if rgb { Indicator::Rgb } else { Indicator::Off };
+            // The board's LED; on battery a status is asked for (a WS2812 draws even dark).
+            answers.status = match (board.rgb_led, board.plain_led) {
+                _ if battery => Indicator::Off,
+                (Some(_), _) => Indicator::Rgb,
+                (None, Some((pin, _))) => {
+                    answers.status_pin = Some(pin);
+                    Indicator::Led
+                }
+                (None, None) => Indicator::Off,
+            };
+        }
+        // The board's own LED keeps its polarity.
+        if answers.status == Indicator::Led && answers.status_active.is_none() {
+            let low = board.plain_led.is_some_and(|(pin, low)| low && answers.status_pin == Some(pin));
+            answers.status_active = Some(if low { Level::Low } else { Level::High });
         }
         if answers.transport == Transport::Thread {
             ensure!(
@@ -324,7 +348,8 @@ impl Project {
                 "with Matter, Home Assistant does not discover the ESPHome API: add the device by its address".into(),
             );
         }
-        let mut taken: Vec<u8> = Vec::new();
+        // The board's own: its switches, set in `main`.
+        let mut taken: Vec<u8> = board.init.iter().map(|i| i.pin).collect();
         let led = answers.status_led && !battery;
         if let (true, Some(pin)) = (led || answers.status == Indicator::Rgb, board.rgb_led) {
             taken.push(pin);
@@ -357,8 +382,11 @@ impl Project {
         if battery && let Some(pin) = answers.battery_pin {
             take(pin, PinUse::Analog, "Battery level", &mut taken, &mut warnings)?;
         }
-        if let (Indicator::Led, Some(pin)) = (answers.status, answers.status_pin) {
-            take(pin, PinUse::Output, "Status LED", &mut taken, &mut warnings)?;
+        match (answers.status, answers.status_pin) {
+            // Wired by the board's maker: no warning for its strapping pin.
+            (Indicator::Led, Some(pin)) if board.plain_led.is_some_and(|(led, _)| led == pin) => taken.push(pin),
+            (Indicator::Led, Some(pin)) => take(pin, PinUse::Output, "Status LED", &mut taken, &mut warnings)?,
+            _ => {}
         }
         let button = answers.button_pin.unwrap_or(board.boot_pin);
         if button != board.boot_pin {
@@ -639,13 +667,14 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         .prompt()?;
 
     // 2. The board.
-    let labels: Vec<&str> = BOARDS.iter().map(|b| b.label).collect();
-    let start = BOARDS.iter().position(|b| b.id == a.board).unwrap_or(0);
+    let labels: Vec<&str> = boards().iter().map(|b| b.label).collect();
+    let start = boards().iter().position(|b| b.id == a.board).unwrap_or(0);
     let label = Select::new("Which board?", labels.clone())
         .with_starting_cursor(start)
-        .with_help_message("The chip decides what is possible: Matter needs the C6. Only the C6 is tested on hardware.")
+        .with_page_size(12)
+        .with_help_message("Type to search (a maker, a chip, a name). Matter needs a C6 with 8 MB.")
         .prompt()?;
-    let board = &BOARDS[labels.iter().position(|l| *l == label).unwrap_or(0)];
+    let board = &boards()[labels.iter().position(|l| *l == label).unwrap_or(0)];
     a.board = board.id.into();
     if board.flash.is_none() {
         let f = Select::new("How much flash memory does it have?", vec!["4 MB", "8 MB or more"])
@@ -801,17 +830,22 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     let mut taken: Vec<u8> = a.battery_pin.into_iter().collect();
     // The first is the default: the board's LED when plugged in, nothing on battery.
     let rgb = if a.status_led { "The board's RGB LED (over the light)" } else { "The board's RGB LED" };
-    let shows = match (board.rgb_led.is_some(), battery) {
-        (true, false) => vec![rgb, "A LED on a pin", "Nothing"],
-        (true, true) => vec!["Nothing", "A LED on a pin", rgb],
-        (false, _) => vec!["Nothing", "A LED on a pin"],
+    let plain = board.plain_led.map(|(pin, _)| format!("The board's LED (GPIO{pin})"));
+    let shows = match (board.rgb_led.is_some(), plain.as_deref(), battery) {
+        (true, _, false) => vec![rgb, "A LED on a pin", "Nothing"],
+        (true, _, true) => vec!["Nothing", "A LED on a pin", rgb],
+        (false, Some(own), false) => vec![own, "A LED on a pin", "Nothing"],
+        (false, Some(own), true) => vec!["Nothing", "A LED on a pin", own],
+        (false, None, _) => vec!["Nothing", "A LED on a pin"],
     };
     let show = Select::new("What shows its status (pairing, connecting, updates)?", shows)
         .with_help_message("Blinks while it waits to be set up, and while it connects or updates")
         .prompt()?;
+    let own = plain.as_deref() == Some(show);
     a.status = match show {
         "Nothing" => Indicator::Off,
         "A LED on a pin" => Indicator::Led,
+        _ if own => Indicator::Led,
         _ => Indicator::Rgb,
     };
     if (a.status_led || a.status == Indicator::Rgb)
@@ -820,7 +854,12 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         taken.push(led);
     }
     a.status_pin = None;
-    if a.status == Indicator::Led {
+    a.status_active = None;
+    taken.extend(board.init.iter().map(|i| i.pin));
+    if own {
+        a.status_pin = board.plain_led.map(|(pin, _)| pin);
+        taken.extend(a.status_pin);
+    } else if a.status == Indicator::Led {
         a.status_pin =
             ask_pin(board, "Which GPIO for the LED? (to ground through a resistor)", PinUse::Output, &taken, false)?;
         taken.extend(a.status_pin);
@@ -1188,6 +1227,22 @@ mod tests {
     fn cargo_toml(p: &Project) -> String {
         let rendered = render::render("Cargo.toml", render::FILES[1].1, &p.package, p.board.chip, "/opt/iotkit");
         codegen::cargo_toml(&rendered.unwrap(), p).unwrap()
+    }
+
+    /// A board file's own wiring: the XIAO ESP32-C6's antenna switch and active-low LED.
+    #[test]
+    fn xiao() {
+        let p = project(include_str!("../../answers/xiao.toml"));
+        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        assert_eq!((p.answers.status, p.answers.status_pin), (Indicator::Led, Some(15)));
+        let main = codegen::main_rs(&p);
+        assert!(main.contains("let _gpio3 = Output::new(p.GPIO3, Level::Low, OutputConfig::default());"), "{main}");
+        assert!(main.contains("let _gpio14 = Output::new(p.GPIO14, Level::Low, OutputConfig::default());"), "{main}");
+        assert!(main.find("p.GPIO3") < main.find("iotkit::start("), "before the radio: {main}");
+        assert!(main.contains("Output::new(p.GPIO15, Level::High,") && main.contains("Active::Low"), "{main}");
+        assert!(codegen::readme(&p).contains("| Status LED | GPIO15 | on the board |"));
+        let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
+        assert!(err("board = \"xiao-esp32c6\"\n[[parts]]\nkind = \"relay\"\npin = 3").contains("antenna switch"));
     }
 
     /// On battery, the mode that suits the link: deep sleep over the ESPHome API (or MQTT), a

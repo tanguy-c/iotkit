@@ -1,0 +1,11 @@
+label    = "Espressif ESP32-C6-DevKitM-1 (ESP32-C6, 4 MB; Wi-Fi 6, no Matter in 4 MB)"
+chip     = "esp32c6"
+model    = "ESP32-C6-DevKitM-1"
+flash    = "4mb"
+boot_pin = 9
+order    = 10
+led      = { kind = "rgb", pin = 8 }
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitm-1/user_guide.html",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/esp32c6/pins_arduino.h",
+]

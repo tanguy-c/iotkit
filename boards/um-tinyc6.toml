@@ -1,0 +1,19 @@
+# One source in text so far (Arduino's variant), and the power pin's level by analogy with
+# Unexpected Maker's other boards (high: on).
+label    = "Unexpected Maker TinyC6 (ESP32-C6, 8 MB; tiny, an RGB LED, battery charger)"
+chip     = "esp32c6"
+model    = "Unexpected Maker TinyC6"
+flash    = "8mb"
+boot_pin = 9
+order    = 140
+led      = { kind = "rgb", pin = 23 }
+sources  = [
+    "https://unexpectedmaker.com/tinyc6",
+    "https://circuitpython.org/board/unexpectedmaker_tinyc6/",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/um_tinyc6/pins_arduino.h",
+]
+
+[[init]]
+pin   = 22
+level = "high"
+why   = "powers the RGB LED"

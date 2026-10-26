@@ -1,0 +1,11 @@
+label    = "LOLIN (Wemos) S3 Mini (ESP32-S3, 4 MB, 2 MB PSRAM; an RGB LED; no Matter yet)"
+chip     = "esp32s3"
+model    = "LOLIN S3 Mini"
+flash    = "4mb"
+boot_pin = 0
+order    = 130
+led      = { kind = "rgb", pin = 47 }
+sources  = [
+    "https://www.wemos.cc/en/latest/s3/s3_mini.html",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/lolin_s3_mini/pins_arduino.h",
+]

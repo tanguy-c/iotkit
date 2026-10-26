@@ -272,8 +272,10 @@ pub fn main_rs(p: &Project) -> String {
     if led || status == Indicator::Rgb {
         hal.extend(["Async", "rmt::Rmt", "time::Rate"]);
     }
-    if status == Indicator::Led {
+    if status == Indicator::Led || !p.board.init.is_empty() {
         hal.extend(["gpio::Level", "gpio::Output", "gpio::OutputConfig"]);
+    }
+    if status == Indicator::Led {
         iotkit.insert("Active");
     }
     if !hal.is_empty() {
@@ -345,6 +347,18 @@ async fn main(spawner: Spawner) -> ! {{
 ",
         if shared_adc { "mut " } else { "" }
     );
+    // The board's own switches, before the radio starts (`boards/<id>.toml`).
+    for i in &p.board.init {
+        let _ = write!(
+            s,
+            "    // GPIO{}: {}; held for as long as `main` runs.\n    let _gpio{} = Output::new(p.GPIO{}, Level::{}, OutputConfig::default());\n",
+            i.pin,
+            i.why,
+            i.pin,
+            i.pin,
+            if i.high { "High" } else { "Low" }
+        );
+    }
     if let Some(pin) = battery_pin {
         let curve = if p.answers.battery_curve == super::Curve::TwoAa { "ALKALINE_2AA" } else { "LIPO" };
         let shared = if shared_adc { "\n    // A part needs the ADC too: `p.ADC1.reborrow()` here." } else { "" };
@@ -401,10 +415,12 @@ async fn main(spawner: Spawner) -> ! {{
         rgb_led(&mut s, "status_task");
     }
     if let (Indicator::Led, Some(pin)) = (status, p.answers.status_pin) {
+        // Dark until the status task runs.
+        let dark = if p.answers.status_active == Some(super::Level::Low) { "High" } else { "Low" };
         let _ = write!(
             s,
             "
-    let led = Output::new(p.GPIO{pin}, Level::Low, OutputConfig::default());
+    let led = Output::new(p.GPIO{pin}, Level::{dark}, OutputConfig::default());
     spawner.spawn(status_task(led).unwrap());
 "
         );
@@ -453,14 +469,15 @@ async fn status_task(led: Led) {
 ",
         ),
         Indicator::Led => s.push_str(
-            "
+            &"
 /// The LED shows the status (`iotkit::status`): slow blinking while it waits to be set up.
 #[embassy_executor::task]
 async fn status_task(led: Output<'static>) {
     // `Show::All` while developing; `Show::Pairing` for a release: lit only to set it up.
-    iotkit::components::status_led(led, Active::High, iotkit::status::Show::All).await
+    iotkit::components::status_led(led, Active::ACTIVE, iotkit::status::Show::All).await
 }
-",
+"
+            .replace("ACTIVE", if p.answers.status_active == Some(super::Level::Low) { "Low" } else { "High" }),
         ),
     }
     if led && !plain_led {
@@ -885,6 +902,9 @@ pub fn readme(p: &Project) -> String {
         );
     }
     match (p.answers.status, a.status_pin) {
+        (Indicator::Led, Some(pin)) if p.board.plain_led.is_some_and(|(led, _)| led == pin) => {
+            let _ = writeln!(s, "| Status LED | GPIO{pin} | on the board | - | - |");
+        }
         (Indicator::Led, Some(pin)) => {
             let _ = writeln!(s, "| Status LED | GPIO{pin} | a LED and a resistor (330 Ω) to GND | - | - |");
         }

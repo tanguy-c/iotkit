@@ -1,0 +1,12 @@
+# v1.1 (the LED on GPIO38); the first version has it on GPIO48: esp32s3-devkitc-1-v1.0.
+label    = "Espressif ESP32-S3-DevKitC-1 v1.1 (ESP32-S3, 8 MB or more; more pins and CPU; no Matter yet)"
+chip     = "esp32s3"
+model    = "ESP32-S3-DevKitC-1"
+flash    = "8mb"
+boot_pin = 0
+order    = 40
+led      = { kind = "rgb", pin = 38 }
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/user_guide_v1.1.html",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/espressif/esp32s3_devkitc/esp32s3_devkitc_procpu.dts",
+]

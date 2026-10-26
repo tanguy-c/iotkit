@@ -1,0 +1,12 @@
+# One source in text so far (Arduino's variant); Waveshare's pinout is an image.
+label    = "Waveshare ESP32-C6-Zero (ESP32-C6, 4 MB; tiny, an RGB LED; no Matter in 4 MB)"
+chip     = "esp32c6"
+model    = "Waveshare ESP32-C6-Zero"
+flash    = "4mb"
+boot_pin = 9
+order    = 121
+led      = { kind = "rgb", pin = 8 }
+sources  = [
+    "https://www.waveshare.com/wiki/ESP32-C6-Zero",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/waveshare_esp32_c6_zero/pins_arduino.h",
+]
