@@ -5,6 +5,19 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
 ## Unreleased
 
+- **Breaking:** MQTT is a feature, `mqtt` (on by default): a project with
+  `default-features = false` adds it ([Upgrading](docs/src/upgrading.md)). `cargo iotkit new`
+  leaves it out for the ESPHome API: about 33 KB less code and 9 KB more free RAM.
+- The setup access point's servers, downloads and update installs share one work area, only held
+  while they run: 11 KB more free RAM on devkit. An update asked for during a setup window is
+  refused (`ota push`: HTTP 503); a window opened during an update waits for it.
+- `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
+  fullest.
+
+## 0.3.0 (2026-10-26)
+
+- **Breaking**, only for an app with its own entity type: `model::Meta` has a `remember` field
+  ([Upgrading](docs/src/upgrading.md)).
 - Entities that keep their state across restarts (`remember` feature): a switch, light, number
   or select built with `.remember()` is saved to flash once it settles and handed back to the app
   as its first command ([Entities](docs/src/entities.md#keeping-their-state)). `cargo iotkit new`
@@ -15,16 +28,11 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   2 s (every 30 s, for a missed event; the signal strength too).
 - Matter over Thread: a paired device now passes its network health check (the attach could
   wake another task instead), so an update over Matter is kept, not rolled back after 30 minutes.
-- **Breaking:** MQTT is a feature, `mqtt` (on by default): a project with
-  `default-features = false` adds it ([Upgrading](docs/src/upgrading.md)). `cargo iotkit new`
-  leaves it out for the ESPHome API: about 33 KB less code and 9 KB more free RAM.
-- The setup access point's servers, downloads and update installs share one work area, only held
-  while they run: 11 KB more free RAM on devkit. An update asked for during a setup window is
-  refused (`ota push`: HTTP 503); a window opened during an update waits for it.
-- `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
-  fullest.
 - Docs: the C6's LP core overwrites iotkit's RTC records; not supported yet
   ([Battery devices](docs/src/battery.md#the-c6s-low-power-core-not-with-iotkit-yet)).
+- Matter's crypto: `crypto-bigint` 0.7.9 and `ctutils` 0.4.6, for operations meant to be
+  constant-time that were not (RUSTSEC-2026-0387, RUSTSEC-2026-0385). Matter over Wi-Fi grows by
+  about 2.3 KB.
 
 ## 0.2.0 (2026-10-25)
 
