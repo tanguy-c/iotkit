@@ -9,7 +9,7 @@ repository.workspace   = true
 publish.workspace      = true
 
 [features]
-default = ["wifi", "improv-ble", "softap", "improv-serial", "console", "ota-push"]
+default = ["wifi", "mqtt", "improv-ble", "softap", "improv-serial", "console", "ota-push"]
 
 ## The chip: one for firmware (none builds the host-testable parts only).
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-println/esp32c6", "esp-alloc/esp32c6", "esp-rtos/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-storage/esp32c6", "esp-backtrace/esp32c6", "esp-radio?/esp32c6"]
@@ -23,6 +23,9 @@ esp32h2 = ["_esp", "esp-hal/esp32h2", "esp-println/esp32h2", "esp-alloc/esp32h2"
 
 ## Wi-Fi and everything on it: `start`, the network, updates, MQTT, the setup window.
 wifi = ["dep:esp-radio", "esp-radio?/wifi", "dep:embassy-net", "dep:smoltcp", "panic-handler"]
+## Home Assistant over MQTT (discovery), once a broker is set. Without it, the ESPHome API or
+## Matter is the link (about 25 KB of flash and 9 KB of RAM less).
+mqtt = ["wifi"]
 ## Improv over Bluetooth LE in a setup window (the Bluetooth stack: about 300 KB of flash).
 improv-ble = ["wifi", "esp-radio?/ble", "esp-radio?/coex", "dep:trouble-host", "dep:bt-hci"]
 ## The setup access point and its page in a setup window.

@@ -14,7 +14,7 @@ esp32c6 = ["iotkit/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6"]
 [dependencies]
 # Setup over USB serial only (Improv: ESP Web Tools, improv-wifi.com), and OTA pushes.
 # A path, not `workspace = true`: older cargo cannot turn the default features off over it.
-iotkit = { path = "../../crates/iotkit", default-features = false, features = ["improv-serial", "ota-push"] }
+iotkit = { path = "../../crates/iotkit", default-features = false, features = ["mqtt", "improv-serial", "ota-push"] }
 
 esp-hal          = { workspace = true }
 esp-rtos         = { workspace = true }

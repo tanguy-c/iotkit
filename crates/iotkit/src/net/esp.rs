@@ -535,6 +535,7 @@ pub(crate) trait Stream {
     /// Why a read or write failed.
     type Error: core::fmt::Debug;
     /// Reads what is there (`Ok(0)`: the peer closed).
+    #[cfg_attr(not(feature = "mqtt"), allow(dead_code))]
     fn recv<'a>(&'a mut self, buf: &'a mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> + 'a;
     /// Sends `bytes` now (TLS: the record goes out instead of waiting in its buffer).
     fn send<'a>(&'a mut self, bytes: &'a [u8]) -> impl Future<Output = Result<(), Self::Error>> + 'a;
@@ -609,9 +610,19 @@ pub trait Sink {
     async fn data(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
-/// GETs `url` (`http://`, or `https://` with the `tls` feature) into `sink`.
+/// GETs `url` (`http://`, or `https://` with the `tls` feature) into `sink`. Its buffers are the
+/// kit's work area: it waits while a setup window or an update holds it.
 pub async fn get<S: Sink>(stack: Stack<'static>, url: &str, sink: &mut S) -> Result<(), GetError<S::Error>> {
     get_from(stack, url, 0, sink).await
+}
+
+/// What a GET works in, in the work area ([`crate::scratch`]).
+pub(crate) struct GetBuffers {
+    /// The TCP receive window: large, to keep data coming while the caller writes flash.
+    rx: [u8; 16 * 1024],
+    tx: [u8; 512],
+    #[cfg(feature = "tls")]
+    tls: super::tls::Buffers,
 }
 
 /// The GET over the connected `$socket` (TCP, or TLS over it). A macro, expanded per stream
@@ -676,6 +687,18 @@ pub async fn get_from<S: Sink>(
     from: u32,
     sink: &mut S,
 ) -> Result<(), GetError<S::Error>> {
+    let mut area = crate::scratch::lease().await;
+    get_with(stack, url, from, sink, area.download()).await
+}
+
+/// [`get_from`] in `buffers`, for a caller that holds the work area.
+pub(crate) async fn get_with<S: Sink>(
+    stack: Stack<'static>,
+    url: &str,
+    from: u32,
+    sink: &mut S,
+    buffers: &mut GetBuffers,
+) -> Result<(), GetError<S::Error>> {
     let url = http::Url::parse(url).map_err(GetError::Url)?;
     let ip = match url.host.parse::<Ipv4Addr>() {
         Ok(ip) => ip,
@@ -690,21 +713,10 @@ pub async fn get_from<S: Sink>(
         }
     };
 
-    // A large window keeps data coming while the caller writes flash.
+    #[cfg(feature = "tls")]
+    let GetBuffers { rx, tx, tls } = buffers;
     #[cfg(not(feature = "tls"))]
-    let (mut rx, mut tx) = ([0u8; 16 * 1024], [0u8; 512]);
-    #[cfg(not(feature = "tls"))]
-    let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
-    // With TLS, in a static: in the future, it is copied through the OTA task's stack frame with
-    // the handshake's futures, which then overflows the stack.
-    #[cfg(feature = "tls")]
-    static WINDOW: embassy_sync::mutex::Mutex<CriticalSectionRawMutex, ([u8; 16 * 1024], [u8; 512])> =
-        embassy_sync::mutex::Mutex::new(([0; 16 * 1024], [0; 512]));
-    #[cfg(feature = "tls")]
-    let mut window = WINDOW.lock().await;
-    #[cfg(feature = "tls")]
-    let (rx, tx) = &mut *window;
-    #[cfg(feature = "tls")]
+    let GetBuffers { rx, tx } = buffers;
     let mut socket = TcpSocket::new(stack, rx, tx);
     socket.set_timeout(Some(HTTP_TIMEOUT));
     with_timeout(HTTP_TIMEOUT, socket.connect((ip, url.port)))
@@ -714,9 +726,7 @@ pub async fn get_from<S: Sink>(
 
     #[cfg(feature = "tls")]
     if url.tls {
-        static BUFFERS: super::tls::SharedBuffers = super::tls::Buffers::shared();
-        let mut buffers = BUFFERS.lock().await;
-        let super::tls::Buffers { read, write } = &mut *buffers;
+        let super::tls::Buffers { read, write } = tls;
         let mut socket = super::tls::open(socket, url.host, read, write).await.map_err(|e| {
             log::warn!("net: TLS with {}: {e:?}", url.host);
             GetError::Tls

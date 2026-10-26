@@ -13,6 +13,12 @@ use esp_hal::{
 
 use crate::diag::{Boot, Crash, CrashKind, ResetCause, TaskWatch, rtc, starving};
 
+// Only `mem` on the console reads them: without it, nothing paints the stack or samples the heap.
+#[cfg(feature = "console")]
+mod memory;
+#[cfg(feature = "console")]
+pub use memory::{Memory, memory, paint_stack};
+
 /// Hardware watchdog timeout: fires when the executor is blocked this long.
 const HW_TIMEOUT: esp_hal::time::Duration = esp_hal::time::Duration::from_secs(5);
 
@@ -145,6 +151,8 @@ pub async fn watchdog_task(mut wdt: Wdt<TIMG1<'static>>, watches: &'static [&'st
     let mut ticker = Ticker::every(Duration::from_secs(1));
     loop {
         wdt.feed();
+        #[cfg(feature = "console")]
+        memory::sample_heap();
         if let Some(watch) = starving(watches, Instant::now().as_millis() as u32) {
             let mut crash = Crash::new(CrashKind::Watchdog, uptime_s());
             let _ = write!(crash, "task `{}` was not fed in time", watch.name());

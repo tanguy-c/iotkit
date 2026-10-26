@@ -36,10 +36,16 @@ Commands:
   help           this text
   info           version, uptime, boot counters, last crash, last update
   net            Wi-Fi state, host name, IP address
+  mem            heap and stack use, now and at their fullest
   provision      open a 10-minute setup window: access point + Bluetooth (Improv)
-  ota URL        install the update whose manifest is at URL (http://...)
+  ota URL        install the update whose manifest is at URL (http://...)";
+
+#[cfg(feature = "mqtt")]
+const MQTT_HELP: &str = "
   mqtt           MQTT broker and connection state
   mqtt HOST[:PORT] [USER PASS]   set the broker (then restarts)";
+#[cfg(not(feature = "mqtt"))]
+const MQTT_HELP: &str = "";
 
 #[cfg(feature = "matter-wifi")]
 const MATTER_HELP: &str = "
@@ -119,7 +125,7 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
     match cmd {
         "" => {}
         "help" => {
-            println!("{HELP}{UPDATE_HELP}{MATTER_HELP}{TEST_HELP}");
+            println!("{HELP}{MQTT_HELP}{UPDATE_HELP}{MATTER_HELP}{TEST_HELP}");
             // Its own line: builds without it print as before.
             #[cfg(feature = "esphome-api")]
             println!("{ESPHOME_HELP}");
@@ -145,6 +151,12 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
                 let (a, b, c) = u.version;
                 println!("last update: {a}.{b}.{c} {:?}", u.outcome);
             }
+        }
+        #[cfg(feature = "console")]
+        "mem" => {
+            let m = crate::diag::esp::memory();
+            println!("heap {} of {} bytes used, {} at most", m.heap_used, m.heap_size, m.heap_peak);
+            println!("stack {} of {} bytes used at most", m.stack_peak, m.stack_size);
         }
         "provision" => {
             crate::provision::esp::open_window();
@@ -172,6 +184,7 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
             println!("forgetting every Matter pairing, restarting");
             crate::matter::wifi::forget_pairings();
         }
+        #[cfg(feature = "mqtt")]
         "mqtt" => {
             match store.lock().await.load::<crate::mqtt::Broker>().await {
                 Ok(Some(b)) => println!("broker {}:{}", b.host, b.port),
@@ -179,6 +192,7 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
             }
             println!("connected: {}", crate::mqtt::esp::is_connected());
         }
+        #[cfg(feature = "mqtt")]
         _ if cmd.starts_with("mqtt ") => {
             let mut args = cmd["mqtt ".len()..].split_whitespace();
             let address = args.next().unwrap_or("");

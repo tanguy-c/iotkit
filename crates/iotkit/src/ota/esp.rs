@@ -67,6 +67,10 @@ pub enum OtaError {
     /// Another update is running, or the running one is on trial (its spare slot holds the
     /// firmware to go back to).
     Busy,
+    /// A setup window (or another download) holds the RAM a download needs: try again once it
+    /// closes.
+    #[cfg(esp_wifi)]
+    InUse,
     /// No `otadata` and two OTA app partitions, or the running app is not in one.
     NoSlots,
     /// The manifest or image could not be downloaded.
@@ -89,6 +93,8 @@ impl fmt::Display for OtaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OtaError::Busy => f.write_str("an update is running or on trial"),
+            #[cfg(esp_wifi)]
+            OtaError::InUse => f.write_str("a setup window or download is open: try later"),
             OtaError::NoSlots => f.write_str("no OTA partitions (see partitions.csv)"),
             #[cfg(esp_wifi)]
             OtaError::Download(e) => write!(f, "download failed: {e:?}"),

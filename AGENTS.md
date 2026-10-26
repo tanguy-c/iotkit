@@ -14,7 +14,8 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
   `esp/http.rs`), `provision`, `mqtt` (Home Assistant discovery, `ha.rs`), `esphome` (the ESPHome
   native API, `api.rs`), `matter` (`ota.rs`: the OTA Requestor, `matter-ota`; `icd.rs`: on
   battery, `matter-icd`, its sleepy Thread driver in `icd/thread.rs`), `remember` (restores
-  and saves `.remember()` states, `remember`), `components` (ready-made
+  and saves `.remember()` states, `remember`), `scratch` (the work area that downloads, update
+  installs and the setup access point share, one at a time), `components` (ready-made
   parts over embedded-hal); `app.rs` (`Config`, `init!`; `start` and `Board` in
   `app/wifi.rs` or `app/thread.rs`), re-exported at the root. Each module's chip code is in its
   `esp.rs`, behind `feature = "_esp"` or, on the Wi-Fi side, `cfg(esp_wifi)` (a chip and `wifi`),

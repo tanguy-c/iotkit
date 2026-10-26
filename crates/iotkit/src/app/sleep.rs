@@ -48,8 +48,10 @@ use esp_hal::{
 use log::{error, info, warn};
 use static_cell::StaticCell;
 
-use super::wifi::{Ble, broker_check_task, network_check_task, provisioner, require_checks, spawn_provisioning};
-use super::{App, BROKER, Board, Config, HEALTH, NETWORK, RECORDED, spawn};
+use super::wifi::{Ble, network_check_task, provisioner, require_checks, spawn_provisioning};
+use super::{App, Board, Config, HEALTH, NETWORK, RECORDED, spawn};
+#[cfg(feature = "mqtt")]
+use super::{BROKER, wifi::broker_check_task};
 use crate::config::{Setting, keys};
 use crate::health::{Radio, radio_failed, supervisor_task};
 use crate::provision::gesture::Gesture;
@@ -99,6 +101,7 @@ pub fn wake_reason() -> WakeReason {
 // The words kept in RTC memory across sleeps.
 const MAGIC: usize = 0;
 const BOOTS: usize = 1;
+#[cfg(feature = "mqtt")]
 const DISCOVERY_HASH: usize = 2;
 const AP_CHANNEL: usize = 3;
 const AP_BSSID: usize = 4; // 2 words
@@ -328,6 +331,7 @@ impl SleepyApp {
             Timer::after_secs(1).await;
         }
         if self.settled().await {
+            #[cfg(feature = "mqtt")]
             rtc(|r| r[DISCOVERY_HASH] = crate::mqtt::esp::discovery_hash());
         }
         // MQTT and the ESPHome API send what is pending and disconnect.
@@ -438,7 +442,7 @@ async fn start_services(
     store: &'static SharedStore,
     bt: Ble,
     config: &'static Config,
-    sleep: &'static SleepConfig,
+    #[cfg_attr(not(feature = "mqtt"), allow(unused_variables))] sleep: &'static SleepConfig,
     unprovisioned: bool,
 ) {
     spawn(spawner, network_check_task(net));
@@ -454,6 +458,7 @@ async fn start_services(
         sw_version: config.firmware.version_text,
         entities,
     });
+    #[cfg(feature = "mqtt")]
     match crate::mqtt::esp::broker(store).await {
         Some(broker) => {
             let sleepy = crate::mqtt::esp::Sleepy {
@@ -483,17 +488,20 @@ async fn start_services(
 }
 
 /// A broker is stored: MQTT is a link too.
+#[cfg(feature = "mqtt")]
 static MQTT_LINK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// The link a wake-up reports over: Home Assistant over the ESPHome API, or the broker (when
 /// one is stored, either does).
 async fn wait_link() {
-    #[cfg(feature = "esphome-api")]
+    #[cfg(all(feature = "esphome-api", feature = "mqtt"))]
     if MQTT_LINK.load(core::sync::atomic::Ordering::Relaxed) {
         select(crate::esphome::esp::wait_settled(), crate::mqtt::esp::wait_connected()).await;
     } else {
         crate::esphome::esp::wait_settled().await;
     }
+    #[cfg(not(feature = "mqtt"))]
+    crate::esphome::esp::wait_settled().await;
     #[cfg(not(feature = "esphome-api"))]
     crate::mqtt::esp::wait_connected().await;
 }

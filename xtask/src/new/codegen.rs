@@ -740,10 +740,17 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
         path => format!("path = {:?}", format!("{path}/crates/iotkit")),
     };
-    // Thread builds without Wi-Fi; the ESP32 without `improv-ble`, which does not link on it yet.
+    // Thread builds without Wi-Fi; the ESP32 without `improv-ble`, which does not link on it yet;
+    // the ESPHome API without MQTT.
     let defaults = if p.thread() {
         "default-features = false, "
-    } else if p.board.chip == "esp32" {
+    } else if p.board.chip == "esp32" || p.esphome() {
+        if p.board.chip != "esp32" {
+            app_features.push("improv-ble");
+        }
+        if !p.esphome() {
+            app_features.push("mqtt");
+        }
         app_features.extend(["wifi", "softap", "improv-serial", "console", "ota-push"]);
         "default-features = false, "
     } else {

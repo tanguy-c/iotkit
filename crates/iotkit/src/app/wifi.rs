@@ -17,10 +17,14 @@ use esp_hal::{peripherals::USB_DEVICE, usb::usb_serial_jtag::UsbSerialJtag};
 use log::{error, info, warn};
 use static_cell::StaticCell;
 
+#[cfg(any(feature = "console", feature = "improv-serial"))]
+use super::console;
 #[cfg(feature = "ha-update")]
 use super::update;
-use super::{App, Config, console, spawn};
-use crate::health::{BROKER, HEALTH, NETWORK, RECORDED, Radio, radio_failed, supervisor_task};
+use super::{App, Config, spawn};
+#[cfg(feature = "mqtt")]
+use crate::health::BROKER;
+use crate::health::{HEALTH, NETWORK, RECORDED, Radio, radio_failed, supervisor_task};
 use crate::{Device, Net, SharedStore};
 
 /// The peripherals the kit takes; the app keeps the rest.
@@ -142,6 +146,8 @@ pub(super) async fn start_services(
     #[cfg(not(feature = "ha-update"))]
     let entities = config.entities;
     static DEVICE: StaticCell<Device> = StaticCell::new();
+    // With no link to Home Assistant, the app uses the network on its own.
+    #[cfg_attr(not(any(feature = "mqtt", feature = "esphome-api", feature = "matter-wifi")), allow(unused_variables))]
     let device = &*DEVICE.init(Device {
         name: net.hostname,
         manufacturer: config.manufacturer,
@@ -154,6 +160,7 @@ pub(super) async fn start_services(
         let task = crate::matter::wifi::matter_task(net, store, config.product_name, config.firmware, device);
         spawn(spawner, task);
     }
+    #[cfg(feature = "mqtt")]
     match crate::mqtt::esp::broker(store).await {
         Some(broker) => {
             spawn(spawner, crate::mqtt::esp::mqtt_task(net, device, broker));
@@ -213,12 +220,7 @@ pub(super) fn spawn_provisioning(
     #[cfg(not(feature = "improv-ble"))]
     spawn(spawner, crate::provision::esp::window_task(p));
     #[cfg(feature = "softap")]
-    {
-        spawn(spawner, crate::provision::esp::dhcp_task(p));
-        spawn(spawner, crate::provision::esp::dns_task(p));
-        spawn(spawner, crate::provision::esp::portal_task(p));
-        spawn(spawner, crate::provision::esp::portal_job_task(p));
-    }
+    spawn(spawner, crate::provision::esp::portal_job_task(p));
     if unprovisioned {
         crate::provision::esp::open_window();
     }
@@ -253,6 +255,7 @@ pub(super) fn spawn_console(
 /// The checks of the network over Wi-Fi, on top of [`RECORDED`].
 pub(super) fn require_checks() {
     HEALTH.require(NETWORK);
+    #[cfg(feature = "mqtt")]
     HEALTH.require(BROKER);
     #[cfg(feature = "matter-wifi")]
     HEALTH.require(crate::health::MATTER);
@@ -266,6 +269,7 @@ pub(super) async fn network_check_task(net: Net) {
     HEALTH.pass(NETWORK);
 }
 
+#[cfg(feature = "mqtt")]
 #[embassy_executor::task]
 pub(super) async fn broker_check_task() {
     crate::mqtt::esp::wait_connected().await;

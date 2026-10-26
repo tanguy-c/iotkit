@@ -64,7 +64,7 @@ jobs:
           # MQTT only: no Bluetooth setup (`improv-ble`) on the original ESP32 yet.
           - chip: esp32
             answers: esp32
-            iotkit: iotkit/esp32,iotkit/wifi,iotkit/softap,iotkit/improv-serial,iotkit/console,iotkit/ota-push,iotkit/tls,iotkit/esphome-api
+            iotkit: iotkit/esp32,iotkit/wifi,iotkit/mqtt,iotkit/softap,iotkit/improv-serial,iotkit/console,iotkit/ota-push,iotkit/tls,iotkit/esphome-api
             build: --flash-size 4mb
     env:
       TARGET: xtensa-${{ matrix.chip }}-none-elf

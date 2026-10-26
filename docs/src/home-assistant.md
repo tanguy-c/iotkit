@@ -25,7 +25,8 @@ build time sets it instead, `api-key KEY` changes it). Every entity kind is serv
 `"per-device"` in an answers file).
 
 - Use the API or MQTT, not both: Home Assistant would show the device twice. Without a broker
-  set, MQTT stays off.
+  set, MQTT stays off; without the `mqtt` feature it is not built in at all (about 30 KB of flash
+  and 9 KB of RAM less), as `cargo iotkit new` does for the API.
 - One client at a time (Home Assistant's), on TCP port 6053; logs, services and Bluetooth proxy
   are not served.
 - With `matter-wifi`, Matter's mDNS does not advertise the API: add the device by its address.

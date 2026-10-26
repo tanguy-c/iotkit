@@ -1102,7 +1102,13 @@ mod tests {
             &p,
         )
         .unwrap();
-        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"remember\", \"esphome-api\"]"), "{cargo}");
+        // The defaults but MQTT.
+        assert!(
+            cargo.contains(
+                "default-features = false, features = [\"esp32c6\", \"ha-update\", \"remember\", \"esphome-api\", \"improv-ble\", \"wifi\", \"softap\", \"improv-serial\", \"console\", \"ota-push\"]"
+            ),
+            "{cargo}"
+        );
         let readme = codegen::readme(&p);
         assert!(
             readme.contains("ESPHOME_API_KEY") && !readme.contains(&key) && !readme.contains("mqtt 192"),
@@ -1183,7 +1189,11 @@ mod tests {
         let main = codegen::main_rs(&p);
         assert!(main.contains("start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP)"), "{main}");
         assert!(main.contains("Battery::new(p.ADC1, p.GPIO2, 2.0)") && !main.contains("battery_task"), "{main}");
-        assert!(cargo_toml(&p).contains("features = [\"esp32c6\", \"ha-update\", \"deep-sleep\", \"esphome-api\"]"));
+        assert!(
+            cargo_toml(&p)
+                .contains("features = [\"esp32c6\", \"ha-update\", \"deep-sleep\", \"esphome-api\", \"improv-ble\"")
+        );
+        assert!(!cargo_toml(&p).contains("\"mqtt\""));
         assert!(codegen::readme(&p).contains("knows it sleeps"));
         // The wake-up button and the status LED.
         assert!(main.contains("boot_button: Some(p.GPIO3.into())") && !p.warnings.iter().any(|w| w.contains("wake")));

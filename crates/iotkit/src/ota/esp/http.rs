@@ -1,13 +1,16 @@
 //! Updates over HTTP: the port-80 endpoint (`cargo xtask ota push`), and the installs and
 //! checks Home Assistant and the console ask for.
+// Without `ota-push` no endpoint, and without `ha-update` either, no task installs.
+#![cfg_attr(not(feature = "ota-push"), allow(unused_imports))]
+#![cfg_attr(not(any(feature = "ota-push", feature = "ha-update")), allow(dead_code))]
 
 use core::fmt::Write as _;
 
-use super::{Claim, Firmware, Image, Install, OtaError};
+use super::{Claim, Firmware, Image, Install, OtaError, Sector};
 use crate::config::esp::SharedStore;
 use crate::image::{Manifest, Version};
 use crate::net::{
-    esp::{GetError, Net, Sink, get, get_from},
+    esp::{GetBuffers, GetError, Net, Sink, get_with},
     http,
 };
 #[cfg(any(not(feature = "ha-update"), not(feature = "ota-push")))]
@@ -101,8 +104,11 @@ pub async fn request_check(manifest_url: &str) -> Result<Option<Release>, OtaErr
 
 #[cfg(feature = "ha-update")]
 async fn check(net: Net, fw: Firmware, manifest_url: &str) -> Result<Option<Release>, OtaError> {
+    let mut area = crate::scratch::try_lease().ok_or_else(in_use)?;
     let mut collect = Collect { buf: [0; MAX_MANIFEST], len: 0 };
-    get(net.stack, manifest_url, &mut collect).await.map_err(|e| OtaError::Download(drop_sink(e)))?;
+    get_with(net.stack, manifest_url, 0, &mut collect, &mut area.update().download)
+        .await
+        .map_err(|e| OtaError::Download(drop_sink(e)))?;
     let manifest = Manifest::parse(&collect.buf[..collect.len]).map_err(OtaError::Manifest)?;
     manifest.verify(fw.key).map_err(OtaError::Manifest)?;
     match manifest.check_update(fw.product, fw.version) {
@@ -119,6 +125,7 @@ async fn check(net: Net, fw: Firmware, manifest_url: &str) -> Result<Option<Rele
 
 /// Downloads and installs the update described by the manifest at `manifest_url`. On success
 /// the new firmware is selected (restart to boot it, on trial), or with `stage` kept unselected.
+#[cfg(any(feature = "ota-push", feature = "ha-update"))]
 async fn install(
     net: Net,
     store: &SharedStore,
@@ -130,16 +137,17 @@ async fn install(
     let _ = stage;
     // Before the first await: `REQUEST` is consumed, and a sleepy device must not sleep now.
     let claim = Claim::take()?;
+    let mut area = crate::scratch::try_lease().ok_or_else(in_use)?;
+    let UpdateBuffers { sector, download } = area.update();
     let mut collect = Collect { buf: [0; MAX_MANIFEST], len: 0 };
-    get(net.stack, manifest_url, &mut collect).await.map_err(|e| OtaError::Download(drop_sink(e)))?;
+    get_with(net.stack, manifest_url, 0, &mut collect, download).await.map_err(|e| OtaError::Download(drop_sink(e)))?;
     let manifest = Manifest::parse(&collect.buf[..collect.len]).map_err(OtaError::Manifest)?;
     manifest.verify(fw.key).map_err(OtaError::Manifest)?;
     manifest.check_update(fw.product, fw.version).map_err(OtaError::Manifest)?;
     let url = http::Url::parse(manifest_url)
         .and_then(|base| base.join(manifest.url))
         .map_err(|e| OtaError::Download(GetError::Url(e)))?;
-    let mut sector = [0xff; super::SECTOR];
-    let mut install = Install::begin(claim, Image::Signed(&manifest), &mut sector)?;
+    let mut install = Install::begin(claim, Image::Signed(&manifest), sector)?;
     // Its slot is written over now.
     #[cfg(esp_stage)]
     super::forget_staged(store).await;
@@ -147,7 +155,7 @@ async fn install(
     let started = embassy_time::Instant::now();
     let mut downloaded = Ok(());
     for attempt in 1..=ATTEMPTS {
-        downloaded = get_from(net.stack, &url, install.received(), &mut install).await;
+        downloaded = get_with(net.stack, &url, install.received(), &mut install, download).await;
         match downloaded {
             // A dropped connection: carry on from where it stopped.
             Err(GetError::Truncated { .. } | GetError::Connect | GetError::Io) if attempt < ATTEMPTS => {
@@ -171,6 +179,18 @@ async fn install(
         Err(GetError::Sink(e)) => Err(e),
         Err(e) => Err(OtaError::Download(drop_sink(e))),
     }
+}
+
+/// What an install works in, in the work area ([`crate::scratch`]).
+pub(crate) struct UpdateBuffers {
+    sector: Sector,
+    download: GetBuffers,
+}
+
+/// The work area is taken: refused, not waited for, as a setup window holds it for minutes.
+fn in_use() -> OtaError {
+    log::warn!("ota: refused while a setup window or another download is open");
+    OtaError::InUse
 }
 
 fn drop_sink<E>(e: GetError<E>) -> GetError<()> {
@@ -223,6 +243,7 @@ impl Sink for Install<'_> {
 /// HTTP endpoint on port 80, and the installs of [`request_install`]:
 /// - `GET /` answers `<product> <version>`;
 /// - `GET /ota?manifest=<url>` installs that update, answers the result, then restarts.
+#[cfg(feature = "ota-push")]
 #[embassy_executor::task]
 pub async fn serve_task(net: Net, store: &'static SharedStore, fw: Firmware) {
     let (mut rx, mut tx) = ([0u8; 1024], [0u8; 512]);
@@ -294,7 +315,10 @@ pub async fn serve_task(net: Net, store: &'static SharedStore, fw: Firmware) {
                             Err(e) => {
                                 log::error!("ota: {e}");
                                 let _ = writeln!(reply, "{e}");
-                                ("500 Internal Server Error", false)
+                                match e {
+                                    OtaError::Busy | OtaError::InUse => ("503 Service Unavailable", false),
+                                    _ => ("500 Internal Server Error", false),
+                                }
                             }
                         }
                     }

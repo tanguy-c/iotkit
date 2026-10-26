@@ -75,6 +75,8 @@ compile_error!(
 #[cfg(all(feature = "esp32", feature = "deep-sleep"))]
 compile_error!("iotkit: `deep-sleep` is not supported on the original ESP32 yet");
 // A wake-up is a restart: every state would be read and written to flash at each one.
+#[cfg(all(feature = "deep-sleep", not(any(feature = "mqtt", feature = "esphome-api"))))]
+compile_error!("iotkit: `deep-sleep` reports over `mqtt` or `esphome-api`: enable one");
 #[cfg(all(feature = "remember", feature = "deep-sleep"))]
 compile_error!("iotkit: `remember` is not for `deep-sleep` devices yet");
 #[cfg(all(feature = "esp32s3", feature = "matter-wifi"))]
@@ -128,6 +130,8 @@ pub mod ota;
 pub mod provision;
 #[cfg(feature = "remember")]
 pub mod remember;
+#[cfg(esp_wifi)]
+mod scratch;
 pub mod status;
 
 #[cfg(any(esp_wifi, all(feature = "_esp", feature = "matter-thread")))]

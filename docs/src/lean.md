@@ -7,6 +7,7 @@ without it: `default-features = false`, then list the ones to keep.
 
 | Feature | What | Without it |
 | --- | --- | --- |
+| `mqtt` | Home Assistant over MQTT | about 30 KB less flash and 9 KB less RAM; the ESPHome API or Matter as the link |
 | `improv-ble` | Wi-Fi setup over Bluetooth (Improv) | no Bluetooth stack: about 300 KB less flash; no `Board::bt` |
 | `softap` | the setup access point and its page | no portal, DHCP or DNS server |
 | `improv-serial` | Wi-Fi setup over USB (ESP Web Tools) | |
@@ -17,13 +18,18 @@ Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `sma
 `esphome-api` ([ESPHome API](home-assistant.md#esphome-api)), `panic-handler`.
 
 ```toml
-iotkit = { git = "https://github.com/tanguy-c/iotkit", default-features = false, features = ["esp32c6", "wifi", "improv-serial", "ota-push"] }
+iotkit = { git = "https://github.com/tanguy-c/iotkit", default-features = false, features = ["esp32c6", "wifi", "mqtt", "improv-serial", "ota-push"] }
 ```
 
 With no setup path left (`improv-ble`, `softap`, `improv-serial`), the build needs `WIFI_SSID` at
-build time. `apps/lean` keeps `improv-serial` and `ota-push`: about 350 KB less flash than
+build time. `apps/lean` keeps `mqtt`, `improv-serial` and `ota-push`: about 350 KB less flash than
 `apps/devkit`. Unused components and entity kinds are not linked either; the repository's
 `tools/link-check.sh` checks it.
+
+A download, an update's install and the setup access point share one work area, reserved once at
+the size of the largest (about 21 KB; 41 KB with `tls`). An update asked for while a setup window
+is open is refused (`ota push` answers 503: try again once the window closes); a window opened
+during an update opens once it is over.
 
 ## TLS
 

@@ -8,15 +8,18 @@
 | --- | --- |
 | `info` | version, uptime, boot and crash counters, last crash, last update |
 | `net` | host name and address |
+| `mem` | heap and stack use, now and at their fullest since boot |
 | `provision` | open a 10-minute setup window |
 | `ota URL` | install the update whose manifest is at URL |
-| `mqtt [HOST[:PORT] [USER PASS]]` | the broker, or set it (then restarts) |
+| `mqtt [HOST[:PORT] [USER PASS]]` | the broker, or set it (then restarts) (`mqtt`) |
 | `update-url [URL]` | where updates from Home Assistant come from (`ha-update`) |
 | `api-key [KEY]` | the ESPHome API's encryption key, or set it (then restarts) (`esphome-api`) |
 | `matter [pair \| reset]` | pairing codes, a pairing window, forget pairings (`matter-wifi`) |
 | `panic`, `hang`, `reboot`, `factory-reset` | failures on purpose, restart, erase everything |
 
-Apps add their own commands with `Config::console`.
+Apps add their own commands with `Config::console`. `mem` reads
+`iotkit::diag::esp::memory()` (with `console`), which an app can publish too: the stack's deepest use is found
+from a pattern painted at boot, the heap's fullest sampled every second.
 
 ## Logs
 
