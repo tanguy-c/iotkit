@@ -94,7 +94,7 @@ impl fmt::Display for OtaError {
         match self {
             OtaError::Busy => f.write_str("an update is running or on trial"),
             #[cfg(esp_wifi)]
-            OtaError::InUse => f.write_str("a setup window or another download is open: try again once it is over"),
+            OtaError::InUse => f.write_str("a setup window or download is open: try later"),
             OtaError::NoSlots => f.write_str("no OTA partitions (see partitions.csv)"),
             #[cfg(esp_wifi)]
             OtaError::Download(e) => write!(f, "download failed: {e:?}"),
