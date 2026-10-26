@@ -15,6 +15,8 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   while a pattern plays) and `components::Overlay` (for an app driving its LED itself). devkit,
   showcase, thread-light, the template and `cargo iotkit new` projects show the status on the
   board's RGB LED; `status = "auto"` is the new default in answers files.
+- A short press of the setup button closes an open setup window (once a network is stored) or
+  Matter pairing window (once paired), instead of reaching the app.
 - `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
   fullest.
 

@@ -900,7 +900,7 @@ pub fn readme(p: &Project) -> String {
     };
     let _ = writeln!(
         s,
-        "\n{button} is the setup button: hold it 3 s to open {}, 10 s to factory reset.",
+        "\n{button} is the setup button: hold it 3 s to open {}, press it to close it, 10 s to factory reset.",
         if p.thread() { "a Matter pairing window" } else { "the setup window" }
     );
     if p.sleepy() {

@@ -74,7 +74,8 @@ With no network stored, the device opens a setup window. Give it your network an
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
 characters. To change it later, hold **BOOT** 3 s, or type `provision` on the USB console;
-the window stays open 10 minutes. Hold **BOOT** 10 s to erase every setting and Matter pairing.
+the window stays open 10 minutes, or until a short press of **BOOT** closes it (once a network is
+stored). Hold **BOOT** 10 s to erase every setting and Matter pairing.
 
 > During a setup window anyone in range can give the device a network. Open it only when you
 > need it.

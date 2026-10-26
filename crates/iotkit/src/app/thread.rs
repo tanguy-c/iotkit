@@ -105,11 +105,13 @@ pub async fn start(spawner: Spawner, board: Board, config: &'static Config) -> A
 }
 
 /// BOOT button (active low): a pairing window, or a factory reset that forgets every setting and
-/// Matter pairing. A short press is the app's ([`wait_press`](crate::provision::gesture::wait_press)).
+/// Matter pairing. A short press closes an open pairing window once paired; otherwise it is the
+/// app's ([`wait_press`](crate::provision::gesture::wait_press)).
 #[embassy_executor::task]
 async fn button_task(mut button: Input<'static>, store: &'static SharedStore) {
     loop {
         match crate::provision::gesture::next(&mut button, None).await {
+            Gesture::Press if crate::matter::common::pairing() => crate::matter::common::close_pairing_window(),
             Gesture::Press => crate::provision::gesture::pressed(),
             Gesture::Provision => {
                 info!("BOOT held {} s: pairing window", PROVISION_MS / 1000);

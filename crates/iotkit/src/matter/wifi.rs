@@ -202,6 +202,13 @@ async fn run<C: Crypto>(
                     Ok(()) => log::info!("matter: pairing window open for {} min", PAIRING_WINDOW_S / 60),
                     Err(e) => log::warn!("matter: cannot open a pairing window: {e:?}"),
                 },
+                Request::Close if !stack.matter().has_fabrics() => {
+                    log::info!("matter: not paired yet, the pairing window stays open")
+                }
+                Request::Close => match stack.matter().close_comm_window(&()) {
+                    Ok(_) => log::info!("matter: pairing window closed"),
+                    Err(e) => log::warn!("matter: cannot close the pairing window: {e:?}"),
+                },
                 Request::Reset => {
                     log::warn!("matter: forgetting every pairing");
                     let _ = crate::config::esp::with(|flash| flash.erase(range.start, range.end));
