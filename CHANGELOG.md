@@ -3,8 +3,10 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
-## Unreleased
+## 0.3.0 (2026-10-26)
 
+- **Breaking**, only for an app with its own entity type: `model::Meta` has a `remember` field
+  ([Upgrading](docs/src/upgrading.md)).
 - Entities that keep their state across restarts (`remember` feature): a switch, light, number
   or select built with `.remember()` is saved to flash once it settles and handed back to the app
   as its first command ([Entities](docs/src/entities.md#keeping-their-state)). `cargo iotkit new`
@@ -17,6 +19,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   wake another task instead), so an update over Matter is kept, not rolled back after 30 minutes.
 - Docs: the C6's LP core overwrites iotkit's RTC records; not supported yet
   ([Battery devices](docs/src/battery.md#the-c6s-low-power-core-not-with-iotkit-yet)).
+- Matter's crypto: `crypto-bigint` 0.7.9 and `ctutils` 0.4.6, for operations meant to be
+  constant-time that were not (RUSTSEC-2026-0387, RUSTSEC-2026-0385). Matter over Wi-Fi grows by
+  about 2.3 KB.
 
 ## 0.2.0 (2026-10-25)
 
