@@ -23,7 +23,8 @@ It asks, in plain words:
 
 - **what it is** (its name in Home Assistant) and your name or brand;
 - **the board**: type to search (a maker, a chip, a name). Espressif's C6, C3, C5 and S3 DevKits,
-  the ESP32-DevKitC, Seeed's XIAO ESP32-C6, C3 and S3, or another board with one of these chips.
+  the ESP32-DevKitC, boards from Seeed (XIAO), M5Stack, Adafruit, Waveshare and LOLIN, or another
+  board with one of these chips.
   Each board's LEDs and quirks come with it (the XIAO ESP32-C6's antenna switch is set in `main`);
   [`boards/`](https://github.com/tanguy-c/iotkit/tree/main/boards) has one file per board, and
   another board is one more file;

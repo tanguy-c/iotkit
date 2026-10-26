@@ -22,7 +22,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - `cargo iotkit new` reads its boards from `boards/`, one file per board with its sources: the
   LED (RGB or single, with its polarity), the BOOT pin, pins to set at start. New: the
   ESP32-C6-DevKitM-1, ESP32-C3-DevKitC-02, ESP32-S3-DevKitC-1 v1.0, ESP32-S3-DevKitM-1 and
-  Seeed's XIAO ESP32-C6 (its antenna switch: without it Wi-Fi does not connect), C3 and S3. The
+  Seeed's XIAO ESP32-C6 (its antenna switch: without it Wi-Fi does not connect), C3 and S3,
+  M5Stack's NanoC6 and AtomS3 Lite, Adafruit's QT Py ESP32-C3 and S3 and Feather ESP32-C6,
+  Waveshare's ESP32-S3-Zero and LOLIN's S3 Mini (their RGB LEDs' power pins set in `main`). The
   board question is searched as you type; `status_active = "low"` for a LED lit by a low level.
 - `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
   fullest.
