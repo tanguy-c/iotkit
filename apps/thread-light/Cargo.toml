@@ -15,7 +15,7 @@ esp32h2 = ["esp-hal/esp32h2", "esp-rtos/esp32h2", "esp-hal-smartled/esp32h2", "e
 
 [dependencies]
 # A path, not `workspace = true`: older cargo cannot turn the default features off over it.
-iotkit = { path = "../../crates/iotkit", default-features = false, features = ["matter-thread", "matter-ota", "remember"] }
+iotkit = { path = "../../crates/iotkit", default-features = false, features = ["matter-thread", "matter-ota", "smartled", "remember"] }
 
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }

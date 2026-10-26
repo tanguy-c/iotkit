@@ -9,13 +9,11 @@
 #![no_main]
 
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
 use embassy_time::Timer;
 use esp_hal::{Async, rmt::Rmt, time::Rate};
 use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit::{Board, Config, Light, LightState, PublicKey};
-use log::warn;
-use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
+use iotkit::{Board, Config, Light, PublicKey};
+use smart_leds::RGB8;
 
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
 static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../../../keys/ota.pub"));
@@ -57,19 +55,9 @@ async fn main(spawner: Spawner) -> ! {
 }
 
 /// The status LED, as a light over Matter; a short press of BOOT toggles it.
+/// The status shows over it (`iotkit::status`): blue blinking while it waits to be set up.
 #[embassy_executor::task]
-async fn led_task(mut led: Led) {
-    // Dark until its saved state comes back (or a command): brightness and colour for "on".
-    let mut state = LightState { on: false, brightness: 20, rgb: [0, 128, 255] };
-    loop {
-        LED.set(state);
-        let color = if state.on { RGB8::new(state.rgb[0], state.rgb[1], state.rgb[2]) } else { RGB8::default() };
-        if let Err(e) = led.write(brightness([color].into_iter(), state.brightness)).await {
-            warn!("LED write failed: {e:?}");
-        }
-        state = match select(LED.wait_command(), iotkit::provision::gesture::wait_press()).await {
-            Either::First(wanted) => wanted,
-            Either::Second(()) => LightState { on: !state.on, ..state },
-        };
-    }
+async fn led_task(led: Led) {
+    // `Show::All` while developing; `Show::Pairing` for a release: only to set it up.
+    iotkit::components::rgb_status_light(&LED, led, 1, iotkit::status::Show::All, true).await
 }

@@ -21,6 +21,7 @@ spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default()
 | `dimmer` | `Light` | a PWM channel; the duty follows brightness² |
 | `fan` | `Fan` | a PWM channel; the duty is the speed |
 | `rgb_light` | `Light` | WS2812 LEDs (feature `smartled`, `esp-hal-smartled` on an RMT channel) |
+| `rgb_status_light` | `Light` | the same, showing the [status](#status-led) over the light |
 | `poll` | `Sensor` | any read function, every interval, through filters |
 
 `cargo iotkit new` uses them where it can, and leaves a `TODO` with hints for the other parts.
@@ -36,7 +37,7 @@ spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default()
 
 A LED shows one family or both (`status::Show::Pairing`, `Diagnostic` or `All`, pairing first),
 with a blink pattern per status (`components::pattern`). On a battery device, `Show::Pairing`
-keeps it dark at each wake-up and lights it only to set the device up. Two parts show it:
+keeps it dark at each wake-up and lights it only to set the device up. Three parts show it:
 
 ```rust,ignore
 #[embassy_executor::task]
@@ -45,13 +46,22 @@ async fn status_task(led: Output<'static>) {
 }
 // or the board's WS2812 (feature `smartled`), in colours (`components::color`):
 //     components::status_rgb(rmt_leds, 1, 32, Show::Pairing).await
+// or the board's WS2812 as a light that shows the status over it (`true`: BOOT toggles it):
+//     components::rgb_status_light(&LIGHT, rmt_leds, 1, Show::All, true).await
 ```
+
+`rgb_status_light` shows a status while its pattern plays (`Online` once, `Pairing` until the
+window closes), at `components::STATUS_LEVEL` brightness, and the light otherwise. Every app of the
+repository with an RGB LED shows the status this way, and `cargo iotkit new` does by default.
 
 To show it another way, follow it: `let mut status = iotkit::status::watch(Show::All);` then
 `status.next().await` in a loop (at once, then at each change; `None` when nothing of the family
-is to be shown; up to 4 watchers). Both parts leave the LED dark between patterns and before a
+is to be shown; up to 4 watchers). For a LED that does something else too, `components::Overlay`
+gives each step of the pattern: `Frame::Status { status, lit }`, or `Frame::Own` for the app's
+content (`apps/devkit` shows Improv's "identify", then the status, then its light). Both parts leave the LED dark between patterns and before a
 deep sleep or restart, so a battery device sleeps; a WS2812 still draws about 1 mA dark.
-`cargo iotkit new` asks for one (`status = "rgb"` or `"led"` with `status_pin`).
+`cargo iotkit new` asks for one: `status = "auto"` (the default: the board's RGB LED, over the
+light if it is one, unless on battery), `"rgb"`, `"led"` with `status_pin`, or `"off"`.
 
 ## Filters
 

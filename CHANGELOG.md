@@ -11,6 +11,10 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - The setup access point's servers, downloads and update installs share one work area, only held
   while they run: 11 KB more free RAM on devkit. An update asked for during a setup window is
   refused (`ota push`: HTTP 503); a window opened during an update waits for it.
+- The status over a light: `components::rgb_status_light` (an RGB light that shows the status
+  while a pattern plays) and `components::Overlay` (for an app driving its LED itself). devkit,
+  showcase, thread-light, the template and `cargo iotkit new` projects show the status on the
+  board's RGB LED; `status = "auto"` is the new default in answers files.
 - `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
   fullest.
 

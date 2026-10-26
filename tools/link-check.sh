@@ -30,8 +30,8 @@ ble-beacon;-p ble-beacon'
 # what;where (syms: `nm -C`, strings: string literals; inlined generics leave no symbol);pattern
 # (extended regex);absent from;present in (`-`: no build has it, for code that must never return)
 rules='unused entity kinds;syms;<iotkit_core::model::appliances::(Cover|Valve|Lock|Fan|Climate) as iotkit_core::model::Entity>;devkit;showcase
-unused components;strings;rgb_light write failed;devkit;showcase
-unused status LEDs;syms;iotkit::components::indicator::;devkit;sleepy
+unused components;strings;rgb_(status_)?light write failed;devkit;showcase
+unused status LEDs;syms;iotkit::components::indicator::;lean;sleepy
 no scheduled updates: no clock;syms;iotkit::clock::;sleepy;sleepy-esphome
 no improv-ble: no Bluetooth stack;syms;r_ble_ll_|trouble_host;lean;devkit
 no console: no commands;strings;Type .help. and press Enter;lean;devkit
