@@ -3,8 +3,10 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
-## Unreleased
+## 0.3.0 (2026-10-26)
 
+- **Breaking**, only for an app with its own entity type: `model::Meta` has a `remember` field
+  ([Upgrading](docs/src/upgrading.md)).
 - Entities that keep their state across restarts (`remember` feature): a switch, light, number
   or select built with `.remember()` is saved to flash once it settles and handed back to the app
   as its first command ([Entities](docs/src/entities.md#keeping-their-state)). `cargo iotkit new`

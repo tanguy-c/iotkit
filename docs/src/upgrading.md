@@ -3,6 +3,21 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
+## To 0.3 (from 0.2)
+
+### `Meta` has a `remember` field
+
+Only for an app with its own entity type (`impl Entity`), whose `Meta` lists every field; the
+entity builders need no change. Add the field:
+
+```rust
+Meta {
+    // ...
+    precision: None,
+    remember: false, // add this line
+}
+```
+
 ## To 0.2 (from 0.1)
 
 ### `matter_task` takes the firmware
