@@ -6,14 +6,15 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 ## Layout
 
 - `crates/iotkit-core`: no chip, host-tested: `model`, `config` (the store), `image` (the
-  re-exported `iotkit-image`), `runtime` (health check).
+  re-exported `iotkit-image`), `runtime` (health check), `remember` (saved entity states).
 - `crates/iotkit-image`: signed update images and manifests, shared by the device and the CLI
   (which signs with it).
 - `crates/iotkit`: what apps depend on. Modules `config::esp`, `diag`, `health` (the checks and
   the supervisor that keeps or rolls back an update), `net`, `ota` (the engine in `esp.rs`, HTTP in
   `esp/http.rs`), `provision`, `mqtt` (Home Assistant discovery, `ha.rs`), `esphome` (the ESPHome
   native API, `api.rs`), `matter` (`ota.rs`: the OTA Requestor, `matter-ota`; `icd.rs`: on
-  battery, `matter-icd`, its sleepy Thread driver in `icd/thread.rs`), `components` (ready-made
+  battery, `matter-icd`, its sleepy Thread driver in `icd/thread.rs`), `remember` (restores
+  and saves `.remember()` states, `remember`), `components` (ready-made
   parts over embedded-hal); `app.rs` (`Config`, `init!`; `start` and `Board` in
   `app/wifi.rs` or `app/thread.rs`), re-exported at the root. Each module's chip code is in its
   `esp.rs`, behind `feature = "_esp"` or, on the Wi-Fi side, `cfg(esp_wifi)` (a chip and `wifi`),

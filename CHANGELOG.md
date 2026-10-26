@@ -5,6 +5,11 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
 ## Unreleased
 
+- Entities that keep their state across restarts (`remember` feature): a switch, light, number
+  or select built with `.remember()` is saved to flash once it settles and handed back to the app
+  as its first command ([Entities](docs/src/entities.md#keeping-their-state)). `cargo iotkit new`
+  projects remember their status LED, and write it before `start` (it no longer shows a reset's
+  green for two seconds, then the default colour); `apps/thread-light` and `apps/showcase` use it.
 - MQTT number commands no longer link core's float parser: about 17 KB less code and constants.
 - A connected station waits for esp-radio's disconnect event instead of checking its link every
   2 s (every 30 s, for a missed event; the signal strength too).

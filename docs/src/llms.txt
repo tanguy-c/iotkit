@@ -10,7 +10,7 @@ Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `io
 - [Getting started](https://tanguy-c.github.io/iotkit/getting-started.html): tools, `cargo iotkit new`, first flash, Wi-Fi setup
 - [Coming from ESPHome](https://tanguy-c.github.io/iotkit/coming-from-esphome.html): each YAML block and its iotkit code
 - [Install from the browser](https://tanguy-c.github.io/iotkit/install-from-browser.html): ESP Web Tools page from `cargo iotkit build`
-- [Entities and settings](https://tanguy-c.github.io/iotkit/entities.html): entity kinds, DeviceClass, Unit, Config, Setting
+- [Entities and settings](https://tanguy-c.github.io/iotkit/entities.html): entity kinds, keeping their state (`.remember()`), DeviceClass, Unit, Config, Setting
 - [Components and drivers](https://tanguy-c.github.io/iotkit/components.html): relay, binary_input, button, dimmer, fan, rgb_light, poll, filters, any embedded-hal driver; status LEDs (`status_led`, `status_rgb`, `iotkit::status`)
 - [Home Assistant and Matter](https://tanguy-c.github.io/iotkit/home-assistant.html): the ESPHome API, MQTT discovery and topics, Matter device types
 - [Updates](https://tanguy-c.github.io/iotkit/updates.html): signed OTA, rollback, the health check per network, updates from Home Assistant and over Matter (Thread), keys
