@@ -1,4 +1,4 @@
-label    = "Seeed Studio XIAO ESP32-C6 (ESP32-C6, 4 MB; Wi-Fi 6, tiny; no Matter in 4 MB)"
+label    = "Seeed Studio XIAO ESP32-C6 (ESP32-C6, 4 MB; Wi-Fi 6, tiny; Matter over Thread, not Wi-Fi, in 4 MB)"
 chip     = "esp32c6"
 model    = "XIAO ESP32-C6"
 flash    = "4mb"

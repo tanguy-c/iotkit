@@ -1,5 +1,5 @@
 # Its NeoPixel shares GPIO9 with BOOT, the setup button: the red LED shows the status instead.
-label    = "Adafruit Feather ESP32-C6 (ESP32-C6, 4 MB; battery charger; no Matter in 4 MB)"
+label    = "Adafruit Feather ESP32-C6 (ESP32-C6, 4 MB; battery charger; Matter over Thread, not Wi-Fi, in 4 MB)"
 chip     = "esp32c6"
 model    = "Adafruit Feather ESP32-C6"
 flash    = "4mb"

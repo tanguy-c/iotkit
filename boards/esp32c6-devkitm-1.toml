@@ -1,4 +1,4 @@
-label    = "Espressif ESP32-C6-DevKitM-1 (ESP32-C6, 4 MB; Wi-Fi 6, no Matter in 4 MB)"
+label    = "Espressif ESP32-C6-DevKitM-1 (ESP32-C6, 4 MB; Wi-Fi 6, Matter over Thread, not Wi-Fi, in 4 MB)"
 chip     = "esp32c6"
 model    = "ESP32-C6-DevKitM-1"
 flash    = "4mb"

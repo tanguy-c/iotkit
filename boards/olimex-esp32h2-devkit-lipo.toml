@@ -1,0 +1,12 @@
+# One source (Olimex's schematic): the green LED from 3.3 V into GPIO8, lit by a low level.
+label    = "Olimex ESP32-H2-DevKit-LiPo (ESP32-H2, 4 MB; Thread only: Matter over Thread; LiPo charger)"
+chip     = "esp32h2"
+model    = "Olimex ESP32-H2-DevKit-LiPo"
+flash    = "4mb"
+boot_pin = 9
+order    = 160
+led      = { kind = "plain", pin = 8, active = "low" }
+sources  = [
+    "https://www.olimex.com/Products/IoT/ESP32-H2/ESP32-H2-DevKit-LiPo/open-source-hardware",
+    "https://github.com/OLIMEX/ESP32-H2-DevKit-LiPo/blob/main/HARDWARE/ESP32-H2-DevKit-Lipo-Rev.A/ESP32-H2-DevKit-LiPo_Rev_A.pdf",
+]

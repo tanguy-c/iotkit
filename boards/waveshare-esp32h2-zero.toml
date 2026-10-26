@@ -1,0 +1,11 @@
+label    = "Waveshare ESP32-H2-Zero (ESP32-H2, 4 MB; Thread only: Matter over Thread; tiny, an RGB LED)"
+chip     = "esp32h2"
+model    = "Waveshare ESP32-H2-Zero"
+flash    = "4mb"
+boot_pin = 9
+order    = 122
+led      = { kind = "rgb", pin = 8 }
+sources  = [
+    "https://www.waveshare.com/wiki/ESP32-H2-Zero",
+    "https://files.waveshare.com/wiki/ESP32-H2-Zero/ESP32-H2-Zero-Schematic.pdf",
+]

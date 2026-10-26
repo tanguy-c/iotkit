@@ -22,10 +22,10 @@ cargo iotkit new garden-sensor
 It asks, in plain words:
 
 - **what it is** (its name in Home Assistant) and your name or brand;
-- **the board**: type to search (a maker, a chip, a name). Espressif's C6, C3, C5 and S3 DevKits,
-  the ESP32-DevKitC, boards from Seeed (XIAO), M5Stack, Adafruit, Waveshare, LOLIN, Unexpected Maker
-  and Arduino, or another board with one of these chips. Each board's LEDs and quirks come with it
-  (the XIAO ESP32-C6's antenna switch is set in `main`);
+- **the board**: type to search (a maker, a chip, a name). Espressif's C6, C3, C5, S3 and H2
+  DevKits, the ESP32-DevKitC, boards from Seeed (XIAO), M5Stack, Adafruit, Waveshare, LOLIN,
+  Unexpected Maker, Arduino and Olimex, or another board with one of these chips. Each board's LEDs
+  and quirks come with it (the XIAO ESP32-C6's antenna switch is set in `main`);
   [`boards/`](https://github.com/tanguy-c/iotkit/tree/main/boards) has one file per board, and
   another board is one more file;
 - **the power**: plugged in, or on battery (wakes up, reports, sleeps; with the battery level if
@@ -62,7 +62,7 @@ cargo iotkit flash --release      # or `cargo run --release`: flash, then the se
 
 If the board is not detected, hold **BOOT**, tap **RESET**, release **BOOT**. A USB flash boots
 the first app slot. `partitions.csv` is for 8 MB of flash (two 3.9 MB app slots, needed for
-Matter); `partitions-4mb.csv` fits 4 MB boards without Matter. Or [install from the
+Matter over Wi-Fi); `partitions-4mb.csv` fits 4 MB boards, Matter over Thread included. Or [install from the
 browser](install-from-browser.md).
 
 ## Join Wi-Fi

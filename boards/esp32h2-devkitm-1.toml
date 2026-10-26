@@ -1,0 +1,12 @@
+label    = "Espressif ESP32-H2-DevKitM-1 (ESP32-H2, 4 MB; Thread only: Matter over Thread)"
+chip     = "esp32h2"
+model    = "ESP32-H2-DevKitM-1"
+flash    = "4mb"
+boot_pin = 9
+order    = 35
+led      = { kind = "rgb", pin = 8 }
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32h2/esp32-h2-devkitm-1/user_guide.html",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/espressif/esp32h2_devkitm/esp32h2_devkitm.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/esp32h2/pins_arduino.h",
+]
