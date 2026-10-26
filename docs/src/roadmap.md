@@ -5,8 +5,8 @@ today.
 
 ## Not in 0.1
 
-- **Hardware tests** beyond the ESP32-C6: the C3, C5, S3 and original ESP32; Matter over Thread
-  with a border router; the current drawn by Matter on battery (`matter-icd`).
+- **Hardware tests** beyond the ESP32-C6: the C3, C5, S3 and original ESP32; the current drawn by
+  Matter on battery (`matter-icd`).
 - **Publishing on crates.io**, once rs-matter-embassy is released (iotkit depends on it from git).
 
 ## Next
@@ -19,5 +19,7 @@ today.
   (Check-In, rs-matter's ICD Management cluster), and a battery level over Thread; Matter over
   Wi-Fi on battery (`matter-icd`), with the esp-radio release that keeps power save working on
   the C6.
+- **The C6's LP core**: iotkit's RTC records moved out of the LP program's way, so an app can
+  count pulses or watch a sensor while the chip sleeps ([why not yet](battery.md#the-c6s-low-power-core-not-with-iotkit-yet)).
 - **Components**: drivers for common sensors (SHT4x, BME280, SCD4x, BH1750, DS18B20), each a good
   first issue ([wrapping a driver](components.md)).

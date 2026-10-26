@@ -9,7 +9,9 @@
 | `ota push`: name not resolved | Use the device's address (`net` on the console) |
 | `ota push`: connection timed out | The device is not on Wi-Fi yet, or on another network |
 | Update refused | Another signing key, product or chip; a version not newer, or the running one older than `--min-version`; an image too big for the slot; "on trial": the last update is not healthy yet, wait for it to be kept or rolled back |
+| No crash report, no early rollback, slow deep-sleep wake-ups, with code on the C6's LP core | The LP core overwrites iotkit's RTC memory: [not supported yet](battery.md#the-c6s-low-power-core-not-with-iotkit-yet) |
 | Device keeps rolling back | The health check never passes: read the log over USB |
+| Update over Matter fails: `CASE to … failed: TxTimeout`, `No valid session found` in the log | The provider's computer has two IPv6 addresses (global and ULA) and answers from the other one; rs-matter only takes the address it called. Route the Thread prefix from that address: `sudo ip -6 route add <prefix>/64 via <border router> dev <interface> src <address> metric 100` (`ip -6 route` lists the prefix and router; the address is in the CASE line) |
 | Setup page cannot join | Wrong password or a 5 GHz-only network; some phone hotspots refuse for a minute after a wrong password |
 | MQTT keeps reconnecting | Broker address (`mqtt` on the console), login, or a weak Wi-Fi signal |
 | Browser install finds no port | Chrome or Edge on a computer, over HTTPS or localhost; a data USB cable |

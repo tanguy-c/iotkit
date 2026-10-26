@@ -241,6 +241,10 @@ pub async fn access_point(on: bool) {
     COMMANDS.send(Command::AccessPoint(on)).await;
 }
 
+/// How often a connected station checks its link and signal: rarely, as the disconnect event
+/// comes at once. On battery (`matter-icd`) power saving follows the setup window within it.
+const LINK_POLL: Duration = if cfg!(feature = "matter-icd") { Duration::from_secs(2) } else { Duration::from_secs(30) };
+
 #[embassy_executor::task(pool_size = 2)]
 async fn runner_task(mut runner: Runner<'static, Interface>) -> ! {
     runner.run().await
@@ -289,8 +293,9 @@ async fn wifi_task(
             }
         }
         backoff.succeeded();
-        // Connected: stay until the link drops or a command comes. The state is polled: waiting
-        // for esp-radio's disconnect event sometimes never returned.
+        // Connected: stay until the link drops or a command comes. esp-radio's disconnect event
+        // ends the wait at once; the poll catches a disconnection that came before the wait
+        // subscribed to it (esp-radio checks, then subscribes).
         #[cfg(feature = "matter-icd")]
         let mut saving = None;
         let dropped = loop {
@@ -302,7 +307,9 @@ async fn wifi_task(
             if let Ok(rssi) = w.controller.rssi() {
                 RSSI.store(rssi, Ordering::Relaxed);
             }
-            if let Either::Second(c) = select(Timer::after_secs(2), COMMANDS.receive()).await {
+            let woke =
+                select3(w.controller.wait_for_disconnect_async(), Timer::after(LINK_POLL), COMMANDS.receive()).await;
+            if let Either3::Third(c) = woke {
                 connected = w.command(c).await;
                 break false;
             }

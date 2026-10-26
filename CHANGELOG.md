@@ -3,6 +3,16 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
+## Unreleased
+
+- MQTT number commands no longer link core's float parser: about 17 KB less code and constants.
+- A connected station waits for esp-radio's disconnect event instead of checking its link every
+  2 s (every 30 s, for a missed event; the signal strength too).
+- Matter over Thread: a paired device now passes its network health check (the attach could
+  wake another task instead), so an update over Matter is kept, not rolled back after 30 minutes.
+- Docs: the C6's LP core overwrites iotkit's RTC records; not supported yet
+  ([Battery devices](docs/src/battery.md#the-c6s-low-power-core-not-with-iotkit-yet)).
+
 ## 0.2.0 (2026-10-25)
 
 - **Breaking:** `init!` takes the flash (`Board` has no `flash` field) and `start` needs it;

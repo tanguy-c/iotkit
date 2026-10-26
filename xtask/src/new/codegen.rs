@@ -1028,6 +1028,11 @@ Pins and wiring: the table in README.md. {}
             "Home Assistant over the ESPHome API (`esphome-api` feature), not MQTT: never set a broker as well.\n",
         );
     }
+    if p.board.chip == "esp32c6" {
+        s.push_str(
+            "Never start the C6's LP core (`LpCore`, `load_lp_code!`): it overwrites iotkit's RTC records (rollback, crash record).\n",
+        );
+    }
     if p.board.xtensa() {
         s.push_str("Xtensa chip: the `esp` toolchain; run `. ~/export-esp.sh` in each new shell before cargo.\n");
     }

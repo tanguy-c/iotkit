@@ -501,6 +501,82 @@ struct Rgb {
     b: u8,
 }
 
+/// A decimal number as `str::parse::<f32>` reads it (`-1.5`, `+2`, `.5`, `1e3`; not `inf` or
+/// `nan`), without core's exact parser and its tables (about 16 KB of flash). Exact to the
+/// 19 digits it keeps, then within an ulp of `parse` from the f64 scaling: plenty for a
+/// setting that is clamped and stepped.
+fn decimal(s: &str) -> Option<f32> {
+    // Powers of ten exact in an f64.
+    const POW10: [f64; 23] = [
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
+        1e20, 1e21, 1e22,
+    ];
+    let b = s.as_bytes();
+    let mut i = 0;
+    let negative = match b.first() {
+        Some(b'-') => {
+            i = 1;
+            true
+        }
+        Some(b'+') => {
+            i = 1;
+            false
+        }
+        _ => false,
+    };
+    let (mut mantissa, mut exp, mut digits, mut fraction) = (0u64, 0i32, 0u32, false);
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'0'..=b'9' => {
+                digits += 1;
+                if mantissa < 1_000_000_000_000_000_000 {
+                    mantissa = mantissa * 10 + u64::from(c - b'0');
+                    exp -= i32::from(fraction);
+                } else {
+                    exp += i32::from(!fraction);
+                }
+            }
+            b'.' if !fraction => fraction = true,
+            _ => break,
+        }
+        i += 1;
+    }
+    if digits == 0 {
+        return None;
+    }
+    if let Some(b'e' | b'E') = b.get(i) {
+        let (sign, start) = match b.get(i + 1) {
+            Some(b'-') => (-1, i + 2),
+            Some(b'+') => (1, i + 2),
+            _ => (1, i + 1),
+        };
+        let e = &b[start..];
+        if e.is_empty() || !e.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        let e = e.iter().fold(0i32, |n, d| n.saturating_mul(10).saturating_add(i32::from(d - b'0')));
+        exp = exp.saturating_add(sign * e);
+        i = b.len();
+    }
+    if i != b.len() {
+        return None;
+    }
+    let mut v = mantissa as f64;
+    if v != 0.0 {
+        while exp > 0 && v.is_finite() {
+            let step = exp.min(22);
+            v *= POW10[step as usize];
+            exp -= step;
+        }
+        while exp < 0 && v != 0.0 {
+            let step = (-exp).min(22);
+            v /= POW10[step as usize];
+            exp += step;
+        }
+    }
+    Some(if negative { -v as f32 } else { v as f32 })
+}
+
 /// A command payload for `entity`, on its own command topic (`feature` `""`) or on the topic
 /// of one setting.
 pub fn parse_command(entity: &dyn Entity, feature: &str, payload: &[u8]) -> Option<Command> {
@@ -510,7 +586,7 @@ pub fn parse_command(entity: &dyn Entity, feature: &str, payload: &[u8]) -> Opti
         _ => None,
     };
     let text = || core::str::from_utf8(payload).ok().map(str::trim);
-    let number = || text()?.parse::<f32>().ok().filter(|v| v.is_finite());
+    let number = || decimal(text()?).filter(|v| v.is_finite());
     let index = |options: &[&str]| {
         let t = text()?;
         options.iter().position(|o| *o == t).and_then(|i| u8::try_from(i).ok())
@@ -597,6 +673,21 @@ mod tests {
     static ENTITIES: [&dyn Entity; 5] = [&TEMP, &RELAY, &LED, &RESTART, &DOOR];
     static DEVICE: Device =
         Device { name: "Desk", manufacturer: "iotkit", model: "devkit", sw_version: "0.5.0", entities: &ENTITIES };
+
+    #[test]
+    fn decimal_reads_as_parse() {
+        let valid = "0 -0 21.5 -3 +2 .5 5. 0.1 1e3 1E-5 -2.5e+2 123456789.123456789 0.000001 \
+                     100000000000000000000000 3.4e38 1e-40 65535 0.30000000000000004";
+        for s in valid.split_whitespace() {
+            let want: f32 = s.parse().unwrap();
+            let got = decimal(s).unwrap();
+            assert!((got - want).abs() <= want.abs() * f32::EPSILON, "{s}: {got} != {want}");
+        }
+        assert!(decimal("1e39").is_some_and(f32::is_infinite));
+        for s in ["", "-", ".", "e5", "1e", "1e+", "1.2.3", "1x", "x1", "--1", "1 2", "inf", "nan", "1_0"] {
+            assert_eq!(decimal(s), None, "{s}");
+        }
+    }
 
     fn json(s: &str) -> serde_json_core::heapless::String<0> {
         // Valid JSON? serde-json-core parses into an ignored value via a map of unit.
