@@ -4,7 +4,8 @@
 //! The blind and the valve move 10 % a second, the thermostat heats or cools the room by
 //! 0.1 °C a second, the lock takes a second, and a short press of BOOT triggers the button event
 //! (`press`; three in a row: `triple_press`). The board's RGB LED is a real light, driven by
-//! `components::rgb_light`.
+//! `components::rgb_light`. The light, the brightness limit and the scene keep their state across
+//! restarts (`.remember()`).
 
 #![no_std]
 #![no_main]
@@ -31,8 +32,8 @@ static FAN: Fan = Fan::new("fan", "Fan").speed().presets(&["sleep", "breeze"]).o
 static THERMOSTAT: Climate =
     Climate::new("thermostat", "Thermostat", &[HvacMode::Heat, HvacMode::Cool, HvacMode::HeatCool, HvacMode::Off]);
 static SETPOINT: Number =
-    Number::new("brightness_limit", "Brightness limit", 0.0, 100.0, 5.0).unit(Unit::PERCENT).slider();
-static MODE: Select = Select::new("scene", "Scene", &["day", "evening", "night"]);
+    Number::new("brightness_limit", "Brightness limit", 0.0, 100.0, 5.0).unit(Unit::PERCENT).slider().remember();
+static MODE: Select = Select::new("scene", "Scene", &["day", "evening", "night"]).remember();
 static STATUS: TextSensor = TextSensor::new("status", "Status");
 static BUTTON: Event = Event::new("button", "Button", &["press", "triple_press"]).device_class(DeviceClass::BUTTON);
 static HUMIDITY: Sensor = Sensor::humidity("humidity", "Humidity");
@@ -44,7 +45,7 @@ static MOTION: BinarySensor = BinarySensor::new("motion", "Motion").device_class
 static LEAK: BinarySensor = BinarySensor::new("leak", "Leak").device_class(DeviceClass::MOISTURE);
 static SMOKE: BinarySensor = BinarySensor::new("smoke", "Smoke").device_class(DeviceClass::SMOKE);
 
-static LIGHT: Light = Light::new("light", "Light");
+static LIGHT: Light = Light::new("light", "Light").remember();
 
 static ENTITIES: &[&dyn Entity] = &[
     &LIGHT,

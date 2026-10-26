@@ -1039,7 +1039,7 @@ mod tests {
         )
         .unwrap();
         assert!(cargo.contains("default     = [\"matter-wifi\"]"), "{cargo}");
-        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\"]"), "{cargo}");
+        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"remember\"]"), "{cargo}");
         assert!(codegen::readme(&p).contains(&p.matter_setup.unwrap().manual_code_pretty()));
     }
 
@@ -1102,7 +1102,7 @@ mod tests {
             &p,
         )
         .unwrap();
-        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"esphome-api\"]"), "{cargo}");
+        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"remember\", \"esphome-api\"]"), "{cargo}");
         let readme = codegen::readme(&p);
         assert!(
             readme.contains("ESPHOME_API_KEY") && !readme.contains(&key) && !readme.contains("mqtt 192"),
@@ -1139,13 +1139,18 @@ mod tests {
             "{main}"
         );
         assert!(main.contains("gesture::wait_press") && main.contains("over Matter"), "{main}");
+        // The status LED keeps its state, and is written before `start` keeps the CPU.
+        assert!(main.contains("Light::new(\"status_led\", \"Status LED\").remember()"), "{main}");
+        assert!(main.find("spawner.spawn(led_task") < main.find("iotkit::start("), "{main}");
         let cargo = codegen::cargo_toml(
             &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c6", "/opt/iotkit").unwrap(),
             &p,
         )
         .unwrap();
         assert!(
-            cargo.contains("default-features = false, features = [\"esp32c6\", \"matter-thread\", \"matter-ota\"]"),
+            cargo.contains(
+                "default-features = false, features = [\"esp32c6\", \"matter-thread\", \"matter-ota\", \"remember\"]"
+            ),
             "{cargo}"
         );
         assert!(

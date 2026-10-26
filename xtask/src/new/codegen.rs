@@ -199,7 +199,8 @@ pub fn main_rs(p: &Project) -> String {
 
     if led {
         iotkit.extend(["Light", "LightState"]);
-        let _ = writeln!(statics, "static LED: Light = Light::new(\"status_led\", \"Status LED\");");
+        // Kept across restarts (never on battery: no status LED there).
+        let _ = writeln!(statics, "static LED: Light = Light::new(\"status_led\", \"Status LED\").remember();");
         ids.push("LED".into());
     }
     if battery_pin.is_some() {
@@ -368,14 +369,8 @@ async fn main(spawner: Spawner) -> ! {{
         },
         p.button_pin()
     );
-    if sleepy {
-        s.push_str("    let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;\n");
-    } else {
-        s.push_str("    iotkit::start(spawner, board, &CONFIG).await;\n");
-    }
-    if led || status == Indicator::Rgb {
+    let rgb_led = |s: &mut String, task: &str| {
         let pin = p.board.rgb_led.unwrap_or_default();
-        let task = if led { "led_task" } else { "status_task" };
         let _ = write!(
             s,
             "
@@ -384,6 +379,21 @@ async fn main(spawner: Spawner) -> ! {{
     spawner.spawn({task}(led).unwrap());
 "
         );
+    };
+    if led {
+        // Before `start`, which keeps the CPU a while (Matter loads its state): until the first
+        // write, the LED shows whatever a reset left on its data line.
+        s.push_str("\n    // Written right after the bootloader; its saved state comes once `start` restores it.");
+        rgb_led(&mut s, "led_task");
+        s.push('\n');
+    }
+    if sleepy {
+        s.push_str("    let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;\n");
+    } else {
+        s.push_str("    iotkit::start(spawner, board, &CONFIG).await;\n");
+    }
+    if status == Indicator::Rgb {
+        rgb_led(&mut s, "status_task");
     }
     if let (Indicator::Led, Some(pin)) = (status, p.answers.status_pin) {
         let _ = write!(
@@ -457,7 +467,8 @@ async fn status_task(led: Output<'static>) {
             "
 #[embassy_executor::task]
 async fn led_task(mut led: Led) {
-    let mut state = LightState { on: true, brightness: 20, rgb: [0, 128, 255] };
+    // Dark until its saved state comes back (or a command): brightness and colour for \"on\".
+    let mut state = LightState { on: false, brightness: 20, rgb: [0, 128, 255] };
     loop {
         LED.set(state);
         let color = if state.on { RGB8::new(state.rgb[0], state.rgb[1], state.rgb[2]) } else { RGB8::default() };
@@ -718,6 +729,9 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     }
     if p.answers.status == Indicator::Rgb {
         app_features.push("smartled");
+    }
+    if p.status_led() {
+        app_features.push("remember");
     }
     if p.esphome() {
         app_features.push("esphome-api");
