@@ -1,0 +1,23 @@
+label    = "Seeed Studio XIAO ESP32-C6 (ESP32-C6, 4 MB; Wi-Fi 6, tiny; no Matter in 4 MB)"
+chip     = "esp32c6"
+model    = "XIAO ESP32-C6"
+flash    = "4mb"
+boot_pin = 9
+order    = 60
+led      = { kind = "plain", pin = 15, active = "low" }
+sources  = [
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/seeed/xiao_esp32c6/xiao_esp32c6_hpcore.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/XIAO_ESP32C6/pins_arduino.h",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/XIAO_ESP32C6/variant.cpp",
+]
+
+# The antenna switch: off, Wi-Fi hears little and sends nothing.
+[[init]]
+pin   = 3
+level = "low"
+why   = "powers the antenna switch"
+
+[[init]]
+pin   = 14
+level = "low"
+why   = "the built-in antenna (high: an external one on the U.FL connector)"

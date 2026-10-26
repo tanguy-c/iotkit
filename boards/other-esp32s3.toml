@@ -1,0 +1,6 @@
+# Another board: its flash is asked, its LED left to the app.
+label    = "Another board with an ESP32-S3"
+chip     = "esp32s3"
+model    = "ESP32-S3 board"
+boot_pin = 0
+order    = 903

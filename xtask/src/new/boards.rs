@@ -3,8 +3,9 @@
 use std::ops::RangeInclusive;
 
 pub struct Board {
+    /// The file's name in `boards/`.
     pub id: &'static str,
-    /// As the menu shows it.
+    /// As the menu shows it (searched as you type).
     pub label: &'static str,
     /// Cargo feature and `espflash --chip`.
     pub chip: &'static str,
@@ -16,123 +17,120 @@ pub struct Board {
     pub boot_pin: u8,
     /// The onboard WS2812 LED.
     pub rgb_led: Option<u8>,
+    /// A single onboard LED: its pin, and whether a low level lights it.
+    pub plain_led: Option<(u8, bool)>,
+    /// Pins `main` sets before the radio starts (an antenna switch).
+    pub init: Vec<Init>,
+    order: u32,
 }
 
-pub const BOARDS: &[Board] = &[
-    Board {
-        id: "esp32c6-devkitc-1",
-        label: "ESP32-C6-DevKitC-1 (Wi-Fi 6, Matter; the board iotkit is tested on)",
-        chip: "esp32c6",
-        model: "ESP32-C6-DevKitC-1",
-        chip_label: "ESP32-C6",
-        flash: Some("8mb"),
-        boot_pin: 9,
-        rgb_led: Some(8),
-    },
-    Board {
-        id: "esp32c3-devkitm-1",
-        label: "ESP32-C3-DevKitM-1 (Wi-Fi, small and cheap; no Matter)",
-        chip: "esp32c3",
-        model: "ESP32-C3-DevKitM-1",
-        chip_label: "ESP32-C3",
-        flash: Some("4mb"),
-        boot_pin: 9,
-        rgb_led: Some(8),
-    },
-    Board {
-        id: "esp32c5-devkitc-1",
-        label: "ESP32-C5-DevKitC-1 (dual-band Wi-Fi; no Matter yet)",
-        chip: "esp32c5",
-        model: "ESP32-C5-DevKitC-1",
-        chip_label: "ESP32-C5",
-        flash: Some("8mb"),
-        boot_pin: 28,
-        rgb_led: Some(27),
-    },
-    Board {
-        id: "esp32s3-devkitc-1",
-        label: "ESP32-S3-DevKitC-1 (more pins and CPU; no Matter yet)",
-        chip: "esp32s3",
-        model: "ESP32-S3-DevKitC-1",
-        chip_label: "ESP32-S3",
-        flash: Some("8mb"),
-        boot_pin: 0,
-        rgb_led: Some(38),
-    },
-    Board {
-        id: "other-esp32c6",
-        label: "Another board with an ESP32-C6",
-        chip: "esp32c6",
-        model: "ESP32-C6 board",
-        chip_label: "ESP32-C6",
-        flash: None,
-        boot_pin: 9,
-        rgb_led: None,
-    },
-    Board {
-        id: "other-esp32c3",
-        label: "Another board with an ESP32-C3",
-        chip: "esp32c3",
-        model: "ESP32-C3 board",
-        chip_label: "ESP32-C3",
-        flash: None,
-        boot_pin: 9,
-        rgb_led: None,
-    },
-    Board {
-        id: "other-esp32c5",
-        label: "Another board with an ESP32-C5",
-        chip: "esp32c5",
-        model: "ESP32-C5 board",
-        chip_label: "ESP32-C5",
-        flash: None,
-        boot_pin: 28,
-        rgb_led: None,
-    },
-    Board {
-        id: "other-esp32s3",
-        label: "Another board with an ESP32-S3",
-        chip: "esp32s3",
-        model: "ESP32-S3 board",
-        chip_label: "ESP32-S3",
-        flash: None,
-        boot_pin: 0,
-        rgb_led: None,
-    },
-    Board {
-        id: "other-esp32h2",
-        label: "A board with an ESP32-H2 (Thread only: Matter over Thread; 8 MB of flash)",
-        chip: "esp32h2",
-        model: "ESP32-H2 board",
-        chip_label: "ESP32-H2",
-        flash: None,
-        boot_pin: 9,
-        rgb_led: None,
-    },
-    Board {
-        id: "esp32-devkitc",
-        label: "ESP32-DevKitC (WROOM-32: the original ESP32; no Matter, no Bluetooth setup yet)",
-        chip: "esp32",
-        model: "ESP32-DevKitC",
-        chip_label: "ESP32",
-        flash: Some("4mb"),
-        boot_pin: 0,
-        rgb_led: None,
-    },
-    Board {
-        id: "other-esp32",
-        label: "Another board with an ESP32 (WROOM-32, WROVER)",
-        chip: "esp32",
-        model: "ESP32 board",
-        chip_label: "ESP32",
-        flash: None,
-        boot_pin: 0,
-        rgb_led: None,
-    },
-];
+/// A pin set at start, and why.
+pub struct Init {
+    pub pin: u8,
+    pub high: bool,
+    pub why: &'static str,
+}
+
+mod files {
+    include!(concat!(env!("OUT_DIR"), "/boards.rs"));
+}
+
+/// A board file (`boards/<id>.toml`).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct File {
+    label: String,
+    chip: String,
+    model: String,
+    flash: Option<String>,
+    boot_pin: u8,
+    order: u32,
+    led: Option<LedFile>,
+    #[serde(default)]
+    init: Vec<InitFile>,
+    #[serde(default)]
+    sources: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LedFile {
+    kind: String,
+    pin: u8,
+    active: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitFile {
+    pin: u8,
+    level: String,
+    why: String,
+}
+
+/// The board files, checked: an error names the file.
+fn load() -> Result<Vec<Board>, String> {
+    let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    let mut boards = Vec::new();
+    for (id, text) in files::FILES {
+        let f: File = toml::from_str(text).map_err(|e| format!("boards/{id}.toml: {e}"))?;
+        let chip_label = match f.chip.as_str() {
+            "esp32c6" => "ESP32-C6",
+            "esp32c3" => "ESP32-C3",
+            "esp32c5" => "ESP32-C5",
+            "esp32s3" => "ESP32-S3",
+            "esp32h2" => "ESP32-H2",
+            "esp32" => "ESP32",
+            other => return Err(format!("boards/{id}.toml: unknown chip `{other}`")),
+        };
+        if f.flash.as_deref().is_some_and(|f| f != "4mb" && f != "8mb") {
+            return Err(format!("boards/{id}.toml: flash is `4mb` or `8mb`"));
+        }
+        let level = |l: Option<&str>| match l {
+            None | Some("high") => Ok(false),
+            Some("low") => Ok(true),
+            Some(other) => Err(format!("boards/{id}.toml: level `{other}`: `high` or `low`")),
+        };
+        let (rgb_led, plain_led) = match f.led {
+            None => (None, None),
+            Some(LedFile { kind, pin, active }) if kind == "rgb" && active.is_none() => (Some(pin), None),
+            Some(LedFile { kind, pin, active }) if kind == "plain" => (None, Some((pin, level(active.as_deref())?))),
+            Some(_) => return Err(format!("boards/{id}.toml: led: `kind = \"rgb\"` or `\"plain\"` (with `active`)")),
+        };
+        let init = f
+            .init
+            .into_iter()
+            .map(|i| Ok(Init { pin: i.pin, high: !level(Some(&i.level))?, why: leak(i.why) }))
+            .collect::<Result<_, String>>()?;
+        if f.sources.is_empty() && !id.starts_with("other-") {
+            return Err(format!("boards/{id}.toml: `sources`: where its facts come from"));
+        }
+        boards.push(Board {
+            id,
+            label: leak(f.label),
+            chip: leak(f.chip),
+            model: leak(f.model),
+            chip_label,
+            flash: f.flash.map(leak),
+            boot_pin: f.boot_pin,
+            rgb_led,
+            plain_led,
+            init,
+            order: f.order,
+        });
+    }
+    boards.sort_by_key(|b| (b.order, b.id));
+    Ok(boards)
+}
+
+/// Every board, in menu order.
+pub fn boards() -> &'static [Board] {
+    static BOARDS: std::sync::OnceLock<Vec<Board>> = std::sync::OnceLock::new();
+    BOARDS.get_or_init(|| load().unwrap_or_else(|e| panic!("{e}")))
+}
 
 pub fn board(id: &str) -> Option<&'static Board> {
-    BOARDS.iter().find(|b| b.id == id)
+    boards().iter().find(|b| b.id == id)
 }
 
 impl Board {
@@ -276,6 +274,9 @@ pub fn check_pin(board: &Board, pin: u8, kind: PinUse, taken: &[u8]) -> PinCheck
     if let Some((_, why)) = p.reserved.iter().find(|(r, _)| r.contains(&pin)) {
         return PinCheck::Refused(format!("GPIO{pin} is {why}"));
     }
+    if let Some(init) = board.init.iter().find(|i| i.pin == pin) {
+        return PinCheck::Refused(format!("GPIO{pin} is used by the board: it {}", init.why));
+    }
     if taken.contains(&pin) {
         return PinCheck::Refused(format!("GPIO{pin} is already used by another part"));
     }
@@ -292,6 +293,9 @@ pub fn check_pin(board: &Board, pin: u8, kind: PinUse, taken: &[u8]) -> PinCheck
     }
     if Some(pin) == board.rgb_led {
         return PinCheck::Warn(format!("GPIO{pin} drives the board's RGB LED"));
+    }
+    if board.plain_led.is_some_and(|(led, _)| led == pin) {
+        return PinCheck::Warn(format!("GPIO{pin} drives the board's LED"));
     }
     if pin == board.boot_pin {
         return PinCheck::Warn(format!("GPIO{pin} is the BOOT button"));
@@ -360,8 +364,27 @@ mod tests {
         let h2 = board("other-esp32h2").unwrap();
         assert!(matches!(check_pin(h2, 16, PinUse::Input, &[]), PinCheck::Refused(_)), "flash");
         assert_eq!(check_pin(h2, 10, PinUse::Output, &[]), PinCheck::Ok);
-        for b in BOARDS {
+        for b in boards() {
             assert!(crate::CHIPS.iter().any(|c| c.name == b.chip), "{}", b.id);
         }
+    }
+
+    /// Every file in `boards/` loads, and its pins exist and are free on its chip.
+    #[test]
+    fn board_files() {
+        let all = load().unwrap();
+        assert!(all.len() >= 15);
+        assert_eq!(all[0].id, "esp32c6-devkitc-1", "the tested board first");
+        for b in &all {
+            let own = [Some(b.boot_pin), b.rgb_led, b.plain_led.map(|(p, _)| p)];
+            for pin in own.into_iter().flatten().chain(b.init.iter().map(|i| i.pin)) {
+                let p = pins(b.chip);
+                assert!(pin <= p.max && !p.reserved.iter().any(|(r, _)| r.contains(&pin)), "{}: GPIO{pin}", b.id);
+            }
+        }
+        let xiao = board("xiao-esp32c6").unwrap();
+        assert_eq!((xiao.flash, xiao.plain_led, xiao.rgb_led), (Some("4mb"), Some((15, true)), None));
+        assert_eq!(xiao.init.iter().map(|i| (i.pin, i.high)).collect::<Vec<_>>(), [(3, false), (14, false)]);
+        assert!(matches!(check_pin(xiao, 3, PinUse::Input, &[]), PinCheck::Refused(_)), "the antenna switch");
     }
 }

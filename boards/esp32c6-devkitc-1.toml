@@ -1,0 +1,13 @@
+# The board iotkit is developed and tested on.
+label    = "Espressif ESP32-C6-DevKitC-1 (ESP32-C6, 8 MB; Wi-Fi 6, Matter; the board iotkit is tested on)"
+chip     = "esp32c6"
+model    = "ESP32-C6-DevKitC-1"
+flash    = "8mb"
+boot_pin = 9
+order    = 0
+led      = { kind = "rgb", pin = 8 }
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c6/esp32-c6-devkitc-1/user_guide.html",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/espressif/esp32c6_devkitc/esp32c6_devkitc_hpcore.dts",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/esp32c6/pins_arduino.h",
+]

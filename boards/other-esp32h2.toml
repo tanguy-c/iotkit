@@ -1,0 +1,6 @@
+# Another board: its flash is asked. Matter over Thread needs 8 MB (the ESP32-H2-DevKitM-1 has 4).
+label    = "A board with an ESP32-H2 (Thread only: Matter over Thread; 8 MB of flash)"
+chip     = "esp32h2"
+model    = "ESP32-H2 board"
+boot_pin = 9
+order    = 904

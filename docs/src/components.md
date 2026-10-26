@@ -60,8 +60,10 @@ is to be shown; up to 4 watchers). For a LED that does something else too, `comp
 gives each step of the pattern: `Frame::Status { status, lit }`, or `Frame::Own` for the app's
 content (`apps/devkit` shows Improv's "identify", then the status, then its light). Both parts leave the LED dark between patterns and before a
 deep sleep or restart, so a battery device sleeps; a WS2812 still draws about 1 mA dark.
-`cargo iotkit new` asks for one: `status = "auto"` (the default: the board's RGB LED, over the
-light if it is one, unless on battery), `"rgb"`, `"led"` with `status_pin`, or `"off"`.
+`cargo iotkit new` asks for one: `status = "auto"` (the default: the board's LED, an RGB one over
+the light if it is one, unless on battery), `"rgb"`, `"led"` with `status_pin` (and
+`status_active = "low"` for a LED lit by a low level; the board's own LED keeps its polarity), or
+`"off"`.
 
 ## Filters
 

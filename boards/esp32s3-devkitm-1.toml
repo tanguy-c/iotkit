@@ -1,0 +1,11 @@
+label    = "Espressif ESP32-S3-DevKitM-1 (ESP32-S3, 8 MB; no Matter yet)"
+chip     = "esp32s3"
+model    = "ESP32-S3-DevKitM-1"
+flash    = "8mb"
+boot_pin = 0
+order    = 42
+led      = { kind = "rgb", pin = 48 }
+sources  = [
+    "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitm-1/user_guide.html",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/esp32s3/pins_arduino.h",
+]

@@ -1,0 +1,6 @@
+# Another board: its flash is asked, its LED left to the app.
+label    = "Another board with an ESP32 (WROOM-32, WROVER)"
+chip     = "esp32"
+model    = "ESP32 board"
+boot_pin = 0
+order    = 905
