@@ -1,5 +1,5 @@
 # Also a blue LED (GPIO7, active high) and an IR LED (GPIO3), left to the app.
-label    = "M5Stack NanoC6 (ESP32-C6, 4 MB; Wi-Fi 6, tiny, cased; no Matter in 4 MB)"
+label    = "M5Stack NanoC6 (ESP32-C6, 4 MB; Wi-Fi 6, tiny, cased; Matter over Thread, not Wi-Fi, in 4 MB)"
 chip     = "esp32c6"
 model    = "M5Stack NanoC6"
 flash    = "4mb"

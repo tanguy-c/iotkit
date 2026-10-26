@@ -126,7 +126,7 @@ jobs:
       # Thread and the ESPHome API.
       - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: |
-          for c in c6 c3 esphome thread thread-battery esphome-battery xiao; do
+          for c in c6 c3 esphome thread thread-battery esphome-battery xiao xiao-thread; do
             cargo iotkit new "$RUNNER_TEMP/new-$c" --answers xtask/answers/$c.toml --iotkit-path "$GITHUB_WORKSPACE"
             (cd "$RUNNER_TEMP/new-$c" && cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify)
           done

@@ -1,5 +1,5 @@
 # One source in text so far (Arduino's variant); Waveshare's pinout is an image.
-label    = "Waveshare ESP32-C6-Zero (ESP32-C6, 4 MB; tiny, an RGB LED; no Matter in 4 MB)"
+label    = "Waveshare ESP32-C6-Zero (ESP32-C6, 4 MB; tiny, an RGB LED; Matter over Thread, not Wi-Fi, in 4 MB)"
 chip     = "esp32c6"
 model    = "Waveshare ESP32-C6-Zero"
 flash    = "4mb"

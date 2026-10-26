@@ -62,7 +62,7 @@ cargo iotkit flash --release      # or `cargo run --release`: flash, then the se
 
 If the board is not detected, hold **BOOT**, tap **RESET**, release **BOOT**. A USB flash boots
 the first app slot. `partitions.csv` is for 8 MB of flash (two 3.9 MB app slots, needed for
-Matter); `partitions-4mb.csv` fits 4 MB boards without Matter. Or [install from the
+Matter over Wi-Fi); `partitions-4mb.csv` fits 4 MB boards, Matter over Thread included. Or [install from the
 browser](install-from-browser.md).
 
 ## Join Wi-Fi

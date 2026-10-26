@@ -306,7 +306,7 @@ impl Project {
                 answers.matter != MatterMode::Off,
                 "Thread devices talk Matter: set `matter = \"fixed\"` or `\"per-device\"`"
             );
-            ensure!(flash == "8mb", "Matter needs 8 MB of flash");
+            // Matter over Thread fits a 4 MB layout's 1.9 MB slot (about 1.6 MB, updates included).
             ensure!(
                 answers.wifi_ssid.is_none() && answers.mqtt_host.is_none() && answers.esphome == EsphomeMode::Off,
                 "Thread has no Wi-Fi, MQTT or ESPHome API: remove `wifi_ssid`, `mqtt_host` and `esphome`"
@@ -324,7 +324,10 @@ impl Project {
                 "Matter needs an ESP32-C6 (the {} has not the RAM or the drivers yet)",
                 board.chip_label
             );
-            ensure!(flash == "8mb", "Matter needs 8 MB of flash");
+            ensure!(
+                flash == "8mb",
+                "Matter over Wi-Fi needs 8 MB of flash (about 2.1 MB per update slot); Matter over Thread fits in 4 MB"
+            );
         }
         if answers.esphome != EsphomeMode::Off {
             ensure!(
@@ -461,6 +464,13 @@ impl Project {
             (EsphomeMode::Fixed, None) => Some(random_key()?),
             _ => None,
         };
+        let light = answers.status_led && !battery && board.rgb_led.is_some();
+        if answers.matter != MatterMode::Off && parts.is_empty() && !light {
+            warnings.push(
+                "no part: over Matter the device has nothing a controller can add (Google Home, Apple Home): add one"
+                    .into(),
+            );
+        }
         Ok(Self { answers, board, package, flash, parts, matter_setup, esphome_key, iotkit_path, warnings })
     }
 }
@@ -1243,6 +1253,10 @@ mod tests {
         assert!(codegen::readme(&p).contains("| Status LED | GPIO15 | on the board |"));
         let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
         assert!(err("board = \"xiao-esp32c6\"\n[[parts]]\nkind = \"relay\"\npin = 3").contains("antenna switch"));
+        // Matter over Thread fits its 4 MB, over Wi-Fi not; with no part, nothing to add.
+        let thread = project("board = \"xiao-esp32c6\"\ntransport = \"thread\"\nmatter = \"fixed\"");
+        assert!(thread.warnings.iter().any(|w| w.contains("nothing a controller can add")), "{:?}", thread.warnings);
+        assert!(err("board = \"xiao-esp32c6\"\nmatter = \"fixed\"").contains("Matter over Wi-Fi needs 8 MB"));
     }
 
     /// On battery, the mode that suits the link: deep sleep over the ESPHome API (or MQTT), a

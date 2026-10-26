@@ -68,8 +68,8 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
 - The C6's LP core (`LpCore`, `load_lp_code!`) overwrites iotkit's RTC records (early rollback,
   crash record, deep-sleep state): not supported yet (`docs/src/battery.md`).
 - Never run espflash while a monitor holds `/dev/ttyACM0`: it hangs on "Connecting".
-- `partitions.csv` is 8 MB: flash with `--flash-size 8mb`. 4 MB boards use `partitions-4mb.csv`,
-  without Matter.
+- `partitions.csv` is 8 MB: flash with `--flash-size 8mb`. 4 MB boards use `partitions-4mb.csv`:
+  Matter over Thread fits (a 1.6 MB image), over Wi-Fi not.
 - `ed25519-compact` and `iotkit-image` build at opt-level `z` ([Cargo.toml](Cargo.toml)); at `s`
   the Ed25519 verification grows to about 1.2 MB.
 - esp-radio's `sta_disconnected_pm` starves BLE: keep it off (Improv setup over BLE,

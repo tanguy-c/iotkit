@@ -27,6 +27,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   Waveshare's ESP32-S3-Zero and C6-Zero, LOLIN's S3 Mini and C3 Mini, Unexpected Maker's TinyC6
   and TinyS3, the Arduino Nano ESP32 (their RGB LEDs' power pins set in `main`). The
   board question is searched as you type; `status_active = "low"` for a LED lit by a low level.
+- Matter over Thread on 4 MB boards (a 1.6 MB image in a 1.9 MB slot): paired with Google Home
+  on a XIAO ESP32-C6. `cargo iotkit new` warns when a Matter project has no part, which leaves
+  controllers nothing to add.
 - `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
   fullest.
 
