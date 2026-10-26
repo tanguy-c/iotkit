@@ -1,4 +1,4 @@
-# Another board: its flash is asked (Matter over Thread fits in 4 MB, not tested on an H2 yet).
+# Another board: its flash is asked.
 label    = "A board with an ESP32-H2 (Thread only: Matter over Thread)"
 chip     = "esp32h2"
 model    = "ESP32-H2 board"

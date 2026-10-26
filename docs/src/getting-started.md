@@ -22,10 +22,10 @@ cargo iotkit new garden-sensor
 It asks, in plain words:
 
 - **what it is** (its name in Home Assistant) and your name or brand;
-- **the board**: type to search (a maker, a chip, a name). Espressif's C6, C3, C5 and S3 DevKits,
-  the ESP32-DevKitC, boards from Seeed (XIAO), M5Stack, Adafruit, Waveshare, LOLIN, Unexpected Maker
-  and Arduino, or another board with one of these chips. Each board's LEDs and quirks come with it
-  (the XIAO ESP32-C6's antenna switch is set in `main`);
+- **the board**: type to search (a maker, a chip, a name). Espressif's C6, C3, C5, S3 and H2
+  DevKits, the ESP32-DevKitC, boards from Seeed (XIAO), M5Stack, Adafruit, Waveshare, LOLIN,
+  Unexpected Maker, Arduino and Olimex, or another board with one of these chips. Each board's LEDs
+  and quirks come with it (the XIAO ESP32-C6's antenna switch is set in `main`);
   [`boards/`](https://github.com/tanguy-c/iotkit/tree/main/boards) has one file per board, and
   another board is one more file;
 - **the power**: plugged in, or on battery (wakes up, reports, sleeps; with the battery level if

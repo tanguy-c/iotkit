@@ -25,7 +25,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   Seeed's XIAO ESP32-C6 (its antenna switch: without it Wi-Fi does not connect), C3 and S3,
   M5Stack's NanoC6 and AtomS3 Lite, Adafruit's QT Py ESP32-C3 and S3 and Feather ESP32-C6,
   Waveshare's ESP32-S3-Zero and C6-Zero, LOLIN's S3 Mini and C3 Mini, Unexpected Maker's TinyC6
-  and TinyS3, the Arduino Nano ESP32 (their RGB LEDs' power pins set in `main`). The
+  and TinyS3, the Arduino Nano ESP32, and for the ESP32-H2 the H2-DevKitM-1, M5Stack's NanoH2,
+  Waveshare's ESP32-H2-Zero and Olimex's ESP32-H2-DevKit-LiPo (their RGB LEDs' power pins set in
+  `main`). The
   board question is searched as you type; `status_active = "low"` for a LED lit by a low level.
 - Matter over Thread on 4 MB boards (a 1.6 MB image in a 1.9 MB slot): paired with Google Home
   on a XIAO ESP32-C6. `cargo iotkit new` warns when a Matter project has no part, which leaves
