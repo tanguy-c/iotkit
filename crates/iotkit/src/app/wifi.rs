@@ -265,8 +265,13 @@ pub(super) fn require_checks() {
 
 #[embassy_executor::task]
 pub(super) async fn network_check_task(net: Net) {
-    net.wait_online().await;
-    HEALTH.pass(NETWORK);
+    // Passed once (the update's trial); followed live for the status LED.
+    loop {
+        net.wait_online().await;
+        HEALTH.pass(NETWORK);
+        let _up = crate::status::LinkUp::new(crate::status::Link::Network);
+        net.stack.wait_link_down().await;
+    }
 }
 
 #[cfg(feature = "mqtt")]

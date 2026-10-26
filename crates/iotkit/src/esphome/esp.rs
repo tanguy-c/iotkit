@@ -332,8 +332,11 @@ async fn session(
     inbox.consume(handshake.end);
 
     let mut subscribed = false;
+    // Home Assistant is linked while subscribed: down again when the session ends.
+    let mut up = None;
     loop {
         if subscribed {
+            up.get_or_insert_with(|| crate::status::LinkUp::new(crate::status::Link::Esphome));
             for entity in device.entities {
                 if entity.take_dirty(binding) {
                     send(socket, &mut tx, &mut out, |w| api::state(w, *entity)).await?;
