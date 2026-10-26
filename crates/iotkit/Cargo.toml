@@ -61,6 +61,10 @@ tls = ["wifi", "dep:embedded-tls", "dep:rand_core"]
 ## Home Assistant's ESPHome integration: the native API on TCP 6053, encrypted, found over mDNS,
 ## next to MQTT or instead of it (`esphome`). Needs `wifi` on a chip.
 esphome-api = ["iotkit-core/extra-bindings", "dep:chacha20poly1305", "dep:ed25519-compact", "dep:hkdf", "dep:sha2"]
+## Switches, lights, numbers and selects built with `.remember()` keep their state across
+## restarts: saved to flash a few seconds after it settles, handed back as a command at start.
+## Not with `deep-sleep`.
+remember = ["iotkit-core/remember"]
 ## Addressable LEDs (WS2812) as a light: `components::rgb_light`.
 smartled = ["dep:smart-leds"]
 ## Records panics (and their backtrace) for the next boot; on with `wifi` and `matter-thread`.

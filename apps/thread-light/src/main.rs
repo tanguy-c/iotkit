@@ -20,7 +20,7 @@ use smart_leds::{RGB8, SmartLedsWriteAsync, brightness};
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
 static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../../../keys/ota.pub"));
 
-static LED: Light = Light::new("status_led", "Status LED");
+static LED: Light = Light::new("status_led", "Status LED").remember();
 
 static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .manufacturer("iotkit")
@@ -43,11 +43,13 @@ async fn main(spawner: Spawner) -> ! {
         timg1: p.TIMG1,
         boot_button: Some(p.GPIO9.into()),
     };
-    iotkit::start(spawner, board, &CONFIG).await;
 
+    // Written right after the bootloader; its saved state comes once `start` restores it.
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
     let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
     spawner.spawn(led_task(led).unwrap());
+
+    iotkit::start(spawner, board, &CONFIG).await;
 
     loop {
         Timer::after_secs(3600).await;
@@ -57,7 +59,8 @@ async fn main(spawner: Spawner) -> ! {
 /// The status LED, as a light over Matter; a short press of BOOT toggles it.
 #[embassy_executor::task]
 async fn led_task(mut led: Led) {
-    let mut state = LightState { on: true, brightness: 20, rgb: [0, 128, 255] };
+    // Dark until its saved state comes back (or a command): brightness and colour for "on".
+    let mut state = LightState { on: false, brightness: 20, rgb: [0, 128, 255] };
     loop {
         LED.set(state);
         let color = if state.on { RGB8::new(state.rgb[0], state.rgb[1], state.rgb[2]) } else { RGB8::default() };

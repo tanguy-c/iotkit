@@ -66,6 +66,8 @@ pub mod keys {
     pub const ESPHOME_CLIENT: u16 = 0x0061;
     /// `iotkit` (`deep-sleep`): the device reached its link once (else it starts in pairing mode).
     pub const SLEEP_LINKED: u16 = 0x0070;
+    /// `iotkit_core::remember`: the states of the entities that remember theirs.
+    pub const REMEMBERED: u16 = 0x0080;
 }
 
 /// Largest encoded setting, version byte included.

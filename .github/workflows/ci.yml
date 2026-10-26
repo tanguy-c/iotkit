@@ -30,7 +30,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo fmt --all --check --manifest-path xtask/Cargo.toml
       - run: cargo test-host
-      - run: cargo clippy -p iotkit-image -p iotkit-core -p iotkit -p iotkit-build --target host-tuple --all-targets --no-default-features --features iotkit-core/sign,iotkit/smartled,iotkit/esphome-api -- -D warnings
+      - run: cargo clippy -p iotkit-image -p iotkit-core -p iotkit -p iotkit-build --target host-tuple --all-targets --no-default-features --features iotkit-core/sign,iotkit/smartled,iotkit/esphome-api,iotkit/remember -- -D warnings
       - run: cargo clippy --manifest-path xtask/Cargo.toml --target host-tuple --all-targets -- -D warnings
       - run: cargo test --manifest-path xtask/Cargo.toml --target host-tuple
 

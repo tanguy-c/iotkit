@@ -13,6 +13,8 @@ publish.workspace      = true
 portable-atomic = ["dep:portable-atomic"]
 ## Bindings beyond MQTT and Matter (`model::Binding::allocate`): for other transports.
 extra-bindings = []
+## Entities that keep their state across restarts (`remember`): `.remember()`, one binding.
+remember = []
 ## Signing images and manifests (the CLI; never in firmware).
 sign = ["iotkit-image/sign"]
 

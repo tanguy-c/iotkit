@@ -13,5 +13,7 @@ pub(crate) use portable_atomic as atomic;
 pub mod config;
 pub use iotkit_image as image;
 pub mod model;
+#[cfg(feature = "remember")]
+pub mod remember;
 pub mod runtime;
 pub mod time;

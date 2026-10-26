@@ -34,6 +34,28 @@ RELAY.set(on);                         // report what the device did
 With `ha-update`, the kit adds an `Update` entity of its own ([updates](updates.md)). Ids are
 `[a-z0-9_]`, checked when building. `apps/showcase` has most of them.
 
+## Keeping their state
+
+With the `remember` feature, a `Switch`, `Light`, `Number` or `Select` built with `.remember()`
+comes back after a restart or a power cut as it was. The kit saves its state to flash a few
+seconds after the last change (a dragged slider is one write), and `start` hands it back to the
+app as its first command: the app needs nothing else.
+
+```rust,ignore
+static LED: Light = Light::new("led", "LED").remember();
+```
+
+- Up to 16 entities. `factory-reset` forgets their states.
+- Covers, valves and locks have no `.remember()`: what the hardware does after a power cut is
+  theirs to tell (a valve should not reopen by itself). Not with `deep-sleep` (refused when
+  building).
+- Over Matter, a light's colour comes back on the device, but the Color Control cluster reports
+  its default (white) until the next colour command: rs-matter cannot set it at start yet. On/off
+  and brightness are right.
+- Spawn the task that drives an LED before `iotkit::start`, starting dark: until its first write,
+  a WS2812 shows whatever a reset left on its data line (often green). Projects from
+  `cargo iotkit new` do, and remember their status LED.
+
 ## Device classes, units, shortcuts
 
 ```rust,ignore
@@ -75,4 +97,5 @@ app.save(&Brightness(200)).await;   // written only when it changed
 
 Keys from `0x1000` are the app's. Bump `VERSION` when the type changes, and convert old values in
 `Setting::migrate`. `SaveLater` tells when to save, a while after the last change (a dragged
-slider writes the flash once).
+slider writes the flash once). An entity's own state needs none of this:
+[`.remember()`](#keeping-their-state).

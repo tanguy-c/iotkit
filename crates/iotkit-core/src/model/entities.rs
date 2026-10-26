@@ -40,6 +40,23 @@ macro_rules! builders {
 
 pub(crate) use builders;
 
+/// `.remember()`, for the kinds whose state one command restores.
+macro_rules! remembers {
+    ($ty:ty) => {
+        #[cfg(feature = "remember")]
+        impl $ty {
+            /// Keeps the state across restarts: saved to flash once it settles, and handed back
+            /// to the app as its first command ([`crate::remember`]).
+            pub const fn remember(mut self) -> Self {
+                self.meta.remember = true;
+                self
+            }
+        }
+    };
+}
+
+pub(crate) use remembers;
+
 /// A numeric reading.
 pub struct Sensor {
     meta: Meta,
@@ -204,6 +221,7 @@ pub struct Switch {
 }
 
 builders!(Switch);
+remembers!(Switch);
 
 impl Switch {
     /// A new entity (`id`: see [`Meta::id`]).
@@ -312,6 +330,7 @@ pub struct Light {
 }
 
 builders!(Light);
+remembers!(Light);
 
 impl Light {
     /// A new entity (`id`: see [`Meta::id`]).
