@@ -3,6 +3,25 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
+## To 0.3 (from 0.2)
+
+### MQTT is a feature
+
+`mqtt`, on by default. A project with `default-features = false` that uses MQTT adds it:
+
+```toml
+iotkit = { git = "https://github.com/tanguy-c/iotkit", default-features = false, features = ["esp32c6", "wifi", "mqtt", "improv-serial", "ota-push"] }
+```
+
+Without it, `iotkit::mqtt::esp` and the `mqtt` console command are gone, and the `BROKER` health
+check is not required. `deep-sleep` needs `mqtt` or `esphome-api`.
+
+### The setup access point's tasks are gone
+
+`provision::esp::{dhcp_task, dns_task, portal_task}` now run inside `window_task`, only while a
+setup window is open. `iotkit::start` spawns it; an app that spawned them itself drops those
+three (it keeps `portal_job_task`).
+
 ## To 0.2 (from 0.1)
 
 ### `matter_task` takes the firmware

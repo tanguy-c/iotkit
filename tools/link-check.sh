@@ -28,21 +28,23 @@ thread-icd;-p thread-light --features iotkit/matter-icd
 ble-beacon;-p ble-beacon'
 
 # what;where (syms: `nm -C`, strings: string literals; inlined generics leave no symbol);pattern
-# (extended regex);absent from;present in
+# (extended regex);absent from;present in (`-`: no build has it, for code that must never return)
 rules='unused entity kinds;syms;<iotkit_core::model::appliances::(Cover|Valve|Lock|Fan|Climate) as iotkit_core::model::Entity>;devkit;showcase
 unused components;strings;rgb_light write failed;devkit;showcase
 unused status LEDs;syms;iotkit::components::indicator::;devkit;sleepy
 no scheduled updates: no clock;syms;iotkit::clock::;sleepy;sleepy-esphome
 no improv-ble: no Bluetooth stack;syms;r_ble_ll_|trouble_host;lean;devkit
 no console: no commands;strings;Type .help. and press Enter;lean;devkit
-no softap: no portal;syms;portal_task;lean;devkit
+no console: no memory metrics;syms;iotkit::diag::esp::memory::;lean;devkit
+no softap: no portal;strings;Location: http://192.168.4.1/;lean;devkit
 no tls: no TLS code;strings;TLS with;devkit;devkit-tls
 no esphome-api: no API server;syms;api_task|esphome;devkit;devkit-esphome
 no matter-icd: no sleepy Thread driver;syms;iotkit::matter::icd::;thread-light;thread-icd
 no matter-ota: no OTA requestor;syms;iotkit::matter::ota::|ota_req::OtaRequestorHandler;devkit-matter;thread-light
 no remember: no saved states;syms;iotkit::remember::|iotkit_core::remember::;devkit;thread-light
 no way to update: no OTA engine;syms;iotkit::ota::esp::;ble-beacon;devkit
-no wifi: no IP stack;syms;embassy_net::|smoltcp::;ble-beacon;devkit'
+no wifi: no IP stack;syms;embassy_net::|smoltcp::;ble-beacon;devkit
+no float parser (17 KB): MQTT parses decimals itself;syms;dec2flt;devkit;-'
 
 echo "$builds" | while IFS=';' read -r name args; do
     set -- $args
@@ -56,7 +58,8 @@ failed=0
 echo "$rules" | {
     while IFS=';' read -r what kind pattern absent present; do
         a=$(grep -cE "$pattern" "$out/$absent.$kind" || true)
-        p=$(grep -cE "$pattern" "$out/$present.$kind" || true)
+        p=-
+        [ "$present" = - ] || p=$(grep -cE "$pattern" "$out/$present.$kind" || true)
         if [ "$a" != 0 ]; then
             echo "FAIL $what: $a matches in $absent"; failed=1
         elif [ "$p" = 0 ]; then

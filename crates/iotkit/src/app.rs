@@ -140,6 +140,8 @@ pub const CHIP: &str = if cfg!(feature = "esp32c6") {
 /// this early.
 #[doc(hidden)]
 pub fn __early_boot(flash: FLASH<'static>) {
+    #[cfg(feature = "console")]
+    crate::diag::esp::paint_stack();
     crate::config::esp::init(flash);
     #[cfg(esp_ota)]
     crate::ota::esp::early_guard();

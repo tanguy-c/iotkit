@@ -18,7 +18,7 @@ matter-wifi = ["iotkit/matter-wifi"]
 [dependencies]
 # From GitHub. A local checkout instead: `iotkit_path` (cargo generate), `--iotkit-path` (cargo iotkit new).
 {% if chip == "esp32" %}# The ESP32: no Bluetooth setup (`improv-ble` does not link on it yet).
-{% endif %}iotkit = { {% if iotkit_path == "" %}git = "https://github.com/tanguy-c/iotkit"{% else %}path = "{{iotkit_path}}/crates/iotkit"{% endif %}, {% if chip == "esp32" %}default-features = false, features = ["esp32", "wifi", "softap", "improv-serial", "console", "ota-push", "ha-update"]{% else %}features = ["{{chip}}", "ha-update"]{% endif %} }
+{% endif %}iotkit = { {% if iotkit_path == "" %}git = "https://github.com/tanguy-c/iotkit"{% else %}path = "{{iotkit_path}}/crates/iotkit"{% endif %}, {% if chip == "esp32" %}default-features = false, features = ["esp32", "wifi", "mqtt", "softap", "improv-serial", "console", "ota-push", "ha-update"]{% else %}features = ["{{chip}}", "ha-update"]{% endif %} }
 
 esp-hal                = { version = "~1.2.2", features = ["{{chip}}", "log-04", "unstable"] }
 esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "{{chip}}", "log-04"] }

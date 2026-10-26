@@ -1,28 +1,18 @@
-//! Improv on the chip: the serial front-end (fed by the app's console) and the Bluetooth LE GATT
-//! server (only while a provisioning window is open).
+//! Provisioning on the chip: the windows, Improv's serial front-end (fed by the app's console),
+//! and while a window is open the Bluetooth LE GATT server and the setup access point.
 
 use core::{
     fmt::Write as _,
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use core::net::Ipv4Addr;
 #[cfg(feature = "improv-ble")]
 use embassy_futures::select::select;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 
 use crate::config::esp::SharedStore;
-use crate::net::{
-    WifiCredentials,
-    esp::{AP_ADDRESS, Net},
-};
-use embassy_net::{
-    IpEndpoint,
-    tcp::TcpSocket,
-    udp::{PacketMetadata, UdpSocket},
-};
-use embassy_time::{Duration, Timer, with_timeout};
-use embedded_io_async::Write;
+use crate::net::{WifiCredentials, esp::Net};
+use embassy_time::{Duration, Timer};
 #[cfg(feature = "improv-ble")]
 use esp_hal::peripherals::BT;
 use esp_println::Printer;
@@ -32,8 +22,13 @@ use crate::provision::improv::{
     Error, FRAME_MAX, RPC_MAX, Rpc, SerialDecoder, State, Transport, command, frame, parse_rpc, rpc_result,
     serial_frame,
 };
-use crate::provision::{dhcp, dns, portal};
 
+#[cfg(feature = "softap")]
+mod ap;
+#[cfg(feature = "softap")]
+pub(crate) use ap::ApBuffers;
+#[cfg(feature = "softap")]
+pub use ap::portal_job_task;
 #[cfg(feature = "improv-ble")]
 mod ble;
 
@@ -182,7 +177,8 @@ fn send_result(id: u8, strings: &[&str]) {
 }
 
 /// Runs the provisioning windows: the setup access point (`softap`) and Improv over Bluetooth LE
-/// (`ble`) while a window is open, both off otherwise.
+/// (`ble`) while a window is open, both off otherwise. The access point's servers work in the
+/// kit's work area ([`crate::scratch`]), held only while the window is open.
 #[embassy_executor::task]
 pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: Provisioner) {
     // Once: its attribute values are static cells, which cannot be made twice.
@@ -192,6 +188,14 @@ pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: 
         while !window_open() {
             CHANGED.wait().await;
         }
+        #[cfg(feature = "softap")]
+        let mut area = match crate::scratch::try_lease() {
+            Some(area) => area,
+            None => {
+                log::info!("provision: the window opens once the update or download running is over");
+                crate::scratch::lease().await
+            }
+        };
         #[cfg(feature = "softap")]
         crate::net::esp::access_point(true).await;
         let window = async {
@@ -204,18 +208,23 @@ pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: 
                 core::future::pending::<()>().await;
             }
         };
-        #[cfg(feature = "improv-ble")]
-        select(ble::run_ble(bt.reborrow(), &p, server.as_ref()), window).await;
-        #[cfg(not(feature = "improv-ble"))]
-        window.await;
-        closed().await;
+        let open = async {
+            #[cfg(feature = "improv-ble")]
+            select(ble::run_ble(bt.reborrow(), &p, server.as_ref()), window).await;
+            #[cfg(not(feature = "improv-ble"))]
+            window.await;
+            closed().await;
+            // Leave the portal's client time to see the outcome.
+            #[cfg(feature = "softap")]
+            Timer::after_secs(10).await;
+        };
         #[cfg(feature = "softap")]
         {
-            // Leave the portal's client time to see the outcome.
-            Timer::after_secs(10).await;
-            PORTAL.lock(|s| *s.borrow_mut() = PortalStatus::Idle);
+            embassy_futures::select::select(ap::servers(&p, area.access_point()), open).await;
             crate::net::esp::access_point(false).await;
         }
+        #[cfg(not(feature = "softap"))]
+        open.await;
     }
 }
 
@@ -227,181 +236,6 @@ async fn closed() {
     while window_open() {
         CHANGED.wait().await;
     }
-}
-
-/// DHCP server of the setup access point.
-#[embassy_executor::task]
-pub async fn dhcp_task(p: Provisioner) {
-    let (mut rx_meta, mut tx_meta) = ([PacketMetadata::EMPTY; 2], [PacketMetadata::EMPTY; 2]);
-    let (mut rx, mut tx) = ([0u8; 600], [0u8; 600]);
-    let mut socket = UdpSocket::new(p.net.ap_stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
-    if let Err(e) = socket.bind(67) {
-        log::error!("provision: DHCP bind failed: {e:?}");
-        return;
-    }
-    let mut leases = dhcp::Leases::new();
-    let (mut buf, mut out) = ([0u8; 600], [0u8; 576]);
-    loop {
-        let Ok((n, _)) = socket.recv_from(&mut buf).await else { continue };
-        if let Some(len) = leases.respond(&buf[..n], &mut out) {
-            let to = IpEndpoint::new(Ipv4Addr::BROADCAST.into(), 68);
-            if let Err(e) = socket.send_to(&out[..len], to).await {
-                log::warn!("provision: DHCP reply failed: {e:?}");
-            }
-        }
-    }
-}
-
-/// Captive DNS of the setup access point.
-#[embassy_executor::task]
-pub async fn dns_task(p: Provisioner) {
-    let (mut rx_meta, mut tx_meta) = ([PacketMetadata::EMPTY; 4], [PacketMetadata::EMPTY; 4]);
-    let (mut rx, mut tx) = ([0u8; 1024], [0u8; 1024]);
-    let mut socket = UdpSocket::new(p.net.ap_stack, &mut rx_meta, &mut rx, &mut tx_meta, &mut tx);
-    if let Err(e) = socket.bind(53) {
-        log::error!("provision: DNS bind failed: {e:?}");
-        return;
-    }
-    let (mut buf, mut out) = ([0u8; 512], [0u8; 512]);
-    loop {
-        let Ok((n, meta)) = socket.recv_from(&mut buf).await else { continue };
-        if let Some(len) = dns::answer(&buf[..n], AP_ADDRESS, &mut out) {
-            let _ = socket.send_to(&out[..len], meta.endpoint).await;
-        }
-    }
-}
-
-/// What the portal shows on `/`.
-#[derive(Clone)]
-enum PortalStatus {
-    Idle,
-    Trying(String<32>),
-    Joined(String<32>),
-    Failed(String<32>),
-}
-
-static PORTAL: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::RefCell<PortalStatus>> =
-    embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(PortalStatus::Idle));
-static PORTAL_JOB: Signal<CriticalSectionRawMutex, (String<32>, String<64>)> = Signal::new();
-
-/// Joins the networks sent through the portal (outside the HTTP exchange: joining restarts the
-/// access point).
-#[embassy_executor::task]
-pub async fn portal_job_task(p: Provisioner) {
-    loop {
-        let (ssid, password) = PORTAL_JOB.wait().await;
-        // Let the "joining" page reach the client first.
-        Timer::after_millis(300).await;
-        let status =
-            if p.provision(&ssid, &password).await { PortalStatus::Joined(ssid) } else { PortalStatus::Failed(ssid) };
-        PORTAL.lock(|s| *s.borrow_mut() = status);
-    }
-}
-
-/// The setup page on the access point (port 80).
-#[embassy_executor::task]
-pub async fn portal_task(p: Provisioner) {
-    let (mut rx, mut tx) = ([0u8; 1536], [0u8; 2560]);
-    loop {
-        let mut socket = TcpSocket::new(p.net.ap_stack, &mut rx, &mut tx);
-        socket.set_timeout(Some(Duration::from_secs(10)));
-        if socket.accept(80).await.is_err() {
-            continue;
-        }
-        let mut buf = [0u8; 1536];
-        let Some((head_len, total)) = read_request(&mut socket, &mut buf).await else {
-            socket.abort();
-            continue;
-        };
-        let head = core::str::from_utf8(&buf[..head_len]).unwrap_or("");
-        let line = head.lines().next().unwrap_or("");
-        let (method, target) = crate::net::http::parse_request_line(line).unwrap_or(("", "/"));
-        let url = p.url();
-        let page: String<2048> = match portal::route(method, crate::net::http::target_path(target)) {
-            portal::Route::Redirect => {
-                let _ = socket
-                    .write_all(b"HTTP/1.1 302 Found\r\nLocation: http://192.168.4.1/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                    .await;
-                finish(&mut socket).await;
-                continue;
-            }
-            portal::Route::Page => {
-                let status = PORTAL.lock(|s| s.borrow().clone());
-                match &status {
-                    PortalStatus::Idle => portal::page(p.net.hostname, portal::Notice::None),
-                    PortalStatus::Trying(ssid) => portal::page(p.net.hostname, portal::Notice::Trying { ssid }),
-                    PortalStatus::Joined(ssid) => {
-                        portal::page(p.net.hostname, portal::Notice::Joined { ssid, url: &url })
-                    }
-                    PortalStatus::Failed(ssid) => portal::page(p.net.hostname, portal::Notice::Failed { ssid }),
-                }
-            }
-            portal::Route::Connect => match portal::parse_form(&buf[head_len + 4..total]) {
-                Some((ssid, password)) => {
-                    let page = portal::page(p.net.hostname, portal::Notice::Trying { ssid: &ssid });
-                    PORTAL.lock(|s| *s.borrow_mut() = PortalStatus::Trying(ssid.clone()));
-                    PORTAL_JOB.signal((ssid, password));
-                    page
-                }
-                None => portal::page(p.net.hostname, portal::Notice::None),
-            },
-        };
-        let mut head: String<160> = String::new();
-        let _ = write!(
-            head,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            page.len()
-        );
-        let _ = socket.write_all(head.as_bytes()).await;
-        let _ = socket.write_all(page.as_bytes()).await;
-        finish(&mut socket).await;
-    }
-}
-
-/// Reads a request head and its body (by `Content-Length`); returns the head length (without
-/// the blank line) and the bytes read.
-async fn read_request(socket: &mut TcpSocket<'_>, buf: &mut [u8; 1536]) -> Option<(usize, usize)> {
-    let mut filled = 0;
-    loop {
-        let n = with_timeout(Duration::from_secs(5), socket.read(&mut buf[filled..])).await.ok()?.ok()?;
-        if n == 0 {
-            return None;
-        }
-        filled += n;
-        if let Some(end) = buf[..filled].windows(4).position(|w| w == b"\r\n\r\n") {
-            let head = core::str::from_utf8(&buf[..end]).ok()?;
-            let total = end + 4 + portal::content_length(head).unwrap_or(0);
-            if total > buf.len() {
-                return None;
-            }
-            while filled < total {
-                let n = with_timeout(Duration::from_secs(5), socket.read(&mut buf[filled..total])).await.ok()?.ok()?;
-                if n == 0 {
-                    return None;
-                }
-                filled += n;
-            }
-            return Some((end, total));
-        }
-        if filled == buf.len() {
-            return None;
-        }
-    }
-}
-
-/// Flushes, closes, and waits for the client's FIN (dropping the socket earlier leaves it hanging).
-async fn finish(socket: &mut TcpSocket<'_>) {
-    let _ = socket.flush().await;
-    socket.close();
-    let _ = with_timeout(Duration::from_secs(2), async {
-        let mut rest = [0u8; 64];
-        while let Ok(n) = socket.read(&mut rest).await {
-            if n == 0 {
-                break;
-            }
-        }
-    })
-    .await;
 }
 
 pub use crate::provision::gesture::{HELD, wait_press};

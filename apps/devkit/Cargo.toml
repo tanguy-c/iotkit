@@ -25,7 +25,7 @@ esphome-api = ["iotkit/esphome-api"]
 [dependencies]
 # A path, not `workspace = true`: older cargo cannot turn the default features off over it.
 # Bluetooth setup on every chip but the ESP32 (see the chip features).
-iotkit = { path = "../../crates/iotkit", default-features = false, features = ["wifi", "softap", "improv-serial", "console", "ota-push"] }
+iotkit = { path = "../../crates/iotkit", default-features = false, features = ["wifi", "mqtt", "softap", "improv-serial", "console", "ota-push"] }
 
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }

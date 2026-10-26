@@ -159,10 +159,13 @@ def main():
     run(["cargo", "run", "--quiet", "--manifest-path", "xtask/Cargo.toml", "--target", "x86_64-unknown-linux-gnu",
          "--bin", "cargo-iotkit", "--", "ota", "push", "--host", host, "--release"], cwd=tree, env=env)
     console = Console(wait_port())
-    if not console.wait_for(r"- healthy", 120):
-        sys.exit("FAIL: the update did not get healthy:\n" + console.seen.decode(errors="replace")[-3000:])
-    if not console.command("info", rf"last update: {re.escape(good)} Confirmed"):
-        sys.exit(f"FAIL: `info` does not report {good} confirmed")
+    # Asked, not waited for in the log: on a quick network `healthy` comes before the port is open.
+    deadline = time.time() + 120
+    while not console.command("info", rf"last update: {re.escape(good)} Confirmed"):
+        if time.time() > deadline:
+            sys.exit(f"FAIL: `info` does not report {good} confirmed within 120 s:\n"
+                     + console.seen.decode(errors="replace")[-3000:])
+        time.sleep(5)
     console.close()
     print(f"ok: {good} installed and confirmed")
 

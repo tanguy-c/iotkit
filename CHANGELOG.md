@@ -15,6 +15,14 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   2 s (every 30 s, for a missed event; the signal strength too).
 - Matter over Thread: a paired device now passes its network health check (the attach could
   wake another task instead), so an update over Matter is kept, not rolled back after 30 minutes.
+- **Breaking:** MQTT is a feature, `mqtt` (on by default): a project with
+  `default-features = false` adds it ([Upgrading](docs/src/upgrading.md)). `cargo iotkit new`
+  leaves it out for the ESPHome API: about 33 KB less code and 9 KB more free RAM.
+- The setup access point's servers, downloads and update installs share one work area, only held
+  while they run: 11 KB more free RAM on devkit. An update asked for during a setup window is
+  refused (`ota push`: HTTP 503); a window opened during an update waits for it.
+- `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
+  fullest.
 - Docs: the C6's LP core overwrites iotkit's RTC records; not supported yet
   ([Battery devices](docs/src/battery.md#the-c6s-low-power-core-not-with-iotkit-yet)).
 

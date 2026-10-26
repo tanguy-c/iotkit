@@ -10,7 +10,8 @@ cargo iotkit ota push --host iotkit-XXXX.local --release   # build, serve, have 
 
 `ota push` (feature `ota-push`, on by default) serves `dist/` from this machine (port 8000): the device must reach it. If the host
 name does not resolve, use the device's address (`net` on the console). Bump `version` in
-`Cargo.toml` for each update.
+`Cargo.toml` for each update. While a setup window is open the device answers 503 (its RAM is
+the window's): push again once it closes.
 
 ## From Home Assistant
 

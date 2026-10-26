@@ -4,7 +4,7 @@
 //! module (chip feature) runs the client.
 
 pub mod codec;
-#[cfg(esp_wifi)]
+#[cfg(all(esp_wifi, feature = "mqtt"))]
 pub mod esp;
 pub mod ha;
 
@@ -64,5 +64,5 @@ mod tests {
     }
 }
 
-#[cfg(esp_wifi)]
+#[cfg(all(esp_wifi, feature = "mqtt"))]
 pub(crate) use crate::atomic;
