@@ -241,12 +241,24 @@ async fn closed() {
 pub use crate::provision::gesture::{HELD, wait_press};
 
 /// BOOT button (active low): runs the [gestures](crate::provision::gesture); a factory reset forgets every
-/// setting and Matter pairing.
+/// setting and Matter pairing. A short press closes an open window (a setup window once a network
+/// is stored, a Matter pairing window once paired); otherwise it is the app's.
 #[embassy_executor::task]
 pub async fn button_task(mut button: esp_hal::gpio::Input<'static>, store: &'static SharedStore) {
     use crate::provision::gesture::Gesture;
     loop {
         match crate::provision::gesture::next(&mut button, None).await {
+            #[cfg(feature = "matter-wifi")]
+            Gesture::Press if crate::matter::common::pairing() => crate::matter::common::close_pairing_window(),
+            Gesture::Press if window_open() => {
+                // Without a network, the window is the way to get one: it stays.
+                if matches!(store.lock().await.load::<WifiCredentials>().await, Ok(Some(_))) {
+                    log::info!("provision: button pressed, window closed");
+                    close_window();
+                } else {
+                    log::info!("provision: no Wi-Fi network yet, the window stays open");
+                }
+            }
             Gesture::Press => crate::provision::gesture::pressed(),
             Gesture::Provision => {
                 log::info!("provision: button held, window open");

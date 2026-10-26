@@ -176,6 +176,8 @@ pub(crate) enum Request {
     Pair,
     /// Forget every pairing.
     Reset,
+    /// Close the pairing window, if paired (else it stays: the way to pair).
+    Close,
 }
 
 pub(crate) static REQUESTS: embassy_sync::signal::Signal<CriticalSectionRawMutex, Request> =
@@ -187,6 +189,11 @@ pub const PAIRING_WINDOW_S: u16 = 900;
 /// paired (Matter devices can have several controllers).
 pub fn open_pairing_window() {
     REQUESTS.signal(Request::Pair);
+}
+
+/// Closes an open pairing window (a short press of the button), once paired.
+pub(crate) fn close_pairing_window() {
+    REQUESTS.signal(Request::Close);
 }
 
 /// Forgets every pairing and restarts (the pairing code stays the same).

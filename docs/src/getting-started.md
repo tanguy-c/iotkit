@@ -34,19 +34,21 @@ It asks, in plain words:
   soil moisture; motion, door, leak, smoke; relay, light, blind, valve, lock, fan, thermostat,
   settings; push buttons; any other reading or mode. Pins are checked for the chip (no flash or USB pin, an ADC pin for
   analog parts);
+- **the LEDs**: the board's RGB LED as a light, and what shows the status (pairing, connecting,
+  updates): that LED (over the light, by default when plugged in), a LED on a pin, or nothing;
 - whether to add an `AGENTS.md` for AI coding agents.
 
 You get one entity per part, a [ready-made part](components.md) where there is one and a
 `TODO(<entity id>)` with hints elsewhere, a README with the wiring table, `.cargo/secrets.toml`
 with what you gave, and the update signing keys. `--defaults` asks nothing (a plugged-in C6 with
-its LED); `--answers FILE` reads the answers from TOML (scripts, CI).
+its LED as a light that shows the status); `--answers FILE` reads the answers from TOML (scripts, CI).
 
 The project depends on iotkit from GitHub; `Cargo.lock` pins the commit and `cargo update` moves
 it on. `--iotkit-path DIR` uses a local checkout instead.
 
 Without the questions: `cargo generate --git https://github.com/tanguy-c/iotkit template --name
 my-device`, then `cargo iotkit keygen`. It makes the DevKit's RGB LED a light, toggled by a short
-press of BOOT.
+press of BOOT, that shows the device's status too (blue blinking while it waits to be set up).
 
 ## First flash
 
@@ -72,7 +74,8 @@ With no network stored, the device opens a setup window. Give it your network an
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
 characters. To change it later, hold **BOOT** 3 s, or type `provision` on the USB console;
-the window stays open 10 minutes. Hold **BOOT** 10 s to erase every setting and Matter pairing.
+the window stays open 10 minutes, or until a short press of **BOOT** closes it (once a network is
+stored). Hold **BOOT** 10 s to erase every setting and Matter pairing.
 
 > During a setup window anyone in range can give the device a network. Open it only when you
 > need it.

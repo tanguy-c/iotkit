@@ -19,6 +19,8 @@ pub fn main_rs(p: &Project) -> String {
     let battery_pin = sleepy.then_some(p.answers.battery_pin).flatten();
     let led = p.status_led();
     let status = p.answers.status;
+    // The RGB LED is a light: plain, or showing the status too (`rgb_status_light`).
+    let plain_led = led && status != Indicator::Rgb;
     let mut iotkit: BTreeSet<&str> = ["Board", "Config", "PublicKey"].into();
     let mut time: BTreeSet<&str> = BTreeSet::new();
     let mut statics = String::new();
@@ -198,7 +200,10 @@ pub fn main_rs(p: &Project) -> String {
     }
 
     if led {
-        iotkit.extend(["Light", "LightState"]);
+        iotkit.insert("Light");
+        if status != Indicator::Rgb {
+            iotkit.insert("LightState");
+        }
         // Kept across restarts (never on battery: no status LED there).
         let _ = writeln!(statics, "static LED: Light = Light::new(\"status_led\", \"Status LED\").remember();");
         ids.push("LED".into());
@@ -255,7 +260,7 @@ pub fn main_rs(p: &Project) -> String {
 
     // Imports.
     s.push_str("use embassy_executor::Spawner;\n");
-    if led {
+    if plain_led {
         s.push_str("use embassy_futures::select::{Either, select};\n");
     }
     if !time.is_empty() {
@@ -282,7 +287,7 @@ pub fn main_rs(p: &Project) -> String {
     }
     let _ = writeln!(s, "use iotkit::{};", group(&iotkit));
 
-    if led {
+    if plain_led {
         s.push_str("use log::warn;\nuse smart_leds::{RGB8, SmartLedsWriteAsync, brightness};\n");
     } else if status == Indicator::Rgb {
         s.push_str("use smart_leds::RGB8;\n");
@@ -392,7 +397,7 @@ async fn main(spawner: Spawner) -> ! {{
     } else {
         s.push_str("    iotkit::start(spawner, board, &CONFIG).await;\n");
     }
-    if status == Indicator::Rgb {
+    if status == Indicator::Rgb && !led {
         rgb_led(&mut s, "status_task");
     }
     if let (Indicator::Led, Some(pin)) = (status, p.answers.status_pin) {
@@ -434,7 +439,9 @@ async fn main(spawner: Spawner) -> ! {{
     }
     s.push_str(&tasks);
     match status {
-        Indicator::Off => {}
+        Indicator::Off | Indicator::Auto => {}
+        // The light shows it (`led_task`).
+        Indicator::Rgb if led => {}
         Indicator::Rgb => s.push_str(
             "
 /// The board's RGB LED shows the status (`iotkit::status`): blue blinking while it waits to be set up.
@@ -456,7 +463,22 @@ async fn status_task(led: Output<'static>) {
 ",
         ),
     }
-    if led {
+    if led && !plain_led {
+        let _ = write!(
+            s,
+            "
+/// The status LED, as a light{}; a short press of BOOT toggles it.
+/// The status shows over it (`iotkit::status`): blue blinking while it waits to be set up.
+#[embassy_executor::task]
+async fn led_task(led: Led) {{
+    // `Show::All` while developing; `Show::Pairing` for a release: only to set it up.
+    iotkit::components::rgb_status_light(&LED, led, 1, iotkit::status::Show::All, true).await
+}}
+",
+            if p.thread() { " over Matter" } else { " in Home Assistant" }
+        );
+    }
+    if plain_led {
         let _ = write!(
             s,
             "
@@ -849,8 +871,9 @@ pub fn readme(p: &Project) -> String {
     if p.status_led() {
         let _ = writeln!(
             s,
-            "| Status LED | GPIO{} | on the board | Light `status_led` | {} |",
+            "| Status LED | GPIO{} | on the board | Light `status_led`{} | {} |",
             p.board.rgb_led.unwrap_or_default(),
+            if a.status == Indicator::Rgb { ", shows the status too" } else { "" },
             if a.matter != MatterMode::Off { "Extended colour light" } else { "-" }
         );
     }
@@ -865,7 +888,7 @@ pub fn readme(p: &Project) -> String {
         (Indicator::Led, Some(pin)) => {
             let _ = writeln!(s, "| Status LED | GPIO{pin} | a LED and a resistor (330 Ω) to GND | - | - |");
         }
-        (Indicator::Rgb, _) => {
+        (Indicator::Rgb, _) if !p.status_led() => {
             let _ = writeln!(s, "| Status LED | GPIO{} | on the board | - | - |", p.board.rgb_led.unwrap_or_default());
         }
         _ => {}
@@ -877,7 +900,7 @@ pub fn readme(p: &Project) -> String {
     };
     let _ = writeln!(
         s,
-        "\n{button} is the setup button: hold it 3 s to open {}, 10 s to factory reset.",
+        "\n{button} is the setup button: hold it 3 s to open {}, press it to close it, 10 s to factory reset.",
         if p.thread() { "a Matter pairing window" } else { "the setup window" }
     );
     if p.sleepy() {

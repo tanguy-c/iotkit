@@ -39,9 +39,11 @@ pub struct Answers {
     /// Battery: the ADC1 pin behind a divider, to report the charge.
     pub battery_pin: Option<u8>,
     pub battery_curve: Curve,
-    /// The board's RGB LED as a light (plugged-in devkits).
+    /// The board's RGB LED as a light (plugged-in devkits); with `status = "rgb"` it shows the
+    /// status too.
     pub status_led: bool,
-    /// What shows the device's status (pairing, connecting, updates).
+    /// What shows the device's status (pairing, connecting, updates): `auto` (default), `off`,
+    /// `rgb` or `led`.
     pub status: Indicator,
     /// With `status = "led"`: the LED's pin (to ground through a resistor).
     pub status_pin: Option<u8>,
@@ -82,7 +84,7 @@ impl Default for Answers {
             battery_pin: None,
             battery_curve: Curve::Lipo,
             status_led: true,
-            status: Indicator::Off,
+            status: Indicator::Auto,
             status_pin: None,
             button_pin: None,
             wifi_ssid: None,
@@ -140,6 +142,8 @@ pub enum MatterMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Indicator {
+    /// The board's RGB LED if it has one and is not on battery, else nothing.
+    Auto,
     Off,
     /// The board's RGB LED (`components::status_rgb`).
     Rgb,
@@ -231,11 +235,9 @@ impl Project {
         }
     }
 
+    /// The board's RGB LED is a light (showing the status too with `status = "rgb"`).
     pub fn status_led(&self) -> bool {
-        self.answers.status_led
-            && !self.battery()
-            && self.board.rgb_led.is_some()
-            && self.answers.status != Indicator::Rgb
+        self.answers.status_led && !self.battery() && self.board.rgb_led.is_some()
     }
 
     /// The setup button's pin.
@@ -244,7 +246,7 @@ impl Project {
     }
 
     /// Checks the answers: board, pins, what the chip can do.
-    pub fn new(answers: Answers, iotkit_path: String) -> Result<Self> {
+    pub fn new(mut answers: Answers, iotkit_path: String) -> Result<Self> {
         let Some(board) = boards::board(&answers.board) else {
             let ids: Vec<_> = BOARDS.iter().map(|b| b.id).collect();
             bail!("unknown board `{}` (one of {ids:?})", answers.board);
@@ -261,6 +263,11 @@ impl Project {
             (None, None) => "4mb".into(),
         };
         let battery = answers.power == Power::Battery;
+        if answers.status == Indicator::Auto {
+            // On battery, a WS2812 draws even dark: a status there is asked for.
+            let rgb = board.rgb_led.is_some() && !battery;
+            answers.status = if rgb { Indicator::Rgb } else { Indicator::Off };
+        }
         if answers.transport == Transport::Thread {
             ensure!(
                 board.thread(),
@@ -329,15 +336,14 @@ impl Project {
                     "the {} has no RGB LED: set `status = \"led\"` and `status_pin`",
                     board.model
                 );
-                if led {
-                    warnings.push("the RGB LED shows the status: no status light".into());
-                }
                 if battery {
                     warnings.push("a WS2812 draws about 1 mA even dark: on battery, a plain LED (`status = \"led\"`) lasts longer".into());
                 }
             }
             Indicator::Led => ensure!(answers.status_pin.is_some(), "`status = \"led\"` needs `status_pin`"),
-            Indicator::Off => ensure!(answers.status_pin.is_none(), "`status_pin` needs `status = \"led\"`"),
+            Indicator::Off | Indicator::Auto => {
+                ensure!(answers.status_pin.is_none(), "`status_pin` needs `status = \"led\"`")
+            }
         }
         let take = |pin: u8, kind: PinUse, what: &str, taken: &mut Vec<u8>, warnings: &mut Vec<String>| -> Result<()> {
             match check_pin(board, pin, kind, taken) {
@@ -788,16 +794,18 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     // 5. Parts.
     a.status_led = board.rgb_led.is_some()
         && !battery
-        && Confirm::new("Keep the board's RGB LED as a status light?")
+        && Confirm::new("Keep the board's RGB LED as a light?")
             .with_default(true)
             .with_help_message("A light in your home app; a short press of BOOT toggles it")
             .prompt()?;
     let mut taken: Vec<u8> = a.battery_pin.into_iter().collect();
-    let mut shows = vec!["Nothing"];
-    if board.rgb_led.is_some() && !a.status_led {
-        shows.push("The board's RGB LED");
-    }
-    shows.push("A LED on a pin");
+    // The first is the default: the board's LED when plugged in, nothing on battery.
+    let rgb = if a.status_led { "The board's RGB LED (over the light)" } else { "The board's RGB LED" };
+    let shows = match (board.rgb_led.is_some(), battery) {
+        (true, false) => vec![rgb, "A LED on a pin", "Nothing"],
+        (true, true) => vec!["Nothing", "A LED on a pin", rgb],
+        (false, _) => vec!["Nothing", "A LED on a pin"],
+    };
     let show = Select::new("What shows its status (pairing, connecting, updates)?", shows)
         .with_help_message("Blinks while it waits to be set up, and while it connects or updates")
         .prompt()?;
@@ -1030,7 +1038,9 @@ mod tests {
         assert!(main.contains("components::poll(&SOIL_MOISTURE"), "{main}");
         assert!(main.contains("TODO(temperature):"));
         assert!(main.contains("iotkit::start(spawner, board, &CONFIG).await;"));
-        assert!(main.contains("led_task"));
+        // The RGB LED: a light that shows the status too, one task.
+        assert!(main.contains("rgb_status_light(&LED, led, 1, iotkit::status::Show::All, true)"), "{main}");
+        assert!(!main.contains("status_task"), "{main}");
         let secrets = codegen::secrets(&p).unwrap();
         assert!(secrets.contains(&format!("MATTER_PASSCODE = \"{}\"", p.matter_setup.unwrap().passcode)));
         let cargo = codegen::cargo_toml(
@@ -1039,7 +1049,7 @@ mod tests {
         )
         .unwrap();
         assert!(cargo.contains("default     = [\"matter-wifi\"]"), "{cargo}");
-        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"remember\"]"), "{cargo}");
+        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\"]"), "{cargo}");
         assert!(codegen::readme(&p).contains(&p.matter_setup.unwrap().manual_code_pretty()));
     }
 
@@ -1105,7 +1115,7 @@ mod tests {
         // The defaults but MQTT.
         assert!(
             cargo.contains(
-                "default-features = false, features = [\"esp32c6\", \"ha-update\", \"remember\", \"esphome-api\", \"improv-ble\", \"wifi\", \"softap\", \"improv-serial\", \"console\", \"ota-push\"]"
+                "default-features = false, features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\", \"esphome-api\", \"improv-ble\", \"wifi\", \"softap\", \"improv-serial\", \"console\", \"ota-push\"]"
             ),
             "{cargo}"
         );
@@ -1144,7 +1154,7 @@ mod tests {
             main.contains("radio: p.IEEE802154") && main.contains("adc1: p.ADC1") && !main.contains("WIFI"),
             "{main}"
         );
-        assert!(main.contains("gesture::wait_press") && main.contains("over Matter"), "{main}");
+        assert!(main.contains("Show::All, true)") && main.contains("over Matter"), "{main}");
         // The status LED keeps its state, and is written before `start` keeps the CPU.
         assert!(main.contains("Light::new(\"status_led\", \"Status LED\").remember()"), "{main}");
         assert!(main.find("spawner.spawn(led_task") < main.find("iotkit::start("), "{main}");
@@ -1155,7 +1165,7 @@ mod tests {
         .unwrap();
         assert!(
             cargo.contains(
-                "default-features = false, features = [\"esp32c6\", \"matter-thread\", \"matter-ota\", \"remember\"]"
+                "default-features = false, features = [\"esp32c6\", \"matter-thread\", \"matter-ota\", \"smartled\", \"remember\"]"
             ),
             "{cargo}"
         );

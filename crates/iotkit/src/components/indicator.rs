@@ -1,5 +1,6 @@
 //! Status LEDs: [`status_led`] (one colour) and [`status_rgb`] (addressable, `smartled`) show
-//! [`status`](crate::status) with the kit's [`pattern`]s.
+//! [`status`](crate::status) with the kit's [`pattern`]s; [`rgb_status_light`] (`smartled`) is a
+//! light that shows it too. An app driving its LED itself follows it with an [`Overlay`].
 
 #[cfg(feature = "_esp")]
 use crate::status::Show;
@@ -13,6 +14,37 @@ pub struct Pattern {
     pub steps: &'static [(u16, u16)],
     /// Played again and again (else once).
     pub repeat: bool,
+}
+
+impl Pattern {
+    /// `elapsed_ms` after it started: lit or dark, and for how many ms more; `None` once a
+    /// pattern played once is over.
+    pub const fn at(&self, elapsed_ms: u32) -> Option<(bool, u32)> {
+        let mut period = 0u32;
+        let mut i = 0;
+        while i < self.steps.len() {
+            period += self.steps[i].0 as u32 + self.steps[i].1 as u32;
+            i += 1;
+        }
+        if period == 0 || (!self.repeat && elapsed_ms >= period) {
+            return None;
+        }
+        let mut t = elapsed_ms % period;
+        let mut i = 0;
+        while i < self.steps.len() {
+            let (lit, dark) = (self.steps[i].0 as u32, self.steps[i].1 as u32);
+            if t < lit {
+                return Some((true, lit - t));
+            }
+            t -= lit;
+            if t < dark {
+                return Some((false, dark - t));
+            }
+            t -= dark;
+            i += 1;
+        }
+        None
+    }
 }
 
 const fn repeat(steps: &'static [(u16, u16)]) -> Pattern {
@@ -48,22 +80,81 @@ pub const fn color(status: Status) -> (u8, u8, u8) {
     }
 }
 
-/// Plays `p` once (to its end, dark if not repeated) or forever.
+/// What a LED shared with the status shows now: a step of the status's [`pattern`], or the
+/// app's own content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Frame {
+    /// The status: lit (in its [`color`]) or dark.
+    Status {
+        /// What is shown.
+        status: Status,
+        /// Lit, or dark between blinks.
+        lit: bool,
+    },
+    /// No status to show (none, or a pattern played once is over): the app's content.
+    Own,
+}
+
+/// Follows [`status`](crate::status) step by step, for a LED that does something else when no
+/// status is shown (a light). Cancel-safe: `select` it with the app's own events.
+///
+/// ```ignore
+/// let mut overlay = Overlay::new(Show::All);
+/// loop {
+///     match select(overlay.next(), LIGHT.wait_command()).await {
+///         Either::First(Frame::Status { status, lit }) => { /* color(status), or dark */ }
+///         Either::First(Frame::Own) => { /* the light */ }
+///         Either::Second(state) => { /* a command */ }
+///     }
+/// }
+/// ```
 #[cfg(feature = "_esp")]
-async fn play(p: Pattern, mut light: impl AsyncFnMut(bool)) {
-    use embassy_time::Timer;
-    loop {
-        for &(lit, dark) in p.steps {
-            light(true).await;
-            Timer::after_millis(lit.into()).await;
-            if dark > 0 {
-                light(false).await;
-                Timer::after_millis(dark.into()).await;
+pub struct Overlay {
+    watcher: crate::status::Watcher,
+    /// The status and when its pattern started; `None` before the first `next`.
+    status: Option<(Option<Status>, embassy_time::Instant)>,
+    last: Option<Frame>,
+}
+
+#[cfg(feature = "_esp")]
+impl Overlay {
+    /// Follows the statuses `shown` shows. Takes one of the 4 [`watch`](crate::status::watch)ers.
+    pub fn new(shown: Show) -> Self {
+        Self { watcher: crate::status::watch(shown), status: None, last: None }
+    }
+
+    /// The frame: at once the first time, then each time it changes.
+    pub async fn next(&mut self) -> Frame {
+        use embassy_futures::select::{Either, select};
+        use embassy_time::{Instant, Timer};
+        loop {
+            let (status, since) = match self.status {
+                Some(s) => s,
+                // Ready at once the first time.
+                None => *self.status.insert((self.watcher.next().await, Instant::now())),
+            };
+            let now = Instant::now();
+            let step =
+                status.and_then(|s| pattern(s).at(now.duration_since(since).as_millis() as u32).map(|st| (s, st)));
+            let (frame, until) = match step {
+                Some((status, (lit, ms))) => {
+                    (Frame::Status { status, lit }, Some(now + embassy_time::Duration::from_millis(ms.into())))
+                }
+                None => (Frame::Own, None),
+            };
+            if self.last != Some(frame) {
+                self.last = Some(frame);
+                return frame;
             }
-        }
-        if !p.repeat {
-            light(false).await;
-            return;
+            let step_over = async {
+                match until {
+                    Some(at) => Timer::at(at).await,
+                    None => core::future::pending().await,
+                }
+            };
+            if let Either::First(next) = select(self.watcher.next(), step_over).await {
+                self.status = Some((next, Instant::now()));
+            }
         }
     }
 }
@@ -72,44 +163,42 @@ async fn play(p: Pattern, mut light: impl AsyncFnMut(bool)) {
 /// darkens the LED.
 #[cfg(feature = "_esp")]
 async fn show(shown: Show, mut light: impl AsyncFnMut(Status, bool)) -> ! {
-    use embassy_futures::select::{Either, Either3, select, select3};
-    let mut watcher = crate::status::watch(shown);
+    use embassy_futures::select::{Either, select};
+    let mut overlay = Overlay::new(shown);
     // Dark before a deep sleep or a restart: a WS2812 keeps its last colour (and draws for it).
     let mut party = crate::runtime::shutdown::register();
-    let shutdown = async |party: &mut Option<crate::runtime::shutdown::Party>| match party {
-        Some(p) => p.requested().await,
-        None => core::future::pending().await,
-    };
-    let mut status = watcher.next().await;
     // The last one lit, to darken.
-    let mut lit = status.unwrap_or(Status::Connecting);
+    let mut lit = None;
     loop {
-        let played = async {
-            if let Some(s) = status {
-                play(pattern(s), async |on| light(s, on).await).await
+        match select(overlay.next(), shutdown(&mut party)).await {
+            Either::First(Frame::Status { status, lit: on }) => {
+                light(status, on).await;
+                lit = Some(status);
             }
-        };
-        if let Some(s) = status {
-            lit = s;
-        }
-        status = match select3(watcher.next(), played, shutdown(&mut party)).await {
-            Either3::First(next) => next,
-            // Played once (or nothing to show): dark until the next status.
-            Either3::Second(()) => match select(watcher.next(), shutdown(&mut party)).await {
-                Either::First(next) => next,
-                Either::Second(()) => break,
-            },
-            Either3::Third(()) => break,
-        };
-        if status.is_none() {
-            light(lit, false).await;
+            Either::First(Frame::Own) => {
+                if let Some(s) = lit.take() {
+                    light(s, false).await;
+                }
+            }
+            Either::Second(()) => break,
         }
     }
-    light(lit, false).await;
+    if let Some(s) = lit {
+        light(s, false).await;
+    }
     if let Some(p) = party.as_mut() {
         p.done();
     }
     core::future::pending().await
+}
+
+/// The restart or deep sleep `party` (if any) waits for.
+#[cfg(feature = "_esp")]
+async fn shutdown(party: &mut Option<crate::runtime::shutdown::Party>) {
+    match party {
+        Some(p) => p.requested().await,
+        None => core::future::pending().await,
+    }
 }
 
 /// A one-colour status LED on `led` (see [`pattern`]) showing `shown` (its families). Off between
@@ -149,6 +238,67 @@ where
     .await
 }
 
+/// Brightness of the status on [`rgb_status_light`] (0-255): seen, not dazzling.
+pub const STATUS_LEVEL: u8 = 32;
+
+/// `count` addressable LEDs as an RGB light (`entity`) that shows the status too: while one of
+/// `shown` plays (see [`pattern`]), the LEDs show it in its [`color`], then the light again.
+/// With `toggle_on_press`, a short press of the setup button toggles the light. Starts off,
+/// white: a remembered state (`.remember()`) comes back as a command.
+///
+/// With esp-hal: an `esp_hal_smartled::RmtSmartLeds` on an RMT channel.
+#[cfg(all(feature = "_esp", feature = "smartled"))]
+pub async fn rgb_status_light<L>(
+    entity: &crate::model::Light,
+    mut leds: L,
+    count: usize,
+    shown: Show,
+    toggle_on_press: bool,
+) -> !
+where
+    L: smart_leds::SmartLedsWriteAsync<Color = smart_leds::RGB8>,
+    L::Error: core::fmt::Debug,
+{
+    use crate::model::{Entity, LightState};
+    use embassy_futures::select::{Either4, select4};
+    use smart_leds::{RGB8, brightness};
+    let press = async || {
+        if toggle_on_press { crate::provision::gesture::wait_press().await } else { core::future::pending().await }
+    };
+    let mut overlay = Overlay::new(shown);
+    let mut party = crate::runtime::shutdown::register();
+    let mut state = LightState { on: false, brightness: 64, rgb: [255, 255, 255] };
+    let mut frame = Frame::Own;
+    entity.set(state);
+    loop {
+        let (color, level) = match frame {
+            Frame::Status { status, lit: true } => {
+                let (r, g, b) = color(status);
+                (RGB8::new(r, g, b), STATUS_LEVEL)
+            }
+            Frame::Status { lit: false, .. } => (RGB8::default(), 0),
+            Frame::Own if state.on => (RGB8::new(state.rgb[0], state.rgb[1], state.rgb[2]), state.brightness),
+            Frame::Own => (RGB8::default(), 0),
+        };
+        if let Err(e) = leds.write(brightness(core::iter::repeat_n(color, count), level)).await {
+            log::warn!("{}: rgb_status_light write failed: {e:?}", entity.meta().id);
+        }
+        match select4(overlay.next(), entity.wait_command(), press(), shutdown(&mut party)).await {
+            Either4::First(f) => frame = f,
+            Either4::Second(wanted) => state = wanted,
+            Either4::Third(()) => state = LightState { on: !state.on, ..state },
+            Either4::Fourth(()) => break,
+        }
+        entity.set(state);
+    }
+    // Dark before a deep sleep or a restart: a WS2812 keeps its last colour.
+    let _ = leds.write(core::iter::repeat_n(RGB8::default(), count)).await;
+    if let Some(p) = party.as_mut() {
+        p.done();
+    }
+    core::future::pending().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +321,17 @@ mod tests {
             // A repeated pattern goes dark at some point, or is meant to stay lit.
             assert!(!p.repeat || p.steps.iter().any(|&(_, dark)| dark > 0) || s == Status::Held(Hold::Pairing));
         }
+        // The steps in time: lit, then dark, then the next; a pattern played once ends.
+        let p = Pattern { steps: &[(100, 200), (300, 0)], repeat: false };
+        assert_eq!(p.at(0), Some((true, 100)));
+        assert_eq!(p.at(150), Some((false, 150)));
+        assert_eq!(p.at(300), Some((true, 300)));
+        assert_eq!(p.at(599), Some((true, 1)));
+        assert_eq!(p.at(600), None);
+        let p = Pattern { repeat: true, ..p };
+        assert_eq!(p.at(600), Some((true, 100)), "again");
+        assert_eq!(p.at(6150), Some((false, 150)));
+        assert_eq!(pattern(Status::Held(Hold::Pairing)).at(5000), Some((true, 1000)), "lit on");
         // Told apart without colour.
         for (i, a) in all.iter().enumerate() {
             for b in &all[i + 1..] {

@@ -226,6 +226,8 @@ macro_rules! session_body {
         CONNECTED.store(true, Ordering::Relaxed);
         #[cfg(not(feature = "deep-sleep"))]
         UP.signal(());
+        // Down again when the session ends, whichever way.
+        let _up = crate::status::LinkUp::new(crate::status::Link::Broker);
 
         let ping_every = Duration::from_secs(u64::from(KEEP_ALIVE_S) / 2);
         let mut last_rx = Instant::now();

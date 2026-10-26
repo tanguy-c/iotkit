@@ -5,7 +5,7 @@
 optionally the absolute path of an iotkit checkout: the generated project uses `iotkit` and
 `iotkit-build` from there, or from the GitHub repository when it is left empty.
 
-`src/main.rs` is a small iotkit app (the LED as a light). Signed builds and OTA use the
+`src/main.rs` is a small iotkit app (the LED as a light that shows the device's status). Signed builds and OTA use the
 `cargo iotkit` CLI (`cargo install --path <iotkit>/xtask`).
 
 `partitions*.csv`, `rustfmt.toml`, `.clippy.toml`, `.vscode/extensions.json`

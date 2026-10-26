@@ -134,6 +134,61 @@ pub(crate) fn notify() {
 #[cfg(feature = "_esp")]
 static OFFLINE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// A link whose state is followed live: once it has come up, the status is
+/// [`Connecting`](Status::Connecting) again while it is down. Matter's is not followed yet (its
+/// health check, passed once, stands for it).
+#[cfg(esp_wifi)]
+#[derive(Clone, Copy)]
+pub(crate) enum Link {
+    /// Wi-Fi joined, with an IPv4 address.
+    Network = 0,
+    /// Connected to the MQTT broker.
+    #[cfg(feature = "mqtt")]
+    Broker = 1,
+    /// Home Assistant subscribed over the ESPHome API.
+    #[cfg(feature = "esphome-api")]
+    Esphome = 2,
+}
+
+/// Holders of each [`Link`] now (sessions: the ESPHome API serves two).
+#[cfg(esp_wifi)]
+static UP: [crate::atomic::AtomicU8; 3] =
+    [crate::atomic::AtomicU8::new(0), crate::atomic::AtomicU8::new(0), crate::atomic::AtomicU8::new(0)];
+/// The [`Link`]s that have come up once (bit per link).
+#[cfg(esp_wifi)]
+static SEEN: crate::atomic::AtomicU8 = crate::atomic::AtomicU8::new(0);
+
+/// A [`Link`] up while it lives: dropped with the session or connection, on any path.
+#[cfg(esp_wifi)]
+pub(crate) struct LinkUp(Link);
+
+#[cfg(esp_wifi)]
+impl LinkUp {
+    pub(crate) fn new(link: Link) -> Self {
+        use crate::atomic::Ordering::Relaxed;
+        UP[link as usize].fetch_add(1, Relaxed);
+        SEEN.fetch_or(1 << link as u8, Relaxed);
+        notify();
+        Self(link)
+    }
+}
+
+#[cfg(esp_wifi)]
+impl Drop for LinkUp {
+    fn drop(&mut self) {
+        UP[self.0 as usize].fetch_sub(1, crate::atomic::Ordering::Relaxed);
+        notify();
+    }
+}
+
+/// A link that came up once is down now.
+#[cfg(esp_wifi)]
+fn link_down() -> bool {
+    use crate::atomic::Ordering::Relaxed;
+    let seen = SEEN.load(Relaxed);
+    (0..UP.len()).any(|i| seen & 1 << i != 0 && UP[i].load(Relaxed) == 0)
+}
+
 /// The radio failed, or a deep-sleeping device found no link in time (or found it again).
 #[cfg(feature = "_esp")]
 pub(crate) fn set_offline(offline: bool) {
@@ -153,6 +208,11 @@ pub fn current(show: Show) -> Option<Status> {
         online: HEALTH.missing() & links == 0,
         ..Inputs::default()
     };
+    // The checks pass once, for the update's trial: a link down now is not online.
+    #[cfg(esp_wifi)]
+    {
+        i.online &= !link_down();
+    }
     #[cfg(esp_ota)]
     {
         i.installing = crate::ota::esp::writing();

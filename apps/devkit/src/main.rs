@@ -1,6 +1,7 @@
 //! ESP32-C6-DevKitC-1 reference firmware: the smoke test for each iotkit crate.
 //!
-//! Shows up in Home Assistant over MQTT: the RGB LED as a light, a "Color cycle" switch, chip
+//! Shows up in Home Assistant over MQTT: the RGB LED as a light (that shows the device's status
+//! too: setup windows, connecting, updates), a "Color cycle" switch, chip
 //! temperature, uptime, Wi-Fi signal and a Restart button. Everything else comes from
 //! `iotkit::start`: Wi-Fi (or a setup window), `iotkit-xxxx.local`, signed updates
 //! (`cargo xtask ota push`), boot counters and the last crash, the USB serial console (`help`).
@@ -11,7 +12,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either4, select4};
+use embassy_futures::select::{Either, Either4, select, select4};
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{Async, rmt::Rmt, time::Rate};
 // The chip temperature sensor: on the ESP32-C6 and C3 only.
@@ -217,7 +218,8 @@ async fn restart_task() {
 
 #[embassy_executor::task]
 async fn led_task(mut led: Led, app: App) {
-    use iotkit::provision::esp::{HELD, IDENTIFY, wait_press};
+    use iotkit::components::{Frame, Overlay, STATUS_LEVEL, color};
+    use iotkit::provision::esp::{IDENTIFY, wait_press};
     const COLORS: [RGB8; 4] = [RGB8::new(255, 0, 0), RGB8::new(0, 255, 0), RGB8::new(0, 0, 255), RGB8::new(0, 0, 0)];
     let saved = app.load::<SavedLight>().await;
     let saved = saved.unwrap_or(SavedLight { on: true, brightness: 10, rgb: [0, 255, 0], cycle: false });
@@ -228,24 +230,41 @@ async fn led_task(mut led: Led, app: App) {
     let mut step = 0usize;
     // Ticks left of white flashes (Improv "identify").
     let mut identify = 0u8;
+    // The status over the light: setup windows, the BOOT button held, connecting, updates.
+    let mut overlay = Overlay::new(iotkit::status::Show::All);
+    let mut frame = Frame::Own;
     loop {
-        match select4(LED.wait_command(), CYCLE.wait_command(), wait_press(), ticker.next()).await {
-            Either4::First(state) => {
+        let event = match select(
+            overlay.next(),
+            select4(LED.wait_command(), CYCLE.wait_command(), wait_press(), ticker.next()),
+        )
+        .await
+        {
+            Either::First(f) => {
+                frame = f;
+                None
+            }
+            Either::Second(e) => Some(e),
+        };
+        match event {
+            None => {}
+            Some(Either4::First(state)) => {
                 LED.set(state);
                 save.changed();
             }
-            Either4::Second(on) => {
+            Some(Either4::Second(on)) => {
                 CYCLE.set(on);
                 save.changed();
             }
             // A short press of BOOT toggles the LED.
-            Either4::Third(()) => {
+            Some(Either4::Third(())) => {
                 let l = LED.get().unwrap_or_default();
                 LED.set(LightState { on: !l.on, ..l });
                 save.changed();
             }
-            Either4::Fourth(()) => {
+            Some(Either4::Fourth(())) => {
                 step += 1;
+                identify = identify.saturating_sub(1);
                 if !STARVE_LED.load(Ordering::Relaxed) {
                     LED_WATCH.feed();
                 }
@@ -261,17 +280,17 @@ async fn led_task(mut led: Led, app: App) {
             identify = 6;
         }
         let light = LED.get().unwrap_or_default();
-        let (color, level) = match (HELD.load(Ordering::Relaxed), identify) {
-            // BOOT held: blue from 3 s (release to provision), red from 10 s (factory reset).
-            (1, _) => (RGB8::new(0, 0, 255), 10),
-            (2, _) => (RGB8::new(255, 0, 0), 10),
-            (_, 0) if CYCLE.get() == Some(true) => (COLORS[step % COLORS.len()], light.brightness.max(1)),
-            (_, 0) if light.on => (RGB8::new(light.rgb[0], light.rgb[1], light.rgb[2]), light.brightness),
-            (_, 0) => (RGB8::default(), 0),
-            (_, n) => {
-                identify -= 1;
-                (if n % 2 == 0 { RGB8::new(255, 255, 255) } else { RGB8::default() }, 10)
+        // Improv's "identify" first, then the status, then the light.
+        let (color, level) = match (identify, frame) {
+            (0, Frame::Status { status, lit: true }) => {
+                let (r, g, b) = color(status);
+                (RGB8::new(r, g, b), STATUS_LEVEL)
             }
+            (0, Frame::Status { lit: false, .. }) => (RGB8::default(), 0),
+            (0, Frame::Own) if CYCLE.get() == Some(true) => (COLORS[step % COLORS.len()], light.brightness.max(1)),
+            (0, Frame::Own) if light.on => (RGB8::new(light.rgb[0], light.rgb[1], light.rgb[2]), light.brightness),
+            (0, Frame::Own) => (RGB8::default(), 0),
+            (n, _) => (if n % 2 == 0 { RGB8::new(255, 255, 255) } else { RGB8::default() }, 10),
         };
         if let Err(e) = led.write(brightness([color].into_iter(), level)).await {
             warn!("LED write failed: {e:?}");

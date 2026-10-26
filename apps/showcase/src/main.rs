@@ -3,8 +3,8 @@
 //!
 //! The blind and the valve move 10 % a second, the thermostat heats or cools the room by
 //! 0.1 °C a second, the lock takes a second, and a short press of BOOT triggers the button event
-//! (`press`; three in a row: `triple_press`). The board's RGB LED is a real light, driven by
-//! `components::rgb_light`. The light, the brightness limit and the scene keep their state across
+//! (`press`; three in a row: `triple_press`). The board's RGB LED is a real light that shows the
+//! device's status too (`components::rgb_status_light`): setup windows, connecting, updates. The light, the brightness limit and the scene keep their state across
 //! restarts (`.remember()`).
 
 #![no_std]
@@ -74,21 +74,23 @@ static CONFIG: Config =
 /// The board's WS2812 LED on GPIO8.
 type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
 
+/// The light, and the status over it; BOOT is the button event's.
 #[embassy_executor::task]
 async fn light_task(led: Led) {
-    iotkit::components::rgb_light(&LIGHT, led, 1).await
+    iotkit::components::rgb_status_light(&LIGHT, led, 1, iotkit::status::Show::All, false).await
 }
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     iotkit::init!(p);
 
-    let board = Board { wifi: p.WIFI, bt: p.BT, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: Some(p.GPIO9.into()) };
-    iotkit::start(spawner, board, &CONFIG).await;
-
+    // Before `start`: the status shows from the first connection on.
     let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
     let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
     spawner.spawn(light_task(led).unwrap());
+
+    let board = Board { wifi: p.WIFI, bt: p.BT, timg1: p.TIMG1, usb: p.USB_DEVICE, boot_button: Some(p.GPIO9.into()) };
+    iotkit::start(spawner, board, &CONFIG).await;
 
     STATUS.set("starting");
     spawner.spawn(motion_task().unwrap());

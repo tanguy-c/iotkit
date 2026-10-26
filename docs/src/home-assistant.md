@@ -62,7 +62,7 @@ flash) makes one: `iotkit` with `default-features = false`, `matter-thread` and 
 `iotkit::start` with the Thread `Board`
 (the 802.15.4 radio, Bluetooth, the RNG and ADC1 for its entropy, so no analog parts yet).
 Building needs `clang` and `cmake`. It pairs over Bluetooth, then joins the controller's Thread
-network; holding BOOT 3 s opens a pairing window for another controller. Updates come over Matter
+network; holding BOOT 3 s opens a pairing window for another controller, and a short press closes it. Updates come over Matter
 ([Updates](updates.md#over-matter-thread-wi-fi)). `apps/thread-light` is this output for
 `xtask/answers/thread.toml`, tested with a Google TV Streamer as the border router: paired in
 Google Home, then shared with Home Assistant's Matter server (*Linked Matter apps & services* gives
