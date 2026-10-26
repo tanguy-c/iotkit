@@ -1,0 +1,12 @@
+# One source in text so far (Arduino's variant): the RGB LED of v2.1.0.
+label    = "LOLIN (Wemos) C3 Mini v2.1 (ESP32-C3, 4 MB; an RGB LED; no Matter)"
+chip     = "esp32c3"
+model    = "LOLIN C3 Mini"
+flash    = "4mb"
+boot_pin = 9
+order    = 131
+led      = { kind = "rgb", pin = 7 }
+sources  = [
+    "https://www.wemos.cc/en/latest/c3/c3_mini.html",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/lolin_c3_mini/pins_arduino.h",
+]

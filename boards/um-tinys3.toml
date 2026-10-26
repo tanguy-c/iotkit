@@ -1,0 +1,18 @@
+# One source in text so far (Arduino's variant); the power pin's level as on the ProS3 (high: on).
+label    = "Unexpected Maker TinyS3 (ESP32-S3, 8 MB, 8 MB PSRAM; tiny, an RGB LED, battery charger)"
+chip     = "esp32s3"
+model    = "Unexpected Maker TinyS3"
+flash    = "8mb"
+boot_pin = 0
+order    = 141
+led      = { kind = "rgb", pin = 18 }
+sources  = [
+    "https://esp32s3.com/tinys3.html",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/um_tinys3/pins_arduino.h",
+    "https://forum.core-electronics.com.au/t/accessing-rgb-light-on-unexpected-maker-pros3/21208",
+]
+
+[[init]]
+pin   = 17
+level = "high"
+why   = "powers the RGB LED"

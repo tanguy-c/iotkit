@@ -1,0 +1,13 @@
+# One source in text so far (Arduino's variant). Its RGB LED takes three pins (red 46, green 0,
+# blue 45), a kind of LED this folder does not describe yet: the yellow LED shows the status.
+label    = "Arduino Nano ESP32 (ESP32-S3, 16 MB, 8 MB PSRAM; the Nano form factor; no Matter yet)"
+chip     = "esp32s3"
+model    = "Arduino Nano ESP32"
+flash    = "8mb"
+boot_pin = 0
+order    = 150
+led      = { kind = "plain", pin = 48, active = "high" }
+sources  = [
+    "https://docs.arduino.cc/hardware/nano-esp32/",
+    "https://github.com/espressif/arduino-esp32/blob/master/variants/arduino_nano_nora/pins_arduino.h",
+]

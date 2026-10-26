@@ -24,20 +24,9 @@ level = "low"
 why   = "powers the antenna switch"
 ```
 
-Check each fact against two sources: the maker's documentation or schematic, Zephyr's board
-devicetree (`boards/<vendor>/<board>/*.dts`: LEDs with their polarity, buttons, flash size,
-switches), and Arduino's board variant (`variants/<board>/pins_arduino.h`, `variant.cpp`).
-`cargo test --manifest-path xtask/Cargo.toml --target host-tuple` checks every file against its
-chip's rules.
+Check each fact against two sources where they exist (a file with only one says so in a comment):
+the maker's documentation or schematic, Zephyr's board devicetree (`boards/<vendor>/<board>/*.dts`:
+LEDs with their polarity, buttons, flash size, switches), and Arduino's board variant
+(`variants/<board>/pins_arduino.h`, `variant.cpp`). `cargo test --manifest-path xtask/Cargo.toml
+--target host-tuple` checks every file against its chip's rules.
 
-## Waiting for a second source
-
-Boards asked for whose wiring only one source gives in text so far:
-
-| Board | One source says | Missing |
-| --- | --- | --- |
-| Waveshare ESP32-C6-Zero | RGB LED on GPIO8 (Arduino's variant) | Waveshare's pinout is an image |
-| LOLIN C3 Mini | RGB LED on GPIO7 (Arduino's variant) | which board revision has which LED |
-| Unexpected Maker TinyC6 | RGB LED on GPIO23, powered by GPIO22 (Arduino's variant) | Unexpected Maker's pinout card |
-| Unexpected Maker TinyS3 | RGB LED on GPIO18, powered by GPIO17 (Arduino's variant) | the same; the power pin's level |
-| Arduino Nano ESP32 | LED on GPIO48; RGB LED on GPIO46, 0, 45 (Arduino's variant) | the LEDs' polarity; a three-pin RGB LED is not a kind `boards/` knows yet |
