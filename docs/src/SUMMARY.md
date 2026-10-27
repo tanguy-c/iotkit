@@ -3,6 +3,7 @@
 [Introduction](introduction.md)
 
 - [Getting started](getting-started.md)
+- [Building a Matter device](matter.md)
 - [Coming from ESPHome](coming-from-esphome.md)
 - [Install from the browser](install-from-browser.md)
 
@@ -10,7 +11,7 @@
 
 - [Entities and settings](entities.md)
 - [Components and drivers](components.md)
-- [Home Assistant and Matter](home-assistant.md)
+- [Home Assistant](home-assistant.md)
 - [Updates](updates.md)
 - [Battery devices](battery.md)
 - [Only what the device uses](lean.md)

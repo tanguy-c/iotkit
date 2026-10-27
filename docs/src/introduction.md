@@ -5,8 +5,8 @@ device's `main` lists its entities and its own hardware, and calls `iotkit::star
 
 - Wi-Fi setup from a phone (setup access point, Improv over Bluetooth or USB);
 - signed OTA updates, with automatic rollback when a new firmware is not healthy;
-- Home Assistant over its ESPHome integration (native API) or MQTT (discovery), and Matter over
-  Wi-Fi or Thread;
+- Matter over Wi-Fi or Thread, with any Matter controller; Home Assistant over its ESPHome
+  integration (native API) or MQTT (discovery), and any MQTT broker;
 - crash records, watchdogs, a USB console;
 - deep sleep for battery devices.
 
@@ -48,11 +48,11 @@ Early (0.x): the API and the settings' flash layout may still change.
 - Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and serial),
   signed OTA with rollback, MQTT with Home Assistant, Matter over Wi-Fi with Home Assistant's
   Matter server, deep sleep, updates from Home Assistant, installing from the browser, Home
-  Assistant's ESPHome integration, MQTT and updates over TLS, Matter over Thread with a Google TV
-  Streamer as the border router (paired in Google Home, shared with Home Assistant's Matter
-  server, updated over Matter), the status LED and the BOOT button's gestures.
+  Assistant's ESPHome integration, MQTT and updates over TLS, Matter over Thread through a Thread
+  border router (paired with one controller, shared with Home Assistant's Matter server, updated
+  over Matter), the status LED and the BOOT button's gestures.
 - Tested on a Seeed Studio XIAO ESP32-C6 (4 MB): Wi-Fi (its antenna switch), MQTT, OTA, the
-  ESPHome API, Matter over Thread with Google Home, deep sleep over MQTT and the ESPHome API.
+  ESPHome API, Matter over Thread, deep sleep over MQTT and the ESPHome API.
 - Tested on an ESP32-S3-DevKitC-1 (v1.1, 8 MB): Wi-Fi, MQTT, OTA, the setup window, the ESPHome
   API, the status LED.
 - Built but not tested on hardware: the C3, C5, ESP32 and H2, most entity kinds over Matter.

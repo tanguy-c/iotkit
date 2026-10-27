@@ -1,4 +1,4 @@
-# Home Assistant and Matter
+# Home Assistant
 
 ## MQTT
 
@@ -34,39 +34,10 @@ build time sets it instead, `api-key KEY` changes it). Every entity kind is serv
 Another transport can be added outside iotkit the same way: `model::Binding::allocate`
 (`iotkit-core`'s `extra-bindings` feature) gives it its own change flags.
 
-## Matter over Wi-Fi
+## Matter
 
-Feature `matter-wifi` (ESP32-C6, 8 MB flash), next to MQTT. The device's pairing code is in the
-boot log, on the console (`matter`), or fixed for a product by `cargo iotkit new` (printed as a
-QR label). In Home Assistant: *Settings > Devices > Add > Matter*, with the code; there is no
-Bluetooth step, the device is already on the network.
-
-| Entities | Over Matter |
-| --- | --- |
-| `Light` | Extended Color Light |
-| `Switch` | On/Off Plug |
-| temperature, humidity, pressure, illuminance, air quality sensors, in a unit Matter takes | the matching sensor |
-| battery sensor | the device's power source |
-| binary sensors: motion/occupancy/presence, leak, smoke, CO/gas; others as contact | the matching sensor or alarm |
-| `Event` with presses | Generic Switch |
-| `Cover`, `Valve`, `Lock`, `Fan`, `Climate`, `Select` | Window Covering, Water Valve, Door Lock, Fan, Thermostat, Mode Select |
-
-Other entities are not on Matter (MQTT and the ESPHome API only). `matter pair` lets another controller pair for 15 minutes;
-`matter reset` forgets every pairing. Matter uses the test vendor's attestation: fine for
-development, not for selling devices.
-
-## Matter over Thread
-
-`cargo iotkit new` with *Thread* as the network (an ESP32-C6 or an ESP32-H2 board, with 4 MB of
-flash or more: a XIAO ESP32-C6 was paired this way) makes one: `iotkit` with `default-features = false`, `matter-thread` and `matter-ota`, and
-`iotkit::start` with the Thread `Board`
-(the 802.15.4 radio, Bluetooth, the RNG and ADC1 for its entropy, so no analog parts yet).
-Building needs `clang` and `cmake`. It pairs over Bluetooth, then joins the controller's Thread
-network; holding BOOT 3 s opens a pairing window for another controller, and a short press closes it. Updates come over Matter
-([Updates](updates.md#over-matter-thread-wi-fi)). `apps/thread-light` is this output for
-`xtask/answers/thread.toml`, tested with a Google TV Streamer as the border router: paired in
-Google Home, then shared with Home Assistant's Matter server (*Linked Matter apps & services* gives
-a pairing code), which drives it and updates it over Matter.
+Home Assistant's Matter server is one Matter controller among others: pairing, the entities on
+Matter, Wi-Fi or Thread: [Building a Matter device](matter.md).
 
 ## A test setup on the PC
 
@@ -80,5 +51,4 @@ mosquitto_sub -h localhost -v -t 'iotkit/#' -t 'homeassistant/#'
 mosquitto_pub -h localhost -t iotkit/iotkit-XXXX/led/set -m '{"state":"ON","color":{"r":255,"g":0,"b":0}}'
 ```
 
-The Matter controller needs the PC's network interface towards the device:
-`MATTER_INTERFACE=<interface> docker compose -f test-server/compose.yaml up -d matter-server`.
+The Matter controller: [A test controller on the PC](matter.md#a-test-controller-on-the-pc).

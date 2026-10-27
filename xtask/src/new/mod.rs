@@ -568,10 +568,7 @@ impl Project {
         };
         let light = answers.status_led && !battery && board.rgb_led.is_some();
         if answers.matter != MatterMode::Off && parts.is_empty() && !light {
-            warnings.push(
-                "no part: over Matter the device has nothing a controller can add (Google Home, Apple Home): add one"
-                    .into(),
-            );
+            warnings.push("no part: over Matter the device has nothing a controller can add: add one".into());
         }
         Ok(Self { answers, board, package, flash, parts, matter_setup, esphome_key, iotkit_path, warnings })
     }
@@ -806,7 +803,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
             "Which network?",
             vec!["Wi-Fi: Home Assistant (MQTT or ESPHome), Matter optional", "Thread: Matter only, low power mesh"],
         )
-        .with_help_message("Thread needs a border router (Home Assistant's OpenThread add-on, an Apple or Google hub)")
+        .with_help_message("Thread needs a border router (e.g. Home Assistant's OpenThread Border Router add-on)")
         .prompt()?
         .starts_with("Thread")
     {
@@ -903,7 +900,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     } else if battery && !thread {
         println!("  (Matter: not on battery over Wi-Fi yet; Thread devices take it on battery)");
     } else if thread
-        || Confirm::new("Also work with Matter (Apple Home, Google Home, Alexa, Home Assistant)?")
+        || Confirm::new("Also work with Matter (any Matter controller)?")
             .with_default(false)
             .with_help_message(
                 "Next to Home Assistant's link. Paired with a code; uses about 2 MB of flash and more RAM.",
