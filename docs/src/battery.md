@@ -63,7 +63,8 @@ app.sleep().await   // sends the states, disconnects, sleeps `interval`
   `Input::wakeup_enable` wakes it too (on the C6 only GPIO0-7, so not BOOT).
 - **Read the battery before Wi-Fi starts:** the radio's load lowers the voltage.
 
-Deep sleep builds on the C3, C5, C6 and S3; it was tested on the C6. The USB serial port
+Deep sleep builds on the C3, C5, C6 and S3; it was tested on the C6 (the DevKitC-1 and a XIAO
+ESP32-C6, over MQTT and the ESPHome API). The USB serial port
 disappears while the chip sleeps: a monitor has to reopen it.
 
 ### Updates and maintenance over the ESPHome API
