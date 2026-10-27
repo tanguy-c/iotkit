@@ -5,35 +5,19 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
 ## Unreleased
 
-- **Breaking:** MQTT is a feature, `mqtt` (on by default): a project with
-  `default-features = false` adds it ([Upgrading](docs/src/upgrading.md)). `cargo iotkit new`
-  leaves it out for the ESPHome API: about 33 KB less code and 9 KB more free RAM.
-- The setup access point's servers, downloads and update installs share one work area, only held
-  while they run: 11 KB more free RAM on devkit. An update asked for during a setup window is
-  refused (`ota push`: HTTP 503); a window opened during an update waits for it.
-- The status over a light: `components::rgb_status_light` (an RGB light that shows the status
-  while a pattern plays) and `components::Overlay` (for an app driving its LED itself). devkit,
-  showcase, thread-light, the template and `cargo iotkit new` projects show the status on the
-  board's RGB LED; `status = "auto"` is the new default in answers files.
-- The status follows the links live: a network, broker or ESPHome API link that drops makes it
-  `Connecting` again (its health checks still pass once, for an update's trial).
-- A short press of the setup button closes an open setup window (once a network is stored) or
-  Matter pairing window (once paired), instead of reaching the app.
-- `cargo iotkit new` reads its boards from `boards/`, one file per board with its sources: the
-  LED (RGB or single, with its polarity), the BOOT pin, pins to set at start. New: the
-  ESP32-C6-DevKitM-1, ESP32-C3-DevKitC-02, ESP32-S3-DevKitC-1 v1.0, ESP32-S3-DevKitM-1 and
-  Seeed's XIAO ESP32-C6 (its antenna switch: without it Wi-Fi does not connect), C3 and S3,
-  M5Stack's NanoC6 and AtomS3 Lite, Adafruit's QT Py ESP32-C3 and S3 and Feather ESP32-C6,
-  Waveshare's ESP32-S3-Zero and C6-Zero, LOLIN's S3 Mini and C3 Mini, Unexpected Maker's TinyC6
-  and TinyS3, the Arduino Nano ESP32, and for the ESP32-H2 the H2-DevKitM-1, M5Stack's NanoH2,
-  Waveshare's ESP32-H2-Zero and Olimex's ESP32-H2-DevKit-LiPo (their RGB LEDs' power pins set in
-  `main`). The
-  board question is searched as you type; `status_active = "low"` for a LED lit by a low level.
-- Matter over Thread on 4 MB boards (a 1.6 MB image in a 1.9 MB slot): paired with Google Home
-  on a XIAO ESP32-C6. `cargo iotkit new` warns when a Matter project has no part, which leaves
-  controllers nothing to add.
-- `mem` on the console, `iotkit::diag::esp::memory()`: heap and stack use, now and at their
-  fullest.
+- **Breaking:** MQTT is the `mqtt` feature (on by default); a project with
+  `default-features = false` adds it. `provision::esp::{dhcp_task, dns_task, portal_task}` are
+  gone: `window_task` runs them ([Upgrading](docs/src/upgrading.md)).
+- Downloads, update installs and the setup access point share one work area: 11 KB more free RAM.
+  An update asked for during a setup window is refused (`ota push`: HTTP 503).
+- `mem` on the console and `diag::esp::memory()`: heap and stack use.
+- The status shows on the board's RGB LED, over the light (`components::rgb_status_light`, or
+  `components::Overlay` for an app's own LED), and follows the links live.
+- A short press of the setup button closes an open setup or Matter pairing window.
+- `cargo iotkit new` reads its boards from [`boards/`](boards/), one file per board: 23 new
+  boards (Espressif, Seeed, M5Stack, Adafruit, Waveshare, LOLIN, Unexpected Maker, Arduino,
+  Olimex), searched as you type. Its status default is the board's LED.
+- Matter over Thread fits 4 MB boards; `cargo iotkit new` warns when a Matter project has no part.
 
 ## 0.3.0 (2026-10-26)
 
