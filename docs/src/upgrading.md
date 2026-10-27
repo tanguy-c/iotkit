@@ -50,7 +50,7 @@ spawner.spawn(matter_task(peripherals, store, "My light", iotkit::firmware!(&OTA
 ```
 
 Over Thread, `iotkit::start` now does it all with the Thread `Board`: see
-[Home Assistant](home-assistant.md#matter-over-thread).
+[Building a Matter device](matter.md#start-a-project).
 
 ### `Board` has no `flash` field
 

@@ -88,4 +88,4 @@ For development, `.cargo/secrets.toml` (git-ignored) can set `WIFI_SSID`, `WIFI_
 `MQTT_HOST`: the first boot stores them and skips the window. `secrets.toml.example` lists the
 other keys (broker login, update URL, Matter code, ESPHome API key).
 
-Then [connect it to Home Assistant](home-assistant.md).
+Then [connect it to Home Assistant](home-assistant.md) or [a Matter controller](matter.md).

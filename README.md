@@ -1,10 +1,11 @@
 # iotkit
 
-Rust firmware for ESP32 smart devices: Wi-Fi setup from a phone, signed OTA updates with
-automatic rollback, Home Assistant over its ESPHome API, MQTT or Matter, deep sleep. A `no_std`
-kit on esp-hal and Embassy for when ESPHome's YAML gets in the way.
+`no_std` Rust firmware kit for ESP32: write the device once, connect it over Matter (Wi-Fi or
+Thread), MQTT or the ESPHome API. Signed OTA updates with automatic rollback, Wi-Fi setup from a
+phone, deep sleep. On esp-hal and Embassy, for when ESPHome's YAML gets in the way.
 
 **[Guide](https://tanguy-c.github.io/iotkit/)** ·
+[Building a Matter device](https://tanguy-c.github.io/iotkit/matter.html) ·
 [Coming from ESPHome](https://tanguy-c.github.io/iotkit/coming-from-esphome.html) ·
 [Changelog](CHANGELOG.md)
 
@@ -23,9 +24,21 @@ async fn main(spawner: Spawner) -> ! {
 
 #[embassy_executor::task]
 async fn pump_task(pin: Output<'static>) {
-    components::relay(&PUMP, pin, Active::High).await   // Home Assistant switches it
+    components::relay(&PUMP, pin, Active::High).await   // switched over Matter, MQTT or the ESPHome API
 }
 ```
+
+## What it connects to
+
+| | |
+| --- | --- |
+| Protocols | Matter; MQTT with Home Assistant discovery; Home Assistant's ESPHome native API. Over Wi-Fi, Matter runs next to either |
+| Networks | Wi-Fi; Thread (Matter) |
+| Works with | any Matter controller, Home Assistant, any MQTT broker |
+| Setup | a setup access point, Improv over Bluetooth LE or USB |
+| Updates | Ed25519-signed, rolled back if unhealthy: pushed from the CLI, from Home Assistant, or over Matter |
+| Power | deep sleep over Wi-Fi; a Matter sleepy end device over Thread |
+| Chips | ESP32-C6 (reference), ESP32-S3, C3, C5 and ESP32; ESP32-H2 for Thread; Matter on the C6 and H2 ([chips](https://tanguy-c.github.io/iotkit/introduction.html#chips)) |
 
 ## Quick start
 
