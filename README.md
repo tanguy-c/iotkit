@@ -30,7 +30,7 @@ async fn pump_task(pin: Output<'static>) {
 
 ## What it connects to
 
-| | |
+| Area | Support |
 | --- | --- |
 | Protocols | Matter; MQTT with Home Assistant discovery; Home Assistant's ESPHome native API. Over Wi-Fi, Matter runs next to either |
 | Networks | Wi-Fi; Thread (Matter) |
