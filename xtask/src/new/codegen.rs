@@ -998,7 +998,7 @@ pub fn readme(p: &Project) -> String {
     if p.thread() {
         s.push_str(
             "## Thread\n\nThe device has no Wi-Fi: pair it over Bluetooth from a Matter controller with a Thread border router\n\
-             (Home Assistant with its OpenThread Border Router add-on, an Apple or Google hub); it then joins that controller's\n\
+             (e.g. Home Assistant with its OpenThread Border Router add-on); it then joins that controller's\n\
              Thread network.\n",
         );
     } else if a.wifi_ssid.is_some() {

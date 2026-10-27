@@ -1,6 +1,6 @@
 [package]
 name         = "iotkit"
-description  = "Firmware kit for ESP32 smart devices: Wi-Fi setup, signed OTA with rollback, Home Assistant over MQTT and Matter"
+description  = "Firmware kit for ESP32: write the device once, connect it over Matter (Wi-Fi or Thread), MQTT or the ESPHome API"
 edition.workspace      = true
 rust-version.workspace = true
 version.workspace      = true

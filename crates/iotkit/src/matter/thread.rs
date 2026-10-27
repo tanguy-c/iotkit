@@ -1,7 +1,7 @@
 //! Matter over Thread: rs-matter-embassy's Thread stack owns the 802.15.4 radio and Bluetooth
 //! (commissioning over BLE gives the device its Thread network). No Wi-Fi, so no `iotkit::net`
-//! or MQTT; updates come over Matter (`matter-ota`). Needs a Thread border router (Home
-//! Assistant's OpenThread Border Router, a Google or Apple hub) and `clang` + `cmake` to build
+//! or MQTT; updates come over Matter (`matter-ota`). Needs a Thread border router (e.g. Home
+//! Assistant's OpenThread Border Router) and `clang` + `cmake` to build
 //! OpenThread. [`NETWORK`](crate::health::NETWORK) passes once attached to the Thread network.
 
 use core::pin::pin;

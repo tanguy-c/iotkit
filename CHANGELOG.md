@@ -33,6 +33,8 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   check; each exchange with it gives up after 2 minutes.
 - `cargo iotkit new` asks about updates (none: a smaller firmware; by themselves), the Wi-Fi setup
   ways and the console, and leaves out the features not wanted.
+- The guide's [Building a Matter device](docs/src/matter.md): Wi-Fi or Thread, pairing with any
+  Matter controller, updates, what certification takes. `cargo iotkit new` names no ecosystem.
 
 ## 0.3.0 (2026-10-26)
 

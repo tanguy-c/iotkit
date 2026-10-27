@@ -1,5 +1,5 @@
 # `cargo iotkit new --answers answers/xiao-thread.toml`: a XIAO ESP32-C6 (4 MB) over Matter and
-# Thread, a plug; paired with Google Home through a Google TV Streamer. CI generates and builds it.
+# Thread, a plug; paired through a Thread border router. CI generates and builds it.
 name      = "Xiao plug"
 maker     = "CI"
 board     = "xiao-esp32c6"

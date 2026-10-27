@@ -92,7 +92,7 @@ is set once on the console (`mqtt 192.168.1.10`) or at build time (`MQTT_HOST`).
 | `esp32: board:` | the board question of `cargo iotkit new`; a chip feature (`esp32c6`, ...) |
 | `wifi:`, `ap:`, `captive_portal:` | the setup window of `start` (feature `softap`) |
 | `esp32_improv:`, `improv_serial:` | features `improv-ble`, `improv-serial` |
-| `api:` + `encryption:` | the `esphome-api` feature; or MQTT discovery, or Matter ([Home Assistant](home-assistant.md)) |
+| `api:` + `encryption:` | the `esphome-api` feature; or MQTT discovery, or Matter ([Home Assistant](home-assistant.md), [Matter](matter.md)) |
 | `mqtt:` | `mqtt HOST` on the console, or `MQTT_HOST` at build time |
 | `ota:` | `cargo iotkit ota push`, signed; or updates from Home Assistant ([updates](updates.md)) |
 | `logger:` | `ESP_LOG` at build time, the USB console ([console](console.md)) |
