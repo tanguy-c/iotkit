@@ -1,11 +1,12 @@
 //! Updates from Home Assistant (`ha-update`): a `firmware` update entity, release checks against
 //! the manifest URL, and installs on request.
 //!
-//! A deep-sleeping device over the ESPHome API (`cfg(esp_scheduled)`) cannot get *Install* while
-//! it sleeps (nothing holds it), so it installs by itself: *Auto-update* on (the default), at
-//! *Update time* (02:00 by default; or at the wake-up that finds the release). For a set time it
-//! downloads the release at once, wakes up at that time (Home Assistant gives the time and zone),
-//! and installs it then.
+//! With *Auto-update* (`cfg(esp_auto)`: `IOTKIT_AUTO_UPDATE=on`) a release installs without a
+//! click: over MQTT once found, over the ESPHome API (`cfg(esp_scheduled)`) at *Update time*
+//! (02:00 by default, or at once). For a set time it downloads the release at once and installs
+//! it then (Home Assistant gives the time and zone). A deep-sleeping device over the API cannot get
+//! *Install* while it sleeps (nothing holds it), so it always has the switch, and wakes up at the
+//! time.
 
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt::Write as _;
@@ -45,8 +46,10 @@ pub(crate) fn with_update(entities: &'static [&'static dyn Entity]) -> &'static 
     let mut all = Vec::with_capacity(entities.len() + 3);
     all.extend_from_slice(entities);
     all.push(&FIRMWARE as &dyn Entity);
+    #[cfg(esp_auto)]
+    all.push(&auto::AUTO_UPDATE as &dyn Entity);
     #[cfg(esp_scheduled)]
-    all.extend_from_slice(&[&auto::AUTO_UPDATE as &dyn Entity, &auto::UPDATE_TIME]);
+    all.push(&auto::UPDATE_TIME as &dyn Entity);
     Box::leak(all.into_boxed_slice())
 }
 
@@ -70,17 +73,19 @@ pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmw
     #[cfg(feature = "deep-sleep")]
     known::restore(store, fw).await;
     // Not waiting for the network: the image is in flash already.
-    #[cfg(esp_scheduled)]
+    #[cfg(esp_auto)]
     auto::start(store, fw).await;
     net.wait_online().await;
     // A deep-sleeping device checks every `CHECK_EVERY` across its sleeps, and at its update
     // time (a release out since is installed then).
     #[cfg(feature = "deep-sleep")]
-    #[cfg_attr(not(esp_scheduled), allow(unused_variables))]
+    #[cfg_attr(not(esp_auto), allow(unused_variables))]
     let (mut check_now, at_slot) = known::due();
     // Not right after a failed install: its error stays in the summary until the next check.
     #[cfg(not(feature = "deep-sleep"))]
     let mut check_now = true;
+    #[cfg(all(esp_auto, not(feature = "deep-sleep")))]
+    let at_slot = false;
     loop {
         let url = source(store).await;
         match &url {
@@ -90,9 +95,9 @@ pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmw
                     warn!("update: no answer from {url} in {} s", CHECK_TIMEOUT.as_secs());
                     Err(())
                 });
-                #[cfg_attr(not(esp_scheduled), allow(unused_mut))]
+                #[cfg_attr(not(esp_auto), allow(unused_mut))]
                 let mut ok = checked.is_ok();
-                #[cfg(esp_scheduled)]
+                #[cfg(esp_auto)]
                 if let Ok(Some(version)) = checked {
                     ok = auto::released(url, store, fw, version, at_slot).await;
                 }
@@ -111,13 +116,13 @@ pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmw
             None => info!("update: no manifest URL (set one with `update-url URL`)"),
         }
         check_now = true;
-        #[cfg(esp_scheduled)]
+        #[cfg(esp_auto)]
         let wait = select3(
             Timer::after(CHECK_EVERY),
             FIRMWARE.wait_install(),
             select(SOURCE_CHANGED.wait(), auto::run(store, fw)),
         );
-        #[cfg(not(esp_scheduled))]
+        #[cfg(not(esp_auto))]
         let wait = select3(Timer::after(CHECK_EVERY), FIRMWARE.wait_install(), SOURCE_CHANGED.wait());
         match wait.await {
             Either3::Second(()) => match &url {
@@ -127,6 +132,7 @@ pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmw
                 }
                 None => warn!("update: install asked, but no manifest URL"),
             },
+            // The timer, a new URL, or *Auto-update* turned on: check now.
             Either3::First(()) | Either3::Third(_) => {}
         }
     }
@@ -189,30 +195,47 @@ async fn install(url: &str) {
     }
 }
 
-/// Installs without a click, at a set time ([module](self) docs).
-#[cfg(esp_scheduled)]
+/// Installs without a click, at a set time over the ESPHome API ([module](self) docs).
+#[cfg(esp_auto)]
 mod auto {
+    #[cfg(esp_scheduled)]
     use core::fmt::Write as _;
 
+    #[cfg(esp_scheduled)]
     use embassy_futures::select::{Either, select};
+    #[cfg(esp_scheduled)]
     use embassy_time::Timer;
+    #[cfg(esp_scheduled)]
     use heapless::String;
-    use log::{info, warn};
+    use log::info;
+    #[cfg(esp_scheduled)]
+    use log::warn;
     use serde::{Deserialize, Serialize};
 
+    #[cfg(esp_scheduled)]
     use super::FIRMWARE;
+    #[cfg(esp_scheduled)]
     use crate::atomic::{AtomicU32, Ordering};
     use crate::config::{Setting, esp::SharedStore, keys};
     use crate::image::Version;
-    use crate::model::{Entity, Select, Switch};
+    #[cfg(esp_scheduled)]
+    use crate::model::Entity;
+    #[cfg(esp_scheduled)]
+    use crate::model::Select;
+    use crate::model::Switch;
     use crate::ota::esp::Firmware;
 
     /// Updates install without a click.
     pub static AUTO_UPDATE: Switch = Switch::new("auto_update", "Auto-update").icon("mdi:autorenew").config();
-    /// When: at the wake-up that finds the release, or every half hour of the day.
+    /// When: at the wake-up (or the check) that finds the release, or every half hour of the day.
+    #[cfg(esp_scheduled)]
     pub static UPDATE_TIME: Select =
         Select::new("update_time", "Update time", &TIMES).icon("mdi:clock-outline").config();
 
+    /// `IOTKIT_AUTO_UPDATE`: on unless `off`.
+    const DEFAULT_ON: bool = !cfg!(auto_update_off);
+
+    #[cfg(esp_scheduled)]
     const TIMES: [&str; 49] = [
         "At wake-up",
         "00:00",
@@ -295,6 +318,7 @@ mod auto {
     }
 
     /// A release downloaded for later (`ota::Staged`), and when to install it.
+    #[cfg(esp_scheduled)]
     #[derive(Clone, Copy, Serialize, Deserialize)]
     struct Scheduled {
         version: (u16, u16, u16),
@@ -302,15 +326,18 @@ mod auto {
         due: u32,
     }
 
+    #[cfg(esp_scheduled)]
     impl Setting for Scheduled {
         const KEY: u16 = keys::OTA_SCHEDULED;
         const VERSION: u8 = 1;
     }
 
     /// When the scheduled install is due (Unix seconds, 0: none), for the sleep: it wakes up then.
+    #[cfg(esp_scheduled)]
     static DUE: AtomicU32 = AtomicU32::new(0);
 
     /// Seconds until the scheduled install, for the sleep (`None`: nothing scheduled, or no clock).
+    #[cfg(esp_scheduled)]
     pub(crate) fn seconds_to_due() -> Option<u64> {
         let now = crate::clock::now()?;
         let due = i64::from(DUE.load(Ordering::Relaxed));
@@ -322,6 +349,7 @@ mod auto {
         [staged, slot].into_iter().flatten().min().map(|s| s as u64)
     }
 
+    #[cfg(esp_scheduled)]
     fn minute(at: u8) -> u16 {
         (u16::from(at) - 1) * 30
     }
@@ -329,13 +357,19 @@ mod auto {
     /// The settings shown; the update scheduled installed if due.
     pub(crate) async fn start(store: &'static SharedStore, fw: Firmware) {
         let settings = store.lock().await.load::<Settings>().await.ok().flatten();
-        let settings = settings.unwrap_or(Settings { on: true, at: DEFAULT_TIME });
+        let settings = settings.unwrap_or(Settings { on: DEFAULT_ON, at: DEFAULT_TIME });
         AUTO_UPDATE.set(settings.on);
-        UPDATE_TIME.set(settings.at);
-        install_if_due(store, fw).await;
+        #[cfg(esp_scheduled)]
+        {
+            UPDATE_TIME.set(settings.at);
+            install_if_due(store, fw).await;
+        }
+        #[cfg(not(esp_scheduled))]
+        let _ = fw;
     }
 
     /// Whether the update time came within the last `seconds` (the check before it then).
+    #[cfg(all(esp_scheduled, feature = "deep-sleep"))]
     pub(crate) fn slot_within(seconds: u32) -> bool {
         let at = UPDATE_TIME.get().unwrap_or(DEFAULT_TIME);
         let Some(now) = crate::clock::now() else { return false };
@@ -346,8 +380,42 @@ mod auto {
         last <= now && now - last < i64::from(seconds)
     }
 
+    /// A newer release is out (`version`): installed now (without a clock, at once).
+    #[cfg(not(esp_scheduled))]
+    pub(crate) async fn released(
+        url: &str,
+        _store: &'static SharedStore,
+        _fw: Firmware,
+        version: Version,
+        _at_slot: bool,
+    ) -> bool {
+        if AUTO_UPDATE.get() != Some(true) {
+            return true;
+        }
+        info!("update: auto-update, installing {version}");
+        // Restarts once installed.
+        super::install(url).await;
+        false
+    }
+
+    /// Saves the switch changed in Home Assistant; returns when it is turned on, so that a release
+    /// found already installs now, not at the next check.
+    #[cfg(not(esp_scheduled))]
+    pub(crate) async fn run(store: &'static SharedStore, _fw: Firmware) {
+        loop {
+            let on = AUTO_UPDATE.wait_command().await;
+            let turned_on = on && AUTO_UPDATE.get() != Some(true);
+            AUTO_UPDATE.set(on);
+            let _ = store.lock().await.save(&Settings { on, at: DEFAULT_TIME }).await;
+            if turned_on {
+                return;
+            }
+        }
+    }
+
     /// A newer release is out (`version`): installed now (at the wake-up that found it, or at the
     /// update time: `at_slot`), or downloaded for its time. `false` if that failed.
+    #[cfg(esp_scheduled)]
     pub(crate) async fn released(
         url: &str,
         store: &'static SharedStore,
@@ -378,6 +446,9 @@ mod auto {
             let due = crate::clock::now().map_or(0, |now| crate::clock::zone().next(now, minute(at)) as u32);
             let _ = store.lock().await.save(&Scheduled { version: triple, due }).await;
             DUE.store(due, Ordering::Relaxed);
+        } else if DUE.load(Ordering::Relaxed) == 0 {
+            // Downloaded before the clock was known (an always-on device): due from now on.
+            install_if_due(store, fw).await;
         }
         let mut summary: String<64> = String::new();
         let _ = write!(summary, "Installs at {}", TIMES[usize::from(at)]);
@@ -387,6 +458,7 @@ mod auto {
     }
 
     /// Installs the scheduled update if its time has come (restarts into it).
+    #[cfg(esp_scheduled)]
     async fn install_if_due(store: &'static SharedStore, fw: Firmware) {
         let Some(mut s) = store.lock().await.load::<Scheduled>().await.ok().flatten() else { return };
         let version = Version::new(s.version.0, s.version.1, s.version.2);
@@ -426,16 +498,25 @@ mod auto {
     }
 
     /// Saves the settings changed in Home Assistant, and installs when the time comes while awake.
-    pub(crate) async fn run(store: &'static SharedStore, fw: Firmware) -> ! {
+    /// Returns when *Auto-update* is turned on, or *Update time* changed while it is: the check
+    /// that follows schedules a release found already, and shows its new time.
+    #[cfg(esp_scheduled)]
+    pub(crate) async fn run(store: &'static SharedStore, fw: Firmware) {
         loop {
             let due = async {
                 match seconds_to_due() {
                     Some(s) => Timer::after_secs(s).await,
+                    // No clock yet: once Home Assistant sends it, a download waiting for it is due.
+                    None if crate::clock::now().is_none() => crate::clock::KNOWN.wait().await,
                     None => core::future::pending().await,
                 }
             };
             match select(select(AUTO_UPDATE.wait_command(), UPDATE_TIME.wait_command()), due).await {
                 Either::First(changed) => {
+                    let check = match changed {
+                        Either::First(on) => on && AUTO_UPDATE.get() != Some(true),
+                        Either::Second(_) => AUTO_UPDATE.get() == Some(true),
+                    };
                     match changed {
                         Either::First(on) => AUTO_UPDATE.set(on),
                         Either::Second(at) => UPDATE_TIME.set(at),
@@ -456,6 +537,9 @@ mod auto {
                     }
                     drop(store_);
                     install_if_due(store, fw).await;
+                    if check {
+                        return;
+                    }
                 }
                 Either::Second(()) => install_if_due(store, fw).await,
             }
@@ -463,7 +547,7 @@ mod auto {
     }
 }
 
-#[cfg(esp_scheduled)]
+#[cfg(all(esp_scheduled, feature = "deep-sleep"))]
 pub(crate) use auto::seconds_to_due;
 
 /// The release last found, kept in flash: a deep-sleeping device checks only now and then, and

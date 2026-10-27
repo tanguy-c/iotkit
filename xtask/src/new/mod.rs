@@ -13,7 +13,7 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use boards::{Board, PinCheck, PinUse, boards, check_pin};
-use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text, validator::Validation};
+use inquire::{Confirm, InquireError, MultiSelect, Password, PasswordDisplayMode, Select, Text, validator::Validation};
 use parts::{Group, KINDS, Kind, slug};
 use serde::{Deserialize, Serialize};
 
@@ -66,8 +66,20 @@ pub struct Answers {
     /// A fixed code to reuse (else drawn); with `matter = "fixed"`.
     pub matter_passcode: Option<u32>,
     pub matter_discriminator: Option<u16>,
+    /// Signed updates: over Wi-Fi from Home Assistant and `cargo iotkit ota push`, over Thread from
+    /// a Matter OTA provider. Off, a smaller firmware, flashed over USB only.
+    pub updates: bool,
     /// The manifest Home Assistant's updates come from.
     pub updates_url: Option<String>,
+    /// Updates install without a click (`IOTKIT_AUTO_UPDATE`); unset, the link's default: on over
+    /// Thread and on a battery device over the ESPHome API, off on the others.
+    pub auto_update: Option<bool>,
+    /// When, over the ESPHome API (`IOTKIT_UPDATE_TIME`): `HH:MM` on the half hour, or `wake`.
+    pub update_time: Option<String>,
+    /// How it gets its Wi-Fi network at the first boot (default: every way the chip has).
+    pub setup: Option<Vec<SetupWay>>,
+    /// The USB console (`help`, `mqtt HOST`, `update-url URL`).
+    pub console: bool,
     pub parts: Vec<PartAnswer>,
     /// Writes AGENTS.md, for AI coding agents.
     pub ai_agents: bool,
@@ -101,7 +113,12 @@ impl Default for Answers {
             matter: MatterMode::Off,
             matter_passcode: None,
             matter_discriminator: None,
+            updates: true,
             updates_url: None,
+            auto_update: None,
+            update_time: None,
+            setup: None,
+            console: true,
             parts: Vec::new(),
             ai_agents: false,
         }
@@ -161,6 +178,37 @@ pub enum Indicator {
 pub enum Level {
     High,
     Low,
+}
+
+/// A way to give the device its Wi-Fi network at the first boot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SetupWay {
+    /// Its access point and page (`softap`).
+    AccessPoint,
+    /// Improv over Bluetooth (`improv-ble`: about 300 KB of flash).
+    Bluetooth,
+    /// Improv over USB (`improv-serial`: ESP Web Tools).
+    Serial,
+}
+
+impl SetupWay {
+    fn label(self) -> &'static str {
+        match self {
+            Self::AccessPoint => "Its access point and page, from a phone",
+            Self::Bluetooth => "Improv over Bluetooth (about 300 KB of flash)",
+            Self::Serial => "Improv over USB (ESP Web Tools, improv-wifi.com)",
+        }
+    }
+
+    /// The ways a chip has (the ESP32: no Bluetooth setup yet).
+    pub fn all(chip: &str) -> Vec<Self> {
+        let mut all = vec![Self::AccessPoint, Self::Bluetooth, Self::Serial];
+        if chip == "esp32" {
+            all.retain(|w| *w != Self::Bluetooth);
+        }
+        all
+    }
 }
 
 /// The ESPHome native API (`esphome-api`): Home Assistant connects to the device, no broker.
@@ -247,6 +295,16 @@ impl Project {
         }
     }
 
+    /// The setup ways, defaults filled in.
+    pub fn setup(&self) -> Vec<SetupWay> {
+        self.answers.setup.clone().unwrap_or_else(|| SetupWay::all(self.board.chip))
+    }
+
+    /// Updates install without a click: the answer, else the link's default.
+    pub fn auto_update(&self) -> bool {
+        self.answers.updates && self.answers.auto_update.unwrap_or(self.thread() || (self.sleepy() && self.esphome()))
+    }
+
     /// The board's RGB LED is a light (showing the status too with `status = "rgb"`).
     pub fn status_led(&self) -> bool {
         self.answers.status_led && !self.battery() && self.board.rgb_led.is_some()
@@ -315,6 +373,10 @@ impl Project {
                 answers.updates_url.is_none(),
                 "Thread devices update over Matter (`cargo iotkit ota build`, then a Matter OTA provider): remove `updates_url`"
             );
+            ensure!(
+                answers.setup.is_none() && answers.console,
+                "Thread has no Wi-Fi setup or console: remove `setup` and `console`"
+            );
         } else {
             ensure!(board.chip != "esp32h2", "the ESP32-H2 has no Wi-Fi: set `transport = \"thread\"`");
         }
@@ -338,6 +400,39 @@ impl Project {
         if board.chip == "esp32" {
             ensure!(!battery, "deep sleep is not supported on the ESP32 yet: choose `power = \"plugged\"`");
         }
+        if let Some(setup) = &answers.setup {
+            ensure!(
+                !(board.chip == "esp32" && setup.contains(&SetupWay::Bluetooth)),
+                "setup over Bluetooth does not link on the ESP32 yet: remove `bluetooth` from `setup`"
+            );
+            ensure!(
+                !setup.is_empty() || answers.wifi_ssid.is_some(),
+                "with no `setup` way, the Wi-Fi network is built in: set `wifi_ssid`"
+            );
+        }
+        ensure!(
+            answers.updates || (answers.updates_url.is_none() && answers.auto_update != Some(true)),
+            "`updates = false`: remove `updates_url` and `auto_update`"
+        );
+        // The broker is set on the console; the setup page and Improv only give the network.
+        ensure!(
+            answers.console
+                || answers.transport == Transport::Thread
+                || answers.esphome != EsphomeMode::Off
+                || answers.mqtt_host.is_some(),
+            "without the console the MQTT broker is built in: set `mqtt_host`"
+        );
+        ensure!(
+            answers.console || answers.esphome != EsphomeMode::PerDevice,
+            "a key drawn by each device is read on the console (`api-key`): keep `console`, or `esphome = \"fixed\"`"
+        );
+        if let Some(time) = &answers.update_time {
+            ensure!(update_time_ok(time), "update_time `{time}`: `HH:MM` on the half hour (02:00, 13:30), or `wake`");
+            ensure!(
+                answers.esphome != EsphomeMode::Off,
+                "`update_time` needs the ESPHome API (Home Assistant gives the time): remove it"
+            );
+        }
         ensure!((1..=24 * 60).contains(&answers.report_every_min), "report_every_min: 1 to 1440");
         // iotkit's `matter-icd` over Wi-Fi waits for an esp-radio release (crates/iotkit/src/lib.rs).
         ensure!(
@@ -349,6 +444,13 @@ impl Project {
         if answers.esphome != EsphomeMode::Off && answers.matter != MatterMode::Off {
             warnings.push(
                 "with Matter, Home Assistant does not discover the ESPHome API: add the device by its address".into(),
+            );
+        }
+        if answers.transport == Transport::Wifi && answers.updates && !answers.console && answers.updates_url.is_none()
+        {
+            warnings.push(
+                "no console and no `updates_url`: Home Assistant offers no updates (`cargo iotkit ota push` still works)"
+                    .into(),
             );
         }
         // The board's own: its switches, set in `main`.
@@ -575,15 +677,19 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
             "Cargo.toml" => text = codegen::cargo_toml(&text, p)?,
             // Always generated: the template's has its placeholder maker and entity ids.
             "src/main.rs" => text = codegen::main_rs(p),
-            ".cargo/config.toml" if p.flash != default_flash(p.board.chip) => {
-                text = text.replace(
-                    &format!(
-                        "--flash-size {} --partition-table {}",
-                        default_flash(p.board.chip),
-                        table(default_flash(p.board.chip))
-                    ),
-                    &format!("--flash-size {} --partition-table {}", p.flash, table(&p.flash)),
-                );
+            ".cargo/config.toml" => {
+                if p.flash != default_flash(p.board.chip) {
+                    text = text.replace(
+                        &format!(
+                            "--flash-size {} --partition-table {}",
+                            default_flash(p.board.chip),
+                            table(default_flash(p.board.chip))
+                        ),
+                        &format!("--flash-size {} --partition-table {}", p.flash, table(&p.flash)),
+                    );
+                }
+                // `[env]` is the last table.
+                text.push_str(&codegen::update_env(p));
             }
             _ => {}
         }
@@ -819,15 +925,9 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     let package = if a.package.is_empty() { slug(&a.name, '-') } else { a.package.clone() };
     let default_url =
         a.mqtt_host.as_deref().map(|h| format!("http://{h}:8080/{package}/manifest.json")).unwrap_or_default();
-    a.updates_url = None;
+    ask_updates(&mut a, &default_url, thread, battery)?;
     if !thread {
-        let url = Text::new("Where will you publish updates (manifest URL)?")
-            .with_default(&default_url)
-            .with_help_message(
-                "Home Assistant then offers new versions; `cargo iotkit ota publish` fills it. Leave empty to skip.",
-            )
-            .prompt()?;
-        a.updates_url = (!url.trim().is_empty()).then(|| url.trim().to_string());
+        ask_extras(&mut a, board)?;
     }
 
     // 5. Parts.
@@ -937,12 +1037,110 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     Ok(project)
 }
 
+/// `HH:MM` on the half hour, or `wake`: iotkit's `IOTKIT_UPDATE_TIME`.
+fn update_time_ok(s: &str) -> bool {
+    if s == "wake" {
+        return true;
+    }
+    let Some((h, m)) = s.split_once(':') else { return false };
+    h.len() == 2 && h.parse::<u8>().is_ok_and(|h| h < 24) && (m == "00" || m == "30")
+}
+
 fn non_empty(s: &str) -> Result<Validation, inquire::CustomUserError> {
     Ok(if s.trim().is_empty() { Validation::Invalid("needed".into()) } else { Validation::Valid })
 }
 
 /// A GPIO number, checked for the chip (refused pins are asked again, warnings shown).
 /// The battery questions: how often a sleeping device reports, and its level's pin.
+/// Updates: whether, from where, and whether they install by themselves.
+fn ask_updates(a: &mut Answers, default_url: &str, thread: bool, battery: bool) -> Result<()> {
+    println!("\nUpdates:");
+    a.updates = Confirm::new(if thread { "Update it over Matter?" } else { "Update it over the network?" })
+        .with_default(true)
+        .with_help_message(if thread {
+            "Signed updates from a Matter OTA provider. Without: flashed over USB only, about 20 KB of RAM and 170 KB of flash less"
+        } else {
+            "Signed updates from Home Assistant and `cargo iotkit ota push`. Without: flashed over USB only, smaller"
+        })
+        .prompt()?;
+    a.updates_url = None;
+    a.auto_update = None;
+    a.update_time = None;
+    if !a.updates {
+        return Ok(());
+    }
+    if !thread {
+        let url = Text::new("Where will you publish updates (manifest URL)?")
+            .with_default(default_url)
+            .with_help_message(
+                "Home Assistant then offers new versions; `cargo iotkit ota publish` fills it. Leave empty to skip.",
+            )
+            .prompt()?;
+        a.updates_url = (!url.trim().is_empty()).then(|| url.trim().to_string());
+    }
+    let esphome = a.esphome != EsphomeMode::Off;
+    // The link's default (`Project::auto_update`): on where nobody can click.
+    let default = thread || (battery && esphome);
+    let auto = Confirm::new("Install updates by themselves?")
+        .with_default(default)
+        .with_help_message(if thread {
+            "Yes: it asks its controllers' providers every day. No: only the updates its controller announces"
+        } else {
+            "Yes: an *Auto-update* switch in Home Assistant, on. No: a release waits for a click on *Install*"
+        })
+        .prompt()?;
+    a.auto_update = (auto != default).then_some(auto);
+    if auto && esphome {
+        let time = Text::new("At what time? (HH:MM on the half hour, or `wake`: once found)")
+            .with_default("02:00")
+            .with_help_message("Home Assistant gives the time; *Update time* in Home Assistant changes it")
+            .with_validator(|s: &str| {
+                Ok(if update_time_ok(s.trim()) {
+                    Validation::Valid
+                } else {
+                    Validation::Invalid("`HH:MM` on the half hour (02:00, 13:30), or `wake`".into())
+                })
+            })
+            .prompt()?;
+        a.update_time = (time.trim() != "02:00").then(|| time.trim().to_string());
+    }
+    Ok(())
+}
+
+/// What to leave out of a Wi-Fi device: setup ways, the console.
+fn ask_extras(a: &mut Answers, board: &'static Board) -> Result<()> {
+    let all = SetupWay::all(board.chip);
+    let labels: Vec<&str> = all.iter().map(|w| w.label()).collect();
+    let help = if a.wifi_ssid.is_some() {
+        "Space toggles. The Wi-Fi network is built in: none is needed"
+    } else {
+        "Space toggles. At least one, as the Wi-Fi network is not built in"
+    };
+    let ssid = a.wifi_ssid.is_some();
+    let chosen = MultiSelect::new("How can it be given a Wi-Fi network at its first boot?", labels.clone())
+        .with_all_selected_by_default()
+        .with_help_message(help)
+        .with_validator(move |c: &[inquire::list_option::ListOption<&&str>]| {
+            Ok(if c.is_empty() && !ssid {
+                Validation::Invalid("at least one, or enter the Wi-Fi network now".into())
+            } else {
+                Validation::Valid
+            })
+        })
+        .prompt()?;
+    let setup: Vec<SetupWay> = all.iter().copied().filter(|w| chosen.contains(&w.label())).collect();
+    a.setup = (setup != all).then_some(setup);
+    let needs_console = a.esphome == EsphomeMode::PerDevice || (a.esphome == EsphomeMode::Off && a.mqtt_host.is_none());
+    a.console = needs_console
+        || Confirm::new("Keep the USB console (`help`)?")
+            .with_default(true)
+            .with_help_message(
+                "Settings and diagnostics over USB. Without: a little smaller, and the app gets the USB port",
+            )
+            .prompt()?;
+    Ok(())
+}
+
 fn ask_battery(a: &mut Answers, board: &'static Board, thread: bool) -> Result<()> {
     if a.matter == MatterMode::Off {
         let every = Select::new(
@@ -1144,6 +1342,56 @@ mod tests {
         }
     }
 
+    /// What can be left out (updates, setup ways, the console), auto-update on every link, and the
+    /// combinations refused.
+    #[test]
+    fn slim() {
+        let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
+        assert!(err("updates = false\nupdates_url = \"http://h/m.json\"").contains("updates = false"));
+        assert!(err("updates = false\nauto_update = true").contains("updates = false"));
+        assert!(err("setup = []").contains("wifi_ssid"));
+        assert!(err("console = false").contains("mqtt_host"));
+        assert!(err("console = false\nesphome = \"per-device\"").contains("api-key"));
+        assert!(err("update_time = \"02:15\"\nesphome = \"fixed\"").contains("half hour"));
+        assert!(err("update_time = \"02:00\"").contains("ESPHome API"));
+        assert!(err("board = \"esp32-devkitc\"\nsetup = [\"bluetooth\"]").contains("ESP32"));
+        assert!(err("transport = \"thread\"\nmatter = \"fixed\"\nconsole = false").contains("Thread"));
+        let features = |p: &Project| {
+            let rendered = render::render("Cargo.toml", render::FILES[1].1, &p.package, p.board.chip, "/x").unwrap();
+            codegen::cargo_toml(&rendered, p).unwrap()
+        };
+
+        // Defaults: the line as before, no `[env]` added.
+        let p = project("");
+        assert!(features(&p).contains("features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\"] }"));
+        assert!(codegen::update_env(&p).is_empty() && !p.auto_update());
+
+        let p = project(include_str!("../../answers/xiao.toml"));
+        let cargo = features(&p);
+        assert!(
+            cargo.contains("default-features = false, features = [\"esp32c6\", \"ha-update\", \"mqtt\", \"wifi\", \"softap\", \"console\", \"ota-push\"]"),
+            "{cargo}"
+        );
+        let main = codegen::main_rs(&p);
+        assert!(!main.contains("bt: p.BT") && main.contains("usb: p.USB_DEVICE"), "{main}");
+        assert!(codegen::update_env(&p).contains("IOTKIT_AUTO_UPDATE = \"on\""));
+        assert!(codegen::readme(&p).contains("once found"));
+
+        let p = project(include_str!("../../answers/c3.toml"));
+        let cargo = features(&p);
+        assert!(!cargo.contains("ha-update") && !cargo.contains("ota-push"), "{cargo}");
+        assert!(codegen::readme(&p).contains("Built without updates"));
+
+        // Over Thread: no `matter-ota`; auto-update off leaves the controller's announcements.
+        let p = project("transport = \"thread\"\nmatter = \"fixed\"\nupdates = false");
+        assert!(features(&p).contains("[\"esp32c6\", \"matter-thread\", \"smartled\", \"remember\"]"));
+        let p = project(include_str!("../../answers/h2.toml"));
+        let cargo = features(&p);
+        assert!(cargo.contains("[\"esp32h2\", \"matter-thread\", \"matter-ota\""), "{cargo}");
+        assert!(codegen::update_env(&p).contains("IOTKIT_AUTO_UPDATE = \"off\"") && !p.auto_update());
+        assert!(codegen::readme(&p).contains("announces"));
+    }
+
     /// The ESPHome API instead of MQTT: its feature, a built-in key, and the combinations refused.
     #[test]
     fn esphome() {
@@ -1161,13 +1409,16 @@ mod tests {
             &p,
         )
         .unwrap();
-        // The defaults but MQTT.
+        // The defaults but MQTT and the console.
         assert!(
             cargo.contains(
-                "default-features = false, features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\", \"esphome-api\", \"improv-ble\", \"wifi\", \"softap\", \"improv-serial\", \"console\", \"ota-push\"]"
+                "default-features = false, features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\", \"esphome-api\", \"improv-ble\", \"wifi\", \"softap\", \"improv-serial\", \"ota-push\"]"
             ),
             "{cargo}"
         );
+        let env = codegen::update_env(&p);
+        assert!(env.contains("IOTKIT_AUTO_UPDATE = \"on\"") && env.contains("IOTKIT_UPDATE_TIME = \"03:30\""), "{env}");
+        assert!(codegen::readme(&p).contains("at 03:30"));
         let readme = codegen::readme(&p);
         assert!(
             readme.contains("ESPHOME_API_KEY") && !readme.contains(&key) && !readme.contains("mqtt 192"),

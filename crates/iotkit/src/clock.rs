@@ -15,6 +15,10 @@ fn rtc() -> Rtc<'static> {
 
 const MAGIC: u32 = 0x7130_0001;
 
+/// The time became known (after a power loss): an update downloaded before is scheduled then.
+pub(crate) static KNOWN: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> =
+    embassy_sync::signal::Signal::new();
+
 /// The time zone, after a magic word: the RTC holds the time once it is valid.
 #[esp_hal::ram(unstable(rtc_fast, persistent))]
 static mut ZONE: [u32; 1 + Zone::WORDS] = [0; 1 + Zone::WORDS];
@@ -34,6 +38,7 @@ pub(crate) fn set(epoch: u32, zone: Zone) {
         w[0] = MAGIC;
     });
     if first {
+        KNOWN.signal(());
         let offset = zone.offset(i64::from(epoch));
         let local = zone.local(i64::from(epoch)).rem_euclid(86_400);
         log::info!(

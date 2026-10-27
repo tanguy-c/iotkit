@@ -1,0 +1,14 @@
+# `cargo iotkit new --answers answers/h2.toml`: Matter over Thread on the ESP32-H2-DevKitM-1 (4 MB,
+# 320 KB of RAM), its RGB LED as a light; updates only when its controller announces one. CI
+# generates and builds it.
+name        = "H2 light"
+maker       = "CI"
+board       = "esp32h2-devkitm-1"
+transport   = "thread"
+matter      = "per-device"
+auto_update = false
+
+[[parts]]
+kind = "relay"
+name = "Relay"
+pin  = 2

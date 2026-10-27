@@ -43,6 +43,11 @@ jobs:
       - if: matrix.app == 'thread-light'
         run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: cargo clippy -p ${{ matrix.app }} --no-default-features --features ${{ matrix.chip }} --target ${{ matrix.target }} -- -D warnings
+      # The link checks the H2's RAM (320 KB), on mains and on battery.
+      - if: matrix.chip == 'esp32h2'
+        run: |
+          cargo build --release -p thread-light --no-default-features --features esp32h2
+          cargo build --release -p thread-light --no-default-features --features esp32h2,iotkit/matter-icd
       # Deep sleep (Wi-Fi chips only).
       - if: matrix.app == 'devkit'
         run: cargo clippy -p iotkit --features iotkit/${{ matrix.chip }},iotkit/deep-sleep,iotkit/esphome-api --target ${{ matrix.target }} -- -D warnings
@@ -122,11 +127,11 @@ jobs:
             (cd "$RUNNER_TEMP/ci-$chip" && cargo iotkit keygen && cargo iotkit build --release && cargo iotkit verify)
           done
       # `cargo iotkit new` from answers files: every part kind with Matter on the C6, a battery C3,
-      # a C6 over the ESPHome API, a C6 over Thread (its Matter OTA file too), and battery C6s over
-      # Thread and the ESPHome API.
+      # a C6 over the ESPHome API, a C6 over Thread (its Matter OTA file too), battery C6s over
+      # Thread and the ESPHome API, and an H2 over Thread.
       - run: sudo apt-get update && sudo apt-get install -y clang cmake
       - run: |
-          for c in c6 c3 esphome thread thread-battery esphome-battery xiao xiao-thread; do
+          for c in c6 c3 esphome thread thread-battery esphome-battery xiao xiao-thread h2; do
             cargo iotkit new "$RUNNER_TEMP/new-$c" --answers xtask/answers/$c.toml --iotkit-path "$GITHUB_WORKSPACE"
             (cd "$RUNNER_TEMP/new-$c" && cargo clippy --release -- -D warnings && cargo iotkit build --release && cargo iotkit verify)
           done

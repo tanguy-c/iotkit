@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::{
-    Indicator, MatterMode, Part, Project,
+    Indicator, MatterMode, Part, Project, SetupWay,
     parts::{Bus, Component, Stub},
 };
 
@@ -380,11 +380,22 @@ async fn main(spawner: Spawner) -> ! {{
 ",
         if p.thread() {
             "        radio: p.IEEE802154,\n        bt: p.BT,\n        rng: p.RNG,\n        adc1: p.ADC1,\n        timg1: p.TIMG1,\n"
-        } else if p.board.chip == "esp32" {
-            // The ESP32: no Bluetooth setup, and the console on UART0.
-            "        wifi: p.WIFI,\n        timg1: p.TIMG1,\n        uart: p.UART0,\n        uart_rx: p.GPIO3.into(),\n"
+                .to_string()
         } else {
-            "        wifi: p.WIFI,\n        bt: p.BT,\n        timg1: p.TIMG1,\n        usb: p.USB_DEVICE,\n"
+            // Bluetooth for its setup; the USB port (on the ESP32 UART0) for the console or Improv.
+            let setup = p.setup();
+            let serial = p.answers.console || setup.contains(&SetupWay::Serial);
+            let mut fields = String::from("        wifi: p.WIFI,\n");
+            if setup.contains(&SetupWay::Bluetooth) {
+                fields.push_str("        bt: p.BT,\n");
+            }
+            fields.push_str("        timg1: p.TIMG1,\n");
+            match (serial, p.board.chip == "esp32") {
+                (true, true) => fields.push_str("        uart: p.UART0,\n        uart_rx: p.GPIO3.into(),\n"),
+                (true, false) => fields.push_str("        usb: p.USB_DEVICE,\n"),
+                (false, _) => {}
+            }
+            fields
         },
         p.button_pin()
     );
@@ -614,6 +625,26 @@ fn group(items: &BTreeSet<&str>) -> String {
     if out.len() == 1 { out.remove(0) } else { format!("{{{}}}", out.join(", ")) }
 }
 
+/// The `[env]` lines of the update answers, for `.cargo/config.toml`.
+pub fn update_env(p: &Project) -> String {
+    let a = &p.answers;
+    let mut s = String::new();
+    if a.updates && a.auto_update.is_some() {
+        let _ = writeln!(
+            s,
+            "# Updates install without a click (*Auto-update* in Home Assistant over Wi-Fi).\nIOTKIT_AUTO_UPDATE = \"{}\"",
+            if p.auto_update() { "on" } else { "off" }
+        );
+    }
+    if let Some(time) = a.update_time.as_deref().filter(|_| p.auto_update()) {
+        let _ = writeln!(
+            s,
+            "# When, until set in Home Assistant: `HH:MM`, or `wake` (at once).\nIOTKIT_UPDATE_TIME = \"{time}\""
+        );
+    }
+    s
+}
+
 /// `.cargo/secrets.toml` (git-ignored): what the builder gave now, read at build time.
 pub fn secrets(p: &Project) -> Option<String> {
     let a = &p.answers;
@@ -755,12 +786,16 @@ fn component<'a>(
 
 pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     let mut app_features = vec![p.board.chip];
+    let updates = p.answers.updates;
     if p.thread() {
-        app_features.extend(["matter-thread", "matter-ota"]);
+        app_features.push("matter-thread");
+        if updates {
+            app_features.push("matter-ota");
+        }
         if p.icd() {
             app_features.push("matter-icd");
         }
-    } else {
+    } else if updates {
         app_features.push("ha-update");
     }
     if p.sleepy() {
@@ -780,17 +815,25 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         path => format!("path = {:?}", format!("{path}/crates/iotkit")),
     };
     // Thread builds without Wi-Fi; the ESP32 without `improv-ble`, which does not link on it yet;
-    // the ESPHome API without MQTT.
+    // the ESPHome API without MQTT; then only the setup ways, console and updates asked for.
+    let setup = p.setup();
+    let wifi: Vec<&str> = [
+        (setup.contains(&SetupWay::Bluetooth), "improv-ble"),
+        (!p.esphome(), "mqtt"),
+        (true, "wifi"),
+        (setup.contains(&SetupWay::AccessPoint), "softap"),
+        (setup.contains(&SetupWay::Serial), "improv-serial"),
+        (p.answers.console, "console"),
+        (updates, "ota-push"),
+    ]
+    .into_iter()
+    .filter_map(|(on, f)| on.then_some(f))
+    .collect();
+    let all = ["improv-ble", "mqtt", "wifi", "softap", "improv-serial", "console", "ota-push"];
     let defaults = if p.thread() {
         "default-features = false, "
-    } else if p.board.chip == "esp32" || p.esphome() {
-        if p.board.chip != "esp32" {
-            app_features.push("improv-ble");
-        }
-        if !p.esphome() {
-            app_features.push("mqtt");
-        }
-        app_features.extend(["wifi", "softap", "improv-serial", "console", "ota-push"]);
+    } else if wifi != all {
+        app_features.extend(wifi);
         "default-features = false, "
     } else {
         ""
@@ -1019,6 +1062,10 @@ pub fn readme(p: &Project) -> String {
         });
     }
 
+    if !a.updates {
+        s.push_str("\n## Updates\n\nBuilt without updates (smaller): flash each new version over USB.\n");
+        return s;
+    }
     if p.thread() {
         let _ = write!(
             s,
@@ -1028,6 +1075,11 @@ pub fn readme(p: &Project) -> String {
              rejoins Thread and its controller (else the previous firmware comes back).\n",
             a.package
         );
+        s.push_str(if p.auto_update() {
+            "It also asks its controllers' providers for an update every day, and installs what they offer.\n"
+        } else {
+            "It installs only the updates its controller announces (`IOTKIT_AUTO_UPDATE = \"off\"`).\n"
+        });
         return s;
     }
     s.push_str("\n## Updates\n\n```bash\n# bump `version` in Cargo.toml, then:\ncargo iotkit ota push --host <device-ip>      # straight to the device\n");
@@ -1043,6 +1095,16 @@ pub fn readme(p: &Project) -> String {
         None => s.push_str(
             "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it (`update-url URL` on the console)\n```\n",
         ),
+    }
+    if p.auto_update() {
+        let time = a.update_time.as_deref().unwrap_or("02:00");
+        s.push_str(&if p.esphome() && time != "wake" {
+            format!(
+                "\n*Auto-update* is on: a release installs by itself at {time} (*Update time* in Home Assistant).\n"
+            )
+        } else {
+            "\n*Auto-update* is on: a release installs by itself once found (checked every 6 h).\n".into()
+        });
     }
     s
 }

@@ -52,6 +52,9 @@ jobs:
       - run: cargo clippy -p showcase --features matter-wifi -- -D warnings
       - run: cargo clippy -p sleepy -- -D warnings
       - run: cargo clippy -p sleepy --features esphome-api -- -D warnings
+      # Updates without a click on an always-on device: once found over MQTT, at a time over the API.
+      - run: IOTKIT_AUTO_UPDATE=on cargo clippy -p showcase -- -D warnings
+      - run: IOTKIT_AUTO_UPDATE=on cargo clippy -p showcase --features iotkit/esphome-api -- -D warnings
       - run: cargo clippy -p lean -- -D warnings
       # The chip side of the libraries, which the host jobs do not build.
       - run: cargo clippy -p iotkit --features iotkit/esp32c6 -- -D warnings
@@ -68,6 +71,7 @@ jobs:
       - run: cargo clippy -p thread-light -- -D warnings
       # On battery: a Matter ICD over Thread (sleepy end device, light sleep).
       - run: cargo clippy -p thread-light --features iotkit/matter-icd -- -D warnings
+      - run: IOTKIT_AUTO_UPDATE=off cargo clippy -p thread-light -- -D warnings
       # Matter OTA over Wi-Fi, signed and bare images.
       - run: cargo clippy -p devkit --features matter-wifi,iotkit/matter-ota -- -D warnings
       - run: cargo clippy -p devkit --features matter-wifi,iotkit/matter-ota-unsigned -- -D warnings

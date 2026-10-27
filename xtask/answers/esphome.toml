@@ -1,9 +1,13 @@
 # `cargo iotkit new --answers answers/esphome.toml`: a plugged-in ESP32-C6 for Home Assistant's
-# ESPHome integration (no broker), with one encryption key built in. CI generates and builds it.
+# ESPHome integration (no broker), with one encryption key built in; updates install by themselves
+# at 03:30; no USB console. CI generates and builds it.
 name = "Desk light"
 maker = "CI"
 board = "esp32c6-devkitc-1"
 esphome = "fixed"
+auto_update = true
+update_time = "03:30"
+console = false
 
 [[parts]]
 kind = "relay"
