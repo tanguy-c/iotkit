@@ -10,7 +10,8 @@
 //!   (`ha-update`) the *Auto-update* switch; `off` leaves Matter to updates its controller
 //!   announces.
 //! - `IOTKIT_UPDATE_TIME` (`02:00`): when a device over the ESPHome API installs updates by itself
-//!   until set in Home Assistant: `HH:MM` on the half hour, or `wake` (at once).
+//!   until set in Home Assistant: `HH:MM` on the half hour, or `wake` (at once). Set, a Matter
+//!   device (`matter-ota`) installs the updates of its daily checks then, in its controller's time.
 //! - `cfg(esp_wifi)`: a chip and the `wifi` feature, for the modules that run on the Wi-Fi side.
 //! - `cfg(esp_ota)`: a chip and a way to receive updates (`wifi` or `matter-ota`): `ota::esp`.
 //! - `cfg(esp_auto)`: updates installed without a click over Wi-Fi (`ha-update`, and
@@ -18,6 +19,8 @@
 //! - `cfg(esp_scheduled)`: at a set time, over the ESPHome API (Home Assistant gives the time):
 //!   `esp_auto` and `esphome-api`. Always on a deep-sleeping device over the API, which nobody
 //!   can click.
+//! - `cfg(matter_scheduled)`: `matter-ota` with `IOTKIT_UPDATE_TIME` set (not `IOTKIT_AUTO_UPDATE=off`):
+//!   the Time Synchronization cluster takes the controller's time zone too.
 //! - `cfg(auto_update_off)`: `IOTKIT_AUTO_UPDATE=off`.
 //! - `cfg(esp_stage)`: images kept downloaded until applied (`matter-ota`, or `esp_scheduled`).
 
@@ -71,6 +74,13 @@ fn main() {
     let scheduled = updates && (auto == Some(true) || asleep) && on("ESPHOME_API");
     if scheduled {
         println!("cargo::rustc-cfg=esp_scheduled");
+    }
+    println!("cargo::rustc-check-cfg=cfg(matter_scheduled)");
+    let time = std::env::var("IOTKIT_UPDATE_TIME").unwrap_or_default();
+    if on("_ESP") && on("MATTER_OTA") && !time.is_empty() && auto != Some(false) {
+        // No wake-up over Matter: its checks come once a day.
+        assert!(time != "wake", "IOTKIT_UPDATE_TIME: `wake` is for deep sleep over the ESPHome API, not Matter");
+        println!("cargo::rustc-cfg=matter_scheduled");
     }
     if on("_ESP") && (on("MATTER_OTA") || scheduled) {
         println!("cargo::rustc-cfg=esp_stage");

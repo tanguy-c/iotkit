@@ -637,10 +637,12 @@ pub fn update_env(p: &Project) -> String {
         );
     }
     if let Some(time) = a.update_time.as_deref().filter(|_| p.auto_update()) {
-        let _ = writeln!(
-            s,
-            "# When, until set in Home Assistant: `HH:MM`, or `wake` (at once).\nIOTKIT_UPDATE_TIME = \"{time}\""
-        );
+        let what = if p.thread() {
+            "When the updates of the daily checks install, in the controller's time (an hour after a restart without it)"
+        } else {
+            "When, until set in Home Assistant: `HH:MM`, or `wake` (at once)"
+        };
+        let _ = writeln!(s, "# {what}.\nIOTKIT_UPDATE_TIME = \"{time}\"");
     }
     s
 }
@@ -1075,10 +1077,17 @@ pub fn readme(p: &Project) -> String {
              rejoins Thread and its controller (else the previous firmware comes back).\n",
             a.package
         );
-        s.push_str(if p.auto_update() {
-            "It also asks its controllers' providers for an update every day, and installs what they offer.\n"
+        s.push_str(&if let Some(time) = a.update_time.as_deref().filter(|_| p.auto_update()) {
+            format!(
+                "It also asks its controllers' providers for an update every day, downloads what they offer, and installs it at\n\
+                 {time} in the controller's time: Home Assistant's Matter Server gives it with its `time_sync` option. Without the\n\
+                 time (a restart) it waits for it, an hour at most. An update its controller announces (*Install*) installs at\n\
+                 once. Home Assistant sets no daily provider: with it, updates install when clicked.\n"
+            )
+        } else if p.auto_update() {
+            "It also asks its controllers' providers for an update every day, and installs what they offer.\n".into()
         } else {
-            "It installs only the updates its controller announces (`IOTKIT_AUTO_UPDATE = \"off\"`).\n"
+            "It installs only the updates its controller announces (`IOTKIT_AUTO_UPDATE = \"off\"`).\n".into()
         });
         return s;
     }

@@ -161,9 +161,17 @@ async fn run(
             Async(Entities { eps }),
         );
     #[cfg(feature = "matter-ota")]
+    let updates = updates();
+    #[cfg(feature = "matter-ota")]
     let handler = handler.chain(
         |e, c| e == ROOT_ENDPOINT_ID && c == crate::matter::ota::CLUSTER.id,
-        crate::matter::ota::requestor(updates(), firmware, store, Dataver::new_rand(&mut rand)),
+        crate::matter::ota::requestor(updates, firmware, store, Dataver::new_rand(&mut rand)),
+    );
+    // Tried before the root handler's: with the time zone.
+    #[cfg(matter_scheduled)]
+    let handler = handler.chain(
+        |e, c| e == ROOT_ENDPOINT_ID && c == crate::matter::ota::at::CLUSTER_ID,
+        crate::matter::ota::at::handler(Dataver::new_rand(&mut rand), updates),
     );
 
     let range = find_partition(NVS_LABEL).ok_or(Error::from(ErrorCode::NoSpace))?;

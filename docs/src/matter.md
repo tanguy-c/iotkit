@@ -65,6 +65,8 @@ server, driven and updated over Matter by it.
 
 With `matter-ota` the device is a Matter OTA Requestor: a Matter OTA provider offers it signed
 updates, so a Thread device updates without Wi-Fi ([Updates](updates.md#over-matter-thread-wi-fi)).
+With `IOTKIT_UPDATE_TIME`, what its daily check finds installs at that time, in the time a
+controller gives ([Without a click](updates.md#without-a-click)).
 
 ## A test controller on the PC
 

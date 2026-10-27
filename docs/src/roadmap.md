@@ -16,7 +16,7 @@ What iotkit does not do yet. [Status](introduction.md#status) says what works to
 - **Chips**: Bluetooth setup (`improv-ble` does not link yet) and deep sleep on the original
   ESP32; Matter on the S3 with PSRAM, and on the C5 once esp-hal has its true RNG.
 - **TLS**: certificates checked for expiry, with a clock on every link (SNTP; today the time only
-  comes from Home Assistant over the ESPHome API).
+  comes from Home Assistant over the ESPHome API, or from a Matter controller for the update time).
 - **ESPHome API**: setting the key from Home Assistant, logs over the API.
 - **Matter**:
   - a product's own vendor and product IDs and attestation credentials built in, so its maker

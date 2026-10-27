@@ -78,13 +78,27 @@ asks) says whether a release installs by itself, on every link:
 | Wi-Fi, MQTT (`ha-update`) | a release waits for *Install* | an *Auto-update* switch, on: installs once found (checked every 6 hours) | as unset |
 | Wi-Fi, ESPHome API (`ha-update`) | waits for *Install* | *Auto-update* and *Update time* (02:00, `IOTKIT_UPDATE_TIME`): downloaded once found, installed at that time | as unset |
 | Deep sleep over the ESPHome API | *Auto-update* on ([Battery](battery.md#updates-and-maintenance-over-the-esphome-api)) | the same | the switch starts off |
-| Matter (`matter-ota`) | asks its default providers once a day, installs what they offer | the same | only what a controller announces (`AnnounceOTAProvider`) |
+| Matter (`matter-ota`) | asks its default providers once a day, installs what they offer (at `IOTKIT_UPDATE_TIME`, if set) | the same | only what a controller announces (`AnnounceOTAProvider`) |
 
 The switches are settings of the device in Home Assistant, kept across restarts. Turning
 *Auto-update* on, or changing *Update time*, checks at once: a release found already installs (or
 is scheduled) without waiting for the next check. Over MQTT there is no clock, so no *Update
 time*: a check finds the release, and the device installs it then. Over the ESPHome API, after a
 power cut the device waits for Home Assistant's time to schedule a downloaded release.
+
+Over Matter, `IOTKIT_UPDATE_TIME` (`HH:MM`; `cargo iotkit new` asks) holds what the daily check
+finds: downloaded at once, installed at that time in the controller's time. The device takes it
+over Time Synchronization: `SetUTCTime`, and `SetTimeZone` and `SetDSTOffset` for local time
+(UTC without them). Home Assistant's Matter Server sends them with its `time_sync` option
+(`--enable-time-sync`): when it pairs the device, when the device comes back after a restart, and
+daily, in the server's time zone (`TZ` in its container). After a restart the device has no
+time until a controller gives it: a downloaded update waits for it, an hour at most (a controller
+without `time_sync` never gives it), then installs. An update a controller announces (a click on
+*Install*) installs at once. It costs about 10 KB of flash and 320 bytes of RAM.
+
+The daily check asks the device's default providers (`DefaultOTAProviders`), which a controller
+writes. Home Assistant's Matter Server writes none, and announces an update only on *Install*:
+with it alone, updates install when clicked, and the update time does not apply.
 
 ## What the device does
 

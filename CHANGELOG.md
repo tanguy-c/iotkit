@@ -3,32 +3,43 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
-## Unreleased
+## 0.4.0 (2026-10-27)
 
-- **Breaking:** MQTT is the `mqtt` feature (on by default); a project with
-  `default-features = false` adds it. `provision::esp::{dhcp_task, dns_task, portal_task}` are
-  gone: `window_task` runs them ([Upgrading](docs/src/upgrading.md)).
-- Downloads, update installs and the setup access point share one work area: 11 KB more free RAM.
-  An update asked for during a setup window is refused (`ota push`: HTTP 503).
-- `mem` on the console and `diag::esp::memory()`: heap and stack use.
+- **Breaking:** MQTT is the `mqtt` feature (on by default): a project with
+  `default-features = false` that uses it adds it. `provision::esp::{dhcp_task, dns_task,
+  portal_task}` are gone: `window_task` runs them, only while a setup window is open
+  ([Upgrading](docs/src/upgrading.md)).
+- Updates without a click, on every link: `IOTKIT_AUTO_UPDATE` (`on`/`off`). Always-on Wi-Fi
+  devices get an *Auto-update* switch, and *Update time* over the ESPHome API; turning
+  *Auto-update* on or changing *Update time* checks at once (battery devices included, which
+  waited for the next check, up to 6 hours). Over Matter, `off` turns the daily provider checks
+  off ([Updates](docs/src/updates.md#without-a-click)).
+- `IOTKIT_UPDATE_TIME` over Matter: the daily checks' updates download at once and install at
+  that time, in the controller's time and time zone (Time Synchronization, which Home Assistant's
+  Matter Server sends with `time_sync`); without it after a restart, an hour later. Home Assistant
+  sets no default provider: its updates install when clicked, at once.
+- Matter updates: a provider that stops answering (a lost network) no longer holds every later
+  check; each exchange with it gives up after 2 minutes.
+- Less RAM: downloads, update installs and the setup access point share one work area, 11 KB more
+  free. An update asked for during a setup window is refused (`ota push`: HTTP 503). `mem` on the
+  console and `diag::esp::memory()` show heap and stack use.
+- Matter over Thread fits 4 MB boards, and links on the ESP32-H2, updates included: the H2's
+  default heap past the reclaimed 64 KB is 32 KB (`DEFAULT_HEAP`; the other chips keep 96 KB).
 - The status shows on the board's RGB LED, over the light (`components::rgb_status_light`, or
-  `components::Overlay` for an app's own LED), and follows the links live.
-- A short press of the setup button closes an open setup or Matter pairing window.
-- `cargo iotkit new` reads its boards from [`boards/`](boards/), one file per board: 23 new
-  boards (Espressif, Seeed, M5Stack, Adafruit, Waveshare, LOLIN, Unexpected Maker, Arduino,
-  Olimex), searched as you type. Its status default is the board's LED.
-- Matter over Thread fits 4 MB boards; `cargo iotkit new` warns when a Matter project has no part.
-- The ESP32-H2 links Matter over Thread, updates included: its default heap past the reclaimed
-  64 KB is 32 KB (`DEFAULT_HEAP`; the other chips keep 96 KB).
-- `IOTKIT_AUTO_UPDATE` (`on`/`off`): updates without a click on every link: an *Auto-update*
-  switch on always-on Wi-Fi devices (with *Update time* over the ESPHome API), and Matter's daily
-  provider checks turned off ([Updates](docs/src/updates.md#without-a-click)). Turning
-  *Auto-update* on or changing *Update time* checks at once (it waited for the next check, up to
-  6 hours, on battery devices too).
-- `cargo iotkit new` asks about updates (none: a smaller firmware; by themselves), the Wi-Fi setup
-  ways and the console, and leaves out the features not wanted.
-- The guide's [Building a Matter device](docs/src/matter.md): Wi-Fi or Thread, pairing with any
-  Matter controller, updates, what certification takes. `cargo iotkit new` names no ecosystem.
+  `components::Overlay` for an app's own LED), and follows the links live. A short press of the
+  setup button closes an open setup or Matter pairing window.
+- `cargo iotkit new`:
+  - reads its boards from [`boards/`](boards/), one file per board: 23 new boards (Espressif,
+    Seeed, M5Stack, Adafruit, Waveshare, LOLIN, Unexpected Maker, Arduino, Olimex), searched as
+    you type; the status default is the board's LED;
+  - asks about updates (none, for a smaller firmware; by themselves), the Wi-Fi setup ways and the
+    console, and leaves out the features not wanted;
+  - warns when a Matter project has no part, and names no ecosystem.
+- Docs: [Building a Matter device](docs/src/matter.md) (Wi-Fi or Thread, pairing with any Matter
+  controller, updates, what certification takes); tested on a XIAO ESP32-C6 and an
+  ESP32-S3-DevKitC-1 too.
+- Fixed: an MQTT number command with a huge negative exponent (`1.1e-50000000000017`) restarted
+  the device.
 
 ## 0.3.0 (2026-10-26)
 
