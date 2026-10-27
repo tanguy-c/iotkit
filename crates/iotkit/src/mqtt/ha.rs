@@ -569,7 +569,8 @@ fn decimal(s: &str) -> Option<f32> {
             exp -= step;
         }
         while exp < 0 && v != 0.0 {
-            let step = (-exp).min(22);
+            // Not `-exp`: a saturated exponent is `i32::MIN`.
+            let step = -exp.max(-22);
             v /= POW10[step as usize];
             exp += step;
         }
@@ -684,6 +685,8 @@ mod tests {
             assert!((got - want).abs() <= want.abs() * f32::EPSILON, "{s}: {got} != {want}");
         }
         assert!(decimal("1e39").is_some_and(f32::is_infinite));
+        // The exponent saturates (found by `fuzz/ha_command`).
+        assert_eq!(decimal("1.1e-50000000000017"), Some(0.0));
         for s in ["", "-", ".", "e5", "1e", "1e+", "1.2.3", "1x", "x1", "--1", "1 2", "inf", "nan", "1_0"] {
             assert_eq!(decimal(s), None, "{s}");
         }

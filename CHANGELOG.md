@@ -31,6 +31,8 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   sets no default provider: its updates install when clicked, at once.
 - Matter updates: a provider that stops answering (a lost network) no longer holds every later
   check; each exchange with it gives up after 2 minutes.
+- Fixed: an MQTT number command with a huge negative exponent (`1.1e-50000000000017`) restarted
+  the device.
 - `cargo iotkit new` asks about updates (none: a smaller firmware; by themselves), the Wi-Fi setup
   ways and the console, and leaves out the features not wanted.
 - The guide's [Building a Matter device](docs/src/matter.md): Wi-Fi or Thread, pairing with any
