@@ -171,6 +171,12 @@ async fn run<C: Crypto>(
         |e, c| e == ROOT_ENDPOINT_ID && c == crate::matter::ota::CLUSTER.id,
         crate::matter::ota::requestor(updates, firmware, store, Dataver::new_rand(&mut rand)),
     );
+    // Tried before the root handler's: with the time zone.
+    #[cfg(matter_scheduled)]
+    let handler = handler.chain(
+        |e, c| e == ROOT_ENDPOINT_ID && c == crate::matter::ota::at::CLUSTER_ID,
+        crate::matter::ota::at::handler(Dataver::new_rand(&mut rand), updates),
+    );
 
     // Pairings and the rest of rs-matter's state, in the `nvs` partition. If it does not load
     // (another firmware's data, say), it is erased and Matter starts unpaired.

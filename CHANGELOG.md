@@ -25,6 +25,12 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   provider checks turned off ([Updates](docs/src/updates.md#without-a-click)). Turning
   *Auto-update* on or changing *Update time* checks at once (it waited for the next check, up to
   6 hours, on battery devices too).
+- `IOTKIT_UPDATE_TIME` over Matter: the updates of the daily checks are downloaded at once and
+  installed at that time, in the controller's time and time zone (Time Synchronization, which
+  Home Assistant's Matter Server sends with `time_sync`). Without it after a restart, an hour later. Home Assistant
+  sets no default provider: its updates install when clicked, at once.
+- Matter updates: a provider that stops answering (a lost network) no longer holds every later
+  check; each exchange with it gives up after 2 minutes.
 - `cargo iotkit new` asks about updates (none: a smaller firmware; by themselves), the Wi-Fi setup
   ways and the console, and leaves out the features not wanted.
 

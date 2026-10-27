@@ -428,9 +428,16 @@ impl Project {
         );
         if let Some(time) = &answers.update_time {
             ensure!(update_time_ok(time), "update_time `{time}`: `HH:MM` on the half hour (02:00, 13:30), or `wake`");
+            ensure!(answers.updates, "`update_time` with `updates = false`: remove it");
+            let thread = answers.transport == Transport::Thread;
             ensure!(
-                answers.esphome != EsphomeMode::Off,
-                "`update_time` needs the ESPHome API (Home Assistant gives the time): remove it"
+                answers.esphome != EsphomeMode::Off || thread,
+                "`update_time` needs the ESPHome API or Matter (the time comes from the controller): remove it"
+            );
+            ensure!(!thread || time != "wake", "`update_time = \"wake\"` is for deep sleep over the ESPHome API");
+            ensure!(
+                !thread || answers.auto_update != Some(false),
+                "`update_time` is for updates installed by themselves: remove it, or `auto_update = false`"
             );
         }
         ensure!((1..=24 * 60).contains(&answers.report_every_min), "report_every_min: 1 to 1440");
@@ -1104,6 +1111,22 @@ fn ask_updates(a: &mut Answers, default_url: &str, thread: bool, battery: bool) 
             .prompt()?;
         a.update_time = (time.trim() != "02:00").then(|| time.trim().to_string());
     }
+    if auto && thread {
+        let time = Text::new("At what time? (HH:MM on the half hour, or empty: once offered)")
+            .with_help_message(
+                "In the controller's time: Home Assistant's Matter Server gives it (`time_sync`). Without it, once offered",
+            )
+            .with_validator(|s: &str| {
+                let s = s.trim();
+                Ok(if s.is_empty() || (s != "wake" && update_time_ok(s)) {
+                    Validation::Valid
+                } else {
+                    Validation::Invalid("`HH:MM` on the half hour (02:00, 13:30), or empty".into())
+                })
+            })
+            .prompt()?;
+        a.update_time = (!time.trim().is_empty()).then(|| time.trim().to_string());
+    }
     Ok(())
 }
 
@@ -1385,11 +1408,20 @@ mod tests {
         // Over Thread: no `matter-ota`; auto-update off leaves the controller's announcements.
         let p = project("transport = \"thread\"\nmatter = \"fixed\"\nupdates = false");
         assert!(features(&p).contains("[\"esp32c6\", \"matter-thread\", \"smartled\", \"remember\"]"));
+        let p = project("transport = \"thread\"\nmatter = \"fixed\"\nauto_update = false");
+        assert!(codegen::update_env(&p).contains("IOTKIT_AUTO_UPDATE = \"off\"") && !p.auto_update());
+        assert!(codegen::readme(&p).contains("announces"));
+        // An update time over Matter: the controller's time, never `wake`, not with auto-update off.
         let p = project(include_str!("../../answers/h2.toml"));
         let cargo = features(&p);
         assert!(cargo.contains("[\"esp32h2\", \"matter-thread\", \"matter-ota\""), "{cargo}");
-        assert!(codegen::update_env(&p).contains("IOTKIT_AUTO_UPDATE = \"off\"") && !p.auto_update());
-        assert!(codegen::readme(&p).contains("announces"));
+        let env = codegen::update_env(&p);
+        assert!(env.contains("IOTKIT_UPDATE_TIME = \"03:00\"") && !env.contains("IOTKIT_AUTO_UPDATE"), "{env}");
+        assert!(codegen::readme(&p).contains("03:00 in the controller's time"));
+        let thread = "transport = \"thread\"\nmatter = \"fixed\"\n";
+        assert!(err(&format!("{thread}update_time = \"wake\"")).contains("deep sleep"));
+        assert!(err(&format!("{thread}update_time = \"03:00\"\nauto_update = false")).contains("by themselves"));
+        assert!(err(&format!("{thread}update_time = \"03:00\"\nupdates = false")).contains("updates = false"));
     }
 
     /// The ESPHome API instead of MQTT: its feature, a built-in key, and the combinations refused.

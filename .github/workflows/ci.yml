@@ -72,6 +72,7 @@ jobs:
       # On battery: a Matter ICD over Thread (sleepy end device, light sleep).
       - run: cargo clippy -p thread-light --features iotkit/matter-icd -- -D warnings
       - run: IOTKIT_AUTO_UPDATE=off cargo clippy -p thread-light -- -D warnings
+      - run: IOTKIT_UPDATE_TIME=03:00 cargo clippy -p thread-light -- -D warnings
       # Matter OTA over Wi-Fi, signed and bare images.
       - run: cargo clippy -p devkit --features matter-wifi,iotkit/matter-ota -- -D warnings
       - run: cargo clippy -p devkit --features matter-wifi,iotkit/matter-ota-unsigned -- -D warnings

@@ -6,6 +6,11 @@
 //! The file is a Matter OTA file ([`image::matter`](crate::image::matter)) whose payload starts
 //! with iotkit's signed manifest: `cargo iotkit ota build` writes it. With `matter-ota-unsigned`
 //! the payload is the bare app image, checked by the header's SHA-256 only.
+//!
+//! With `IOTKIT_UPDATE_TIME` (`cfg(matter_scheduled)`) an update of the daily checks is downloaded
+//! at once and installed at that time, in the controller's time zone (Time Synchronization:
+//! `SetUTCTime`, `SetTimeZone`). One a controller announces (a click) installs at once. Without a
+//! time since the device started (a restart), it waits for one, an hour at most.
 
 use core::num::NonZeroU8;
 
@@ -54,7 +59,7 @@ macro_rules! root_endpoint {
                 rs_matter_embassy::matter::dm::devices::DEV_TYPE_ROOT_NODE,
                 rs_matter_embassy::matter::dm::devices::DEV_TYPE_OTA_REQUESTOR
             ),
-        clusters: rs_matter_embassy::matter::clusters!($net; $crate::matter::ota::CLUSTER),
+            clusters: $crate::matter::ota::root_clusters!($net),
             client_clusters: &[$crate::matter::ota::PROVIDER_CLUSTER],
             unique_id: None,
             semantic_tags: &[],
@@ -63,6 +68,21 @@ macro_rules! root_endpoint {
     }};
 }
 pub(crate) use root_endpoint;
+
+#[cfg(not(matter_scheduled))]
+macro_rules! root_clusters {
+    ($net:ident) => {
+        rs_matter_embassy::matter::clusters!($net; $crate::matter::ota::CLUSTER)
+    };
+}
+/// With the controller's time zone, for the update time.
+#[cfg(matter_scheduled)]
+macro_rules! root_clusters {
+    ($net:ident) => {
+        rs_matter_embassy::matter::clusters!($net, time_sync(time_zone); $crate::matter::ota::CLUSTER)
+    };
+}
+pub(crate) use root_clusters;
 
 /// How often the default providers are asked for an update.
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 3600);
@@ -78,18 +98,29 @@ const CHUNK: usize = 1024;
 const RETRY_STAGED: Duration = Duration::from_secs(600);
 /// Longest wait for the provider's go-ahead once downloaded.
 const MAX_WAIT_S: u64 = 24 * 3600;
+/// Longest wait for a provider to answer (its address, a session, the response): an exchange
+/// stuck on a lost network would hold every later check.
+const ANSWER: Duration = Duration::from_secs(120);
 
 /// The requestor's state, kept across restarts of the stack.
 pub(crate) struct Shared {
     providers: Providers,
     state: OtaState,
+    /// What the controller sets with `SetTimeZone` and `SetDSTOffset` (kept in Matter's storage).
+    #[cfg(matter_scheduled)]
+    time_zones: rs_matter_embassy::matter::dm::clusters::time_sync::TimeZoneStore,
 }
 
 impl Shared {
     /// The state; call once.
     pub(crate) fn take() -> &'static Self {
         static SHARED: StaticCell<Shared> = StaticCell::new();
-        SHARED.init(Shared { providers: Providers::new(), state: OtaState::new(ROOT_ENDPOINT_ID) })
+        SHARED.init(Shared {
+            providers: Providers::new(),
+            state: OtaState::new(ROOT_ENDPOINT_ID),
+            #[cfg(matter_scheduled)]
+            time_zones: rs_matter_embassy::matter::dm::clusters::time_sync::TimeZoneStore::new(),
+        })
     }
 }
 
@@ -196,13 +227,25 @@ async fn updates(
     fw: Firmware,
     store: &'static SharedStore,
 ) -> core::convert::Infallible {
-    let Shared { providers, state } = shared;
+    let Shared { providers, state, .. } = shared;
     notify_applied(ctx, fw, store).await;
     loop {
         state.set_update_possible(ctx, !crate::ota::esp::busy());
-        let next = if crate::ota::esp::staged(store, fw.version).await.is_some() { RETRY_STAGED } else { CHECK_EVERY };
+        let staged = crate::ota::esp::staged(store, fw.version).await.is_some();
+        let next = if staged { RETRY_STAGED } else { CHECK_EVERY };
+        // Kept for the update time: asked about again then (a few seconds past: the clock drifts).
+        #[cfg(matter_scheduled)]
+        let next = match at::seconds_to(ctx.matter(), shared) {
+            Some(s) if staged => Duration::from_secs(s + 5),
+            _ => next,
+        };
         select(providers.wait_changed(), Timer::after(next)).await;
         let announced = providers.take_announced();
+        // Announced: someone asked for it, so it installs at once.
+        #[cfg(matter_scheduled)]
+        let mut clicked = announced.len();
+        #[cfg(matter_scheduled)]
+        let due = at::due(ctx.matter(), shared);
         #[cfg(not(auto_update_off))]
         let defaults = (0..providers.len()).filter_map(|i| providers.get(i));
         // Off: asked only about an image downloaded already.
@@ -215,6 +258,11 @@ async fn updates(
             if crate::ota::esp::busy() {
                 log::info!("ota: provider {:#x} ignored: an update is running or on trial", provider.node_id);
                 break;
+            }
+            #[cfg(matter_scheduled)]
+            {
+                at::HOLD.store(clicked == 0 && !due, crate::atomic::Ordering::Relaxed);
+                clicked = clicked.saturating_sub(1);
             }
             match update(ctx, state, provider, fw, store).await {
                 Ok(Some(version)) => {
@@ -250,8 +298,13 @@ async fn update(
     let mut buffers = BUFFERS.lock().await;
     let Buffers { sector, header, manifest, chunk, uri } = &mut *buffers;
     uri.clear();
-    let offer = provider
-        .query(ctx.matter(), ctx.crypto(), &[DownloadProtocolEnum::BDXSynchronous], Some(running), false, |r| {
+    let offer = answered(provider.query(
+        ctx.matter(),
+        ctx.crypto(),
+        &[DownloadProtocolEnum::BDXSynchronous],
+        Some(running),
+        false,
+        |r| {
             match r.status()? {
                 StatusEnum::UpdateAvailable => {}
                 StatusEnum::Busy => {
@@ -266,9 +319,10 @@ async fn update(
             let token = Vec::from_slice(token.0).map_err(|_| ErrorCode::InvalidData)?;
             let version = r.software_version()?.ok_or(ErrorCode::InvalidData)?;
             Ok(Some(Offer { version, token }))
-        })
-        .await
-        .map_err(matter_error)?;
+        },
+    ))
+    .await
+    .map_err(matter_error)?;
     let Some(offer) = offer else { return Ok(None) };
     if offer.version <= running {
         return Ok(None);
@@ -277,7 +331,7 @@ async fn update(
 
     let (node, fd) = parse_bdx_url(uri).map_err(matter_error)?;
     let exchange =
-        Exchange::initiate(ctx.matter(), ctx.crypto(), provider.fab_idx, node).await.map_err(matter_error)?;
+        answered(Exchange::initiate(ctx.matter(), ctx.crypto(), provider.fab_idx, node)).await.map_err(matter_error)?;
     let mut reader = exchange.download(fd.as_bytes(), None).await.map_err(matter_error)?;
     session.downloading(Some(0));
 
@@ -303,12 +357,17 @@ async fn update(
     };
     // The transfer is over: no exchange kept open while the provider decides.
     drop(reader);
+    #[cfg(matter_scheduled)]
+    if at::HOLD.load(crate::atomic::Ordering::Relaxed) {
+        log::info!("ota: {} downloaded, kept for {}", staged.version(), env!("IOTKIT_UPDATE_TIME"));
+        return Ok(None);
+    }
 
     // The image waits in the spare slot meanwhile, other updates allowed: it is kept if the wait
     // gets too long or the provider cannot be reached, and asked about again.
     let mut waited = 0;
     loop {
-        match provider.apply_update(ctx.matter(), ctx.crypto(), &offer.token, offer.version).await {
+        match answered(provider.apply_update(ctx.matter(), ctx.crypto(), &offer.token, offer.version)).await {
             Ok(OtaApplyOutcome::Proceed { delay_secs }) if waited + u64::from(delay_secs) <= MAX_WAIT_S => {
                 Timer::after_secs(delay_secs.into()).await;
                 break;
@@ -421,7 +480,7 @@ async fn notify_applied(ctx: &impl HandlerContext, fw: Firmware, store: &'static
     {
         let provider = Provider { fab_idx, node_id: from.node_id, endpoint: from.endpoint };
         for attempt in 1..=NOTIFY_ATTEMPTS {
-            match provider.notify_applied(ctx.matter(), ctx.crypto(), &from.token, running).await {
+            match answered(provider.notify_applied(ctx.matter(), ctx.crypto(), &from.token, running)).await {
                 Ok(()) => {
                     log::info!("ota: provider {:#x} told that {} runs", from.node_id, fw.version);
                     HEALTH.pass(MATTER);
@@ -450,6 +509,95 @@ async fn read_exact(reader: &mut BdxReader<'_>, buf: &mut [u8]) -> Result<(), Ot
     Ok(())
 }
 
+/// `f`, or [`ErrorCode::RxTimeout`] once the provider took longer than [`ANSWER`].
+async fn answered<T>(f: impl Future<Output = Result<T, Error>>) -> Result<T, Error> {
+    let f = core::pin::pin!(f);
+    timed(f).await
+}
+
+/// Behind `dyn`: the timer is not copied into each exchange's state machine.
+async fn timed<T>(f: core::pin::Pin<&mut dyn Future<Output = Result<T, Error>>>) -> Result<T, Error> {
+    embassy_time::with_timeout(ANSWER, f).await.unwrap_or_else(|_| Err(ErrorCode::RxTimeout.into()))
+}
+
 fn matter_error(e: Error) -> OtaError {
     OtaError::Matter(e.code())
+}
+
+/// The update time (`IOTKIT_UPDATE_TIME`), in the time and time zone a controller gives.
+#[cfg(matter_scheduled)]
+pub(crate) mod at {
+    use rs_matter_embassy::matter::{
+        Matter,
+        dm::{
+            Async, AsyncHandler, Dataver,
+            clusters::time_sync::{ClusterHandler as _, TimeSyncHandler},
+        },
+        utils::epoch::MATTER_EPOCH_SECS,
+    };
+
+    use super::Shared;
+    use crate::atomic::AtomicBool;
+    use crate::time::Zone;
+
+    /// The Time Synchronization cluster, to chain [`handler`] on the root endpoint.
+    pub(crate) const CLUSTER_ID: u32 = TimeSyncHandler::CLUSTER.id;
+
+    /// Time Synchronization with the time zone, in place of the root handler's.
+    pub(crate) fn handler(dataver: Dataver, shared: &'static Shared) -> impl AsyncHandler {
+        Async(TimeSyncHandler::new_with_time_zone(dataver, &shared.time_zones).adapt())
+    }
+
+    /// `IOTKIT_UPDATE_TIME`, minutes after midnight.
+    const MINUTE: u16 = match env!("IOTKIT_UPDATE_TIME").as_bytes() {
+        &[h1 @ b'0'..=b'2', h2 @ b'0'..=b'9', b':', m1 @ b'0'..=b'5', m2 @ b'0'..=b'9']
+            if (h1 - b'0') * 10 + h2 - b'0' < 24 =>
+        {
+            ((h1 - b'0') * 10 + h2 - b'0') as u16 * 60 + ((m1 - b'0') * 10 + m2 - b'0') as u16
+        }
+        _ => panic!("IOTKIT_UPDATE_TIME: `HH:MM` (02:00)"),
+    };
+
+    /// How long past the update time an update still installs: a provider can take a while.
+    const WINDOW_S: i64 = 3600;
+
+    /// Set before asking a default provider outside the update time: what it offers is downloaded
+    /// and kept for then.
+    pub(crate) static HOLD: AtomicBool = AtomicBool::new(false);
+
+    /// Unix seconds and the time zone, if a controller gave the time since the device started.
+    fn now(matter: &Matter<'_>, shared: &Shared) -> Option<(i64, Zone)> {
+        let us = matter.with_rtc(|rtc| rtc.utc_time()).reliable()?;
+        let zones = &shared.time_zones;
+        let offset = zones.active_time_zone(us).0 + zones.active_dst_offset(us).unwrap_or(0);
+        // Matter counts the offset east of UTC, POSIX (`Zone`) west.
+        let zone = Zone { std_offset_s: -offset, dst_offset_s: -offset, ..Zone::UTC };
+        Some(((us / 1_000_000 + MATTER_EPOCH_SECS) as i64, zone))
+    }
+
+    /// How long after the start an update waits for a controller to give the time: one that never
+    /// does (no Time Synchronization) installs then.
+    const NO_TIME_S: u64 = 3600;
+
+    /// Whether an update installs now: within the hour past the update time, or with no time an
+    /// hour after the start.
+    pub(crate) fn due(matter: &Matter<'_>, shared: &Shared) -> bool {
+        let Some((now, zone)) = now(matter, shared) else {
+            let late = embassy_time::Instant::now().as_secs() >= NO_TIME_S;
+            if late {
+                log::info!("ota: no time from a controller an hour after the start: installing when offered");
+            } else {
+                log::info!("ota: no time from a controller yet: kept until it gives one, or an hour after the start");
+            }
+            return late;
+        };
+        let last = zone.next(now - 86_400, MINUTE);
+        last <= now && now - last < WINDOW_S
+    }
+
+    /// Seconds to the next update time (`None`: no time yet).
+    pub(crate) fn seconds_to(matter: &Matter<'_>, shared: &Shared) -> Option<u64> {
+        let (now, zone) = now(matter, shared)?;
+        Some((zone.next(now, MINUTE) - now) as u64)
+    }
 }
