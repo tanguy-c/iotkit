@@ -18,6 +18,15 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   boards (Espressif, Seeed, M5Stack, Adafruit, Waveshare, LOLIN, Unexpected Maker, Arduino,
   Olimex), searched as you type. Its status default is the board's LED.
 - Matter over Thread fits 4 MB boards; `cargo iotkit new` warns when a Matter project has no part.
+- The ESP32-H2 links Matter over Thread, updates included: its default heap past the reclaimed
+  64 KB is 32 KB (`DEFAULT_HEAP`; the other chips keep 96 KB).
+- `IOTKIT_AUTO_UPDATE` (`on`/`off`): updates without a click on every link: an *Auto-update*
+  switch on always-on Wi-Fi devices (with *Update time* over the ESPHome API), and Matter's daily
+  provider checks turned off ([Updates](docs/src/updates.md#without-a-click)). Turning
+  *Auto-update* on or changing *Update time* checks at once (it waited for the next check, up to
+  6 hours, on battery devices too).
+- `cargo iotkit new` asks about updates (none: a smaller firmware; by themselves), the Wi-Fi setup
+  ways and the console, and leaves out the features not wanted.
 
 ## 0.3.0 (2026-10-26)
 

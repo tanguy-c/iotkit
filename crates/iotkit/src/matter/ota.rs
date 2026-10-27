@@ -188,7 +188,8 @@ impl<H: AsyncHandler> AsyncHandler for Requestor<H> {
 }
 
 /// Tells the provider of an update on trial that it runs, then checks for updates: when a
-/// provider announces one, or the default providers each [`CHECK_EVERY`].
+/// provider announces one, or the default providers each [`CHECK_EVERY`] (not with
+/// `IOTKIT_AUTO_UPDATE=off`, unless about an image downloaded already).
 async fn updates(
     ctx: &impl HandlerContext,
     shared: &Shared,
@@ -202,7 +203,14 @@ async fn updates(
         let next = if crate::ota::esp::staged(store, fw.version).await.is_some() { RETRY_STAGED } else { CHECK_EVERY };
         select(providers.wait_changed(), Timer::after(next)).await;
         let announced = providers.take_announced();
+        #[cfg(not(auto_update_off))]
         let defaults = (0..providers.len()).filter_map(|i| providers.get(i));
+        // Off: asked only about an image downloaded already.
+        #[cfg(auto_update_off)]
+        let defaults = {
+            let staged = crate::ota::esp::staged(store, fw.version).await.is_some();
+            (0..providers.len()).filter(move |_| staged).filter_map(|i| providers.get(i))
+        };
         for provider in announced.into_iter().chain(defaults) {
             if crate::ota::esp::busy() {
                 log::info!("ota: provider {:#x} ignored: an update is running or on trial", provider.node_id);

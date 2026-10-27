@@ -147,10 +147,14 @@ pub fn __early_boot(flash: FLASH<'static>) {
     crate::ota::esp::early_guard();
 }
 
+/// [`init!`]'s heap past the 64 KB reclaimed from the bootloader: 96 KB, for the Wi-Fi driver.
+/// The ESP32-H2 (Thread only, 320 KB of RAM) has 32 KB: Bluetooth and OpenThread need far less.
+pub const DEFAULT_HEAP: usize = if cfg!(feature = "esp32h2") { 32 * 1024 } else { 96 * 1024 };
+
 /// Sets up the chip for the kit, in `main` before [`start`]: the app descriptor, the clocks at
 /// full speed, the flash, the rollback of an update that keeps crashing
 /// ([`early_guard`](crate::ota::esp::early_guard)), the heap (64 KB reclaimed from the bootloader
-/// plus `heap`, 96 KB by default; the Wi-Fi and Bluetooth drivers allocate) and the RTOS timer.
+/// plus `heap`, [`DEFAULT_HEAP`] by default; the Wi-Fi and Bluetooth drivers allocate) and the RTOS timer.
 /// Declares `$p`, the peripherals (`FLASH`, `TIMG0` and `FROM_CPU_INTR0` are taken; `LPWR` too
 /// on a Thread device on battery, `matter-icd`, whose CPU light-sleeps when idle). The app
 /// reaches the flash through [`config::esp::with`](crate::config::esp::with) (its own partition:
@@ -171,7 +175,7 @@ macro_rules! init {
         $crate::init!(@go [] $p, $($heap)?);
     };
     (@go [$($mut:tt)?] $p:ident,) => {
-        $crate::init!(@go [$($mut)?] $p, 96 * 1024);
+        $crate::init!(@go [$($mut)?] $p, $crate::DEFAULT_HEAP);
     };
     (@go [$($mut:tt)?] $p:ident, $heap:expr) => {
         $crate::__private::esp_bootloader_esp_idf::esp_app_desc!();

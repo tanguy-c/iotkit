@@ -68,6 +68,24 @@ cannot be reached, or delays the update past 24 hours, is asked again 10 minutes
 only: any administrator of any fabric can then install firmware. It replaces the signature
 check, it is not a fallback: a signed build never takes a bare image.
 
+## Without a click
+
+`IOTKIT_AUTO_UPDATE` (`on` or `off`, in the project's `.cargo/config.toml`; `cargo iotkit new`
+asks) says whether a release installs by itself, on every link:
+
+| Link | Unset | `on` | `off` |
+| --- | --- | --- | --- |
+| Wi-Fi, MQTT (`ha-update`) | a release waits for *Install* | an *Auto-update* switch, on: installs once found (checked every 6 hours) | as unset |
+| Wi-Fi, ESPHome API (`ha-update`) | waits for *Install* | *Auto-update* and *Update time* (02:00, `IOTKIT_UPDATE_TIME`): downloaded once found, installed at that time | as unset |
+| Deep sleep over the ESPHome API | *Auto-update* on ([Battery](battery.md#updates-and-maintenance-over-the-esphome-api)) | the same | the switch starts off |
+| Matter (`matter-ota`) | asks its default providers once a day, installs what they offer | the same | only what a controller announces (`AnnounceOTAProvider`) |
+
+The switches are settings of the device in Home Assistant, kept across restarts. Turning
+*Auto-update* on, or changing *Update time*, checks at once: a release found already installs (or
+is scheduled) without waiting for the next check. Over MQTT there is no clock, so no *Update
+time*: a check finds the release, and the device installs it then. Over the ESPHome API, after a
+power cut the device waits for Home Assistant's time to schedule a downloaded release.
+
 ## What the device does
 
 1. Checks the manifest's Ed25519 signature; it must be for the same product, and the version
@@ -104,7 +122,7 @@ project's `.cargo/config.toml`:
 [env]
 IOTKIT_UPDATE_TRIAL_BOOTS = "3"      # 1 to 10
 IOTKIT_UPDATE_TIMEOUT     = "1800"   # seconds a trial boot gets to be healthy, 60 to 86400
-IOTKIT_UPDATE_TIME        = "02:00"  # deep sleep over the ESPHome API: when updates install by themselves
+IOTKIT_UPDATE_TIME        = "02:00"  # over the ESPHome API: when updates install by themselves
 ```
 
 The timeout cannot tell a broken update from an outage: if the access point, the broker, the

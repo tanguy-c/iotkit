@@ -1,4 +1,5 @@
-# A battery ESP32-C3: reports every 15 min, with the battery level. CI generates and builds it.
+# A battery ESP32-C3: reports every 15 min, with the battery level; no updates over the network.
+# CI generates and builds it.
 name = "Garden sensor"
 maker = "CI"
 board = "esp32c3-devkitm-1"
@@ -6,6 +7,7 @@ power = "battery"
 report_every_min = 15
 battery_pin = 3
 battery_curve = "2aa"
+updates = false
 
 [[parts]]
 kind = "temperature"
