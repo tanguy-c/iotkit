@@ -45,11 +45,13 @@ use crate::matter::{
     handler::Entities,
 };
 
-/// Memory for the stack's futures; the OTA requestor's (a CASE session, a BDX download) too.
+/// Memory for the stack's futures, the OTA requestor's included: all allocated when the stack
+/// starts (a shortfall panics then), measured on a C6 with `matter-ota` at 19.4 KB, plus 1.1 KB
+/// while commissioning over Bluetooth (`matter-icd`: the same).
 #[cfg(not(feature = "matter-ota"))]
 const BUMP_SIZE: usize = 20_000;
 #[cfg(feature = "matter-ota")]
-const BUMP_SIZE: usize = 32_000;
+const BUMP_SIZE: usize = 23_500;
 
 #[cfg(not(feature = "matter-icd"))]
 type Stack = EmbassyThreadMatterStack<'static, BUMP_SIZE, ()>;
