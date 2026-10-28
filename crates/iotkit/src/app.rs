@@ -148,8 +148,9 @@ pub fn __early_boot(flash: FLASH<'static>) {
 }
 
 /// [`init!`]'s heap past the 64 KB reclaimed from the bootloader: 96 KB, for the Wi-Fi driver.
-/// The ESP32-H2 (Thread only, 320 KB of RAM) has 32 KB: Bluetooth and OpenThread need far less.
-pub const DEFAULT_HEAP: usize = if cfg!(feature = "esp32h2") { 32 * 1024 } else { 96 * 1024 };
+/// Without Wi-Fi none: Bluetooth and Thread fit in the reclaimed 64 KB (measured on a C6: 2 KB
+/// in use over Thread; Matter and OpenThread keep their state in statics).
+pub const DEFAULT_HEAP: usize = if cfg!(feature = "wifi") { 96 * 1024 } else { 0 };
 
 /// Sets up the chip for the kit, in `main` before [`start`]: the app descriptor, the clocks at
 /// full speed, the flash, the rollback of an update that keeps crashing
@@ -185,7 +186,9 @@ macro_rules! init {
         );
         $crate::__early_boot($p.FLASH);
         $crate::__private::esp_alloc::heap_allocator!(#[$crate::__private::esp_hal::ram(reclaimed)] size: 64 * 1024);
-        $crate::__private::esp_alloc::heap_allocator!(size: $heap);
+        if $heap > 0 {
+            $crate::__private::esp_alloc::heap_allocator!(size: $heap);
+        }
         let timg0 = $crate::__private::esp_hal::timer::timg::TimerGroup::new($p.TIMG0);
         $crate::__start_rtos!($p, timg0.timer0);
     };

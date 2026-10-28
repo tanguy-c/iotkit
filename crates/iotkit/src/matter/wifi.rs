@@ -54,11 +54,12 @@ use rs_matter_embassy::{
 };
 use static_cell::StaticCell;
 
-/// Memory for the stack's futures; the OTA requestor's (a CASE session, a BDX download) too.
+/// Memory for the stack's futures, the OTA requestor's included: all allocated when the stack
+/// starts (a shortfall panics then), measured on a C6 at 14.3 KB, 18.1 KB with `matter-ota`.
 #[cfg(not(feature = "matter-ota"))]
-const BUMP_SIZE: usize = 20_000;
+const BUMP_SIZE: usize = 17_000;
 #[cfg(feature = "matter-ota")]
-const BUMP_SIZE: usize = 32_000;
+const BUMP_SIZE: usize = 21_000;
 
 type Stack = EthMatterStack<'static, BUMP_SIZE, ()>;
 
