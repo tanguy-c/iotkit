@@ -27,6 +27,7 @@ use rs_matter_embassy::{
         },
         error::{Error, ErrorCode},
         pairing::DiscoveryCapabilities,
+        persist::{KvBlobStoreAccess, NETWORKS_KEY},
         utils::init::InitMaybeUninit,
     },
     persist::SeqMapKvBlobStore,
@@ -189,6 +190,15 @@ async fn run(
     if !stack.matter().has_fabrics() {
         // Not commissioned: no Thread network to join yet.
         HEALTH.pass(NETWORK);
+        // The controller removed the last pairing but not the network: the stack would join it
+        // while pairing over Bluetooth, which shares the radio (a busy loop). Pairing sets it again.
+        kv.access(|store, buf| {
+            if store.load(NETWORKS_KEY, buf)?.is_some() {
+                log::info!("matter: not paired, forgetting the Thread network");
+                store.remove(NETWORKS_KEY, buf)?;
+            }
+            Ok::<_, Error>(())
+        })?;
     }
 
     let mut eui64 = [0; 8];
