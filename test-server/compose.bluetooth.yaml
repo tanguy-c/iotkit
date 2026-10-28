@@ -1,0 +1,11 @@
+# The Matter server with the host's Bluetooth (BlueZ over D-Bus), to commission devices over BLE
+# from this PC (`commission_with_code`): Thread devices, given the network first
+# (`set_thread_dataset`, again after each restart: the server does not keep it).
+#   MATTER_INTERFACE=wlp2s0 podman compose -f compose.yaml -f compose.bluetooth.yaml up -d matter-server
+# MATTER_BT_ADAPTER picks the adapter (0: hci0).
+services:
+  matter-server:
+    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlan0}", "--ota-provider-dir", "/updates", "--bluetooth-adapter", "${MATTER_BT_ADAPTER:-0}"]
+    volumes:
+      - /run/dbus:/run/dbus:ro
+    security_opt: ["label=disable"]   # SELinux: reach the host's D-Bus socket

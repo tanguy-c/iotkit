@@ -5,7 +5,8 @@
 #                   host network, as on a real install: mDNS, `.local` names and ESPHome discovery)
 #   Matter server   ws://localhost:5580/ws  (`up -d matter-server`; host network: Matter needs IPv6
 #                   multicast; in the Home Assistant container's Matter integration the URL is
-#                   ws://host.containers.internal:5580/ws with rootless podman)
+#                   ws://host.containers.internal:5580/ws with rootless podman); commissioning over
+#                   Bluetooth from this PC: add `-f compose.bluetooth.yaml`
 services:
   mosquitto:
     image: docker.io/library/eclipse-mosquitto:2
