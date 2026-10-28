@@ -11,3 +11,8 @@ sources  = [
     "https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/adafruit/feather_esp32c6/adafruit_feather_esp32c6_hpcore.dts",
     "https://github.com/espressif/arduino-esp32/blob/master/variants/adafruit_feather_esp32c6/pins_arduino.h",
 ]
+
+[[init]]
+pin   = 20
+level = "high"
+why   = "powers the NeoPixel and the STEMMA QT (I2C) port"
