@@ -1,0 +1,31 @@
+label  = "Relay / on-off (lamp, pump, socket)"
+group  = "controls"
+order  = 10
+name   = "Relay"
+wiring = "the relay module's IN pin"
+matter = "On/off plug"
+
+[entity]
+type = "Switch"
+
+[[pins]]
+use = "output"
+
+[todo]
+text  = "switch the relay to `on`"
+buses = ["gpio-out"]
+
+[code]
+uses  = [
+    "esp_hal::gpio::Level",
+    "esp_hal::gpio::Output",
+    "esp_hal::gpio::OutputConfig",
+    "iotkit::Active",
+    "iotkit::components",
+]
+param = "pin: Output<'static>"
+arg   = "Output::new(pin, Level::Low, OutputConfig::default())"
+body  = """
+// `Active::Low` for a relay board switched by a low input.
+components::relay(&{{ entity }}, pin, Active::High).await
+"""

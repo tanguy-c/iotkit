@@ -37,5 +37,5 @@ ESP32, which has none).
 ## AI coding agents
 
 `cargo iotkit new` can add an `AGENTS.md`: the device, the commands, the rules of a `no_std`
-firmware, and where to look up iotkit's and esp-hal's API. The generated `TODO(<entity id>)`s
-carry the bus setup and checked driver crates.
+firmware, and where to look up iotkit's and esp-hal's API. The generated `TODO(<entity id>)`s, one module per
+part in `src/parts/`, carry the bus setup and checked driver crates.

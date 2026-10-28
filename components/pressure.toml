@@ -1,0 +1,18 @@
+label  = "Air pressure (another sensor)"
+group  = "measures"
+order  = 30
+name   = "Pressure"
+wiring = "SDA of an I²C chip without its own part (BME280 and BMP280 have one)"
+matter = "Pressure sensor"
+
+[entity]
+type = "Sensor"
+ctor = "pressure"
+
+[[pins]]
+use = "input"
+
+[todo]
+text    = "read hPa"
+buses   = ["i2c"]
+drivers = "`bme280-rs`; BMP280: `bme280` (blocking)"

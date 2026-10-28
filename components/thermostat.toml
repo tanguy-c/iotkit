@@ -1,0 +1,17 @@
+label  = "Thermostat (heater control)"
+group  = "controls"
+order  = 70
+name   = "Thermostat"
+wiring = "the heater's relay input"
+matter = "Thermostat"
+
+[entity]
+type = "Climate"
+args = ", &[HvacMode::Heat, HvacMode::Off]"
+
+[[pins]]
+use = "output"
+
+[todo]
+text  = "read the room temperature into `state.current` (as for a temperature part), then switch the heater towards `state.target` (set `state.action`)"
+buses = ["gpio-out"]

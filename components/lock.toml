@@ -1,0 +1,16 @@
+label  = "Lock (door strike, smart lock)"
+group  = "controls"
+order  = 50
+name   = "Lock"
+wiring = "the strike's relay or driver input"
+matter = "Door lock"
+
+[entity]
+type = "Lock"
+
+[[pins]]
+use = "output"
+
+[todo]
+text  = "drive the strike's relay"
+buses = ["gpio-out"]

@@ -14,9 +14,14 @@ Follow an existing part: `relay` (output), `button` (input with timing), `poll` 
    and allowed by `deny.toml`.
 3. **Tests** (`src/tests.rs`): mock pins and the mock clock (`MockDriver`), one timed test at a
    time (`CLOCK`). `cargo test-host` runs them.
-4. **Wizard**: a `Component` variant in `xtask/src/new/parts.rs` on the kinds it fits, and its code
-   in `codegen::component` (task parameters, spawn argument, body, imports). Update the tests in
-   `xtask/src/new/mod.rs`; `xtask/answers/c6.toml` must cover it.
+4. **Wizard**: a `[code]` table in the `components/<id>.toml` it fits, or a new file (format:
+   `components/README.md`; a sensor chip's bus and address checked against two sources): `uses`,
+   `takes`, `features`, then `setup`, `param`, `arg` and `body` as Liquid templates. `cargo test
+   --manifest-path xtask/Cargo.toml --target host-tuple` renders it on every chip;
+   `xtask/answers/c6.toml` must cover it, and `cargo iotkit add <id>` then adds it to a project.
+   A reading also gets `read` (once per wake-up on battery; `xtask/answers/c3.toml` covers it). An
+   I²C chip: its driver in `components::i2c` (stateless, a mock-bus test in `tests.rs`) and an
+   `[i2c]` table instead of `[code]`, its address checked against two sources.
 5. **Docs**: the table in `docs/src/components.md`, and the generated AGENTS.md line in
    `codegen::agents_md`.
 6. **Checks**: a rule in `tools/link-check.sh` when the part has a distinctive string or symbol

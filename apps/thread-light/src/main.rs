@@ -3,31 +3,29 @@
 //!
 //! `iotkit::start` brings Matter over Thread (paired over Bluetooth), signed updates over Matter
 //! (rolled back unless it rejoins Thread and its controller), crash records and the watchdog.
-//! No parts yet: add entities below (https://tanguy-c.github.io/iotkit/entities.html).
+//! No parts yet: `cargo iotkit add` adds one (`cargo iotkit components` lists them).
 
 #![no_std]
 #![no_main]
 
+mod led;
+mod parts;
+
 use embassy_executor::Spawner;
 use embassy_time::Timer;
-use esp_hal::{Async, rmt::Rmt, time::Rate};
-use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
-use iotkit::{Board, Config, Light, PublicKey};
-use smart_leds::RGB8;
+use iotkit::{Board, Config, PublicKey};
 
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
 static OTA_KEY: PublicKey = iotkit::public_key(include_str!("../../../keys/ota.pub"));
-
-static LED: Light = Light::new("status_led", "Status LED").remember();
 
 static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .manufacturer("iotkit")
     .model("ESP32-C6-DevKitC-1")
     .product_name("iotkit thread light")
-    .entities(&[&LED]);
-
-/// The board's WS2812 LED on GPIO8, driven by an RMT channel.
-type Led = RmtSmartLeds<'static, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
+    .entities(&[
+        // The parts' entities (`cargo iotkit add` adds them here).
+        &led::LED,
+    ]);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
@@ -43,21 +41,13 @@ async fn main(spawner: Spawner) -> ! {
     };
 
     // Written right after the bootloader; its saved state comes once `start` restores it.
-    let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
-    let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO8, Rate::from_mhz(80)).unwrap();
-    spawner.spawn(led_task(led).unwrap());
+    led::spawn_rgb(spawner, p.RMT, p.GPIO8);
 
     iotkit::start(spawner, board, &CONFIG).await;
+
+    // The parts, one module each in src/parts/ (`cargo iotkit add` adds them here).
 
     loop {
         Timer::after_secs(3600).await;
     }
-}
-
-/// The status LED, as a light over Matter; a short press of BOOT toggles it.
-/// The status shows over it (`iotkit::status`): blue blinking while it waits to be set up.
-#[embassy_executor::task]
-async fn led_task(led: Led) {
-    // `Show::All` while developing; `Show::Pairing` for a release: only to set it up.
-    iotkit::components::rgb_status_light(&LED, led, 1, iotkit::status::Show::All, true).await
 }

@@ -26,6 +26,7 @@
 
 pub mod filter;
 mod gpio;
+pub mod i2c;
 mod indicator;
 mod pwm;
 mod sensor;

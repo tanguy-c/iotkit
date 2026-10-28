@@ -1,0 +1,18 @@
+label  = "CO2 (another sensor: MH-Z19)"
+group  = "measures"
+order  = 50
+name   = "CO2"
+wiring = "TX of a MH-Z19 (UART), or SDA of an I²C chip without its own part (the SCD4x has one)"
+matter = "Air quality sensor"
+
+[entity]
+type = "Sensor"
+ctor = "carbon_dioxide"
+
+[[pins]]
+use = "input"
+
+[todo]
+text    = "read ppm"
+buses   = ["uart", "i2c"]
+drivers = "MH-Z19: `mh-z19` (frames only; add `.with_tx`)"

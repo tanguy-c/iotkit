@@ -6,218 +6,144 @@ use std::{
     fmt::Write as _,
 };
 
-use super::{
-    Indicator, MatterMode, Part, Project, SetupWay,
-    parts::{Bus, Component, Stub},
-};
+mod part;
 
-/// `src/main.rs`. Each part gets an entity and, in its task (or, on a deep-sleeping device, in
-/// `main`), a `TODO` saying what to write.
-pub fn main_rs(p: &Project) -> String {
+use part::Uses;
+pub use part::{Call, part, ready};
+
+use super::{Indicator, MatterMode, Project, SetupWay};
+
+/// The comments `cargo iotkit add` finds in `src/main.rs`, each above the lines it adds to.
+pub const ENTITIES_MARK: &str = "// The parts' entities (`cargo iotkit add` adds them here).";
+pub const SPAWNS_MARK: &str = "// The parts, one module each in src/parts/ (`cargo iotkit add` adds them here).";
+pub const READS_MARK: &str = "// Read once per wake-up (`cargo iotkit add` adds them here).";
+
+/// `src/parts/mod.rs`'s head.
+pub const PARTS_MOD: &str = "//! The parts, one module each: `cargo iotkit add <component>` adds one (`cargo iotkit components`\n//! lists them).\n";
+
+/// The project's Rust files: `src/main.rs`, the board's LED (`src/led.rs`) and a module per part
+/// (`src/parts/`).
+pub fn sources(p: &Project) -> anyhow::Result<Vec<(String, String)>> {
+    let mut parts = Vec::new();
+    let mut entities = Vec::new();
+    let (mut spawns, mut reads, mut mods) = (String::new(), String::new(), String::new());
+    for (i, part) in p.parts.iter().enumerate() {
+        let code = part::part(p, i)?;
+        entities.extend(code.entities);
+        match code.call {
+            Call::Spawn(line) => spawns += &format!("    {line}\n"),
+            Call::Read(line) => reads += &format!("    {line}\n"),
+        }
+        let _ = writeln!(mods, "pub mod {};", part.module);
+        parts.push((format!("src/parts/{}.rs", part.module), code.file));
+    }
+    let mut files = vec![("src/main.rs".to_string(), main_rs(p, &entities, &spawns, &reads))];
+    if let Some(led) = led_rs(p) {
+        files.push(("src/led.rs".into(), led));
+    }
+    if let Some(i2c) = i2c_rs(p) {
+        files.push(("src/i2c.rs".into(), i2c));
+    }
+    let sep = if mods.is_empty() { "" } else { "\n" };
+    files.push(("src/parts/mod.rs".into(), format!("{PARTS_MOD}{sep}{mods}")));
+    files.extend(parts);
+    Ok(files)
+}
+
+/// `src/i2c.rs`: the I²C bus the I²C parts share, when one is on it and its pins are chosen.
+/// Plugged in, behind a mutex (each part's task has a `Device` on it); on battery, the parts are
+/// read one after the other in `main`, which lends them the bus.
+pub fn i2c_rs(p: &Project) -> Option<String> {
+    let bus = p.i2c()?;
+    let (sda, scl) = (bus.sda, bus.scl);
+    let head = format!(
+        "//! The I²C bus, SDA on GPIO{sda} and SCL on GPIO{scl} (most breakout boards have its pull-ups), at 100 kHz:\n"
+    );
+    Some(wrap_comments(&if p.sleepy() {
+        format!(
+            "{head}//! `main` lends it to each I²C part in turn, once per wake-up.
+
+use esp_hal::{{
+    Async,
+    i2c::master::{{Config, I2c}},
+    peripherals::{{GPIO{sda}, GPIO{scl}, I2C0}},
+}};
+
+pub type Bus = I2c<'static, Async>;
+
+/// The bus (from `main`).
+pub fn bus(i2c0: I2C0<'static>, sda: GPIO{sda}<'static>, scl: GPIO{scl}<'static>) -> Bus {{
+    I2c::new(i2c0, Config::default()).unwrap().with_sda(sda).with_scl(scl).into_async()
+}}
+"
+        )
+    } else {
+        format!(
+            "{head}//! each I²C part's task has a `Device` on it, which takes the bus for one transfer at a time.
+
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_sync::{{blocking_mutex::raw::NoopRawMutex, mutex::Mutex}};
+use esp_hal::{{
+    Async,
+    i2c::master::{{Config, I2c}},
+    peripherals::{{GPIO{sda}, GPIO{scl}, I2C0}},
+}};
+use static_cell::StaticCell;
+
+/// The bus; its parts' tasks run on `main`'s executor (`NoopRawMutex`).
+pub type Bus = Mutex<NoopRawMutex, I2c<'static, Async>>;
+/// A part's handle on the bus.
+pub type Device = I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>;
+
+/// The bus (from `main`, once).
+pub fn bus(i2c0: I2C0<'static>, sda: GPIO{sda}<'static>, scl: GPIO{scl}<'static>) -> &'static Bus {{
+    static BUS: StaticCell<Bus> = StaticCell::new();
+    BUS.init(Mutex::new(I2c::new(i2c0, Config::default()).unwrap().with_sda(sda).with_scl(scl).into_async()))
+}}
+"
+        )
+    }))
+}
+
+/// `main`'s line that creates the I²C bus, above the parts that take it.
+pub fn bus_line(p: &Project) -> Option<String> {
+    let bus = p.i2c()?;
+    let m = if p.sleepy() { "mut " } else { "" };
+    Some(format!("let {m}bus = i2c::bus(p.I2C0, p.GPIO{}, p.GPIO{});", bus.sda, bus.scl))
+}
+
+/// The dependencies the I²C bus needs (`Cargo.toml` lines): plugged in, its mutex.
+pub fn bus_dependencies(p: &Project) -> &'static [&'static str] {
+    if p.i2c().is_none() || p.sleepy() {
+        return &[];
+    }
+    &[
+        "embassy-embedded-hal   = { version = \"0.6\", default-features = false }",
+        "embassy-sync           = \"0.8\"",
+        "static_cell            = \"2.1\"",
+    ]
+}
+
+/// `src/main.rs`: the setup, `iotkit::start`, and the parts' entities and spawns (each part's code
+/// is in its module).
+fn main_rs(p: &Project, entities: &[String], spawns: &str, reads: &str) -> String {
     let sleepy = p.sleepy();
     // The battery level, read once per wake-up (over Thread, the ADC feeds the TRNG: none).
     let battery_pin = sleepy.then_some(p.answers.battery_pin).flatten();
     let led = p.status_led();
     let status = p.answers.status;
-    // The RGB LED is a light: plain, or showing the status too (`rgb_status_light`).
-    let plain_led = led && status != Indicator::Rgb;
-    let mut iotkit: BTreeSet<&str> = ["Board", "Config", "PublicKey"].into();
-    let mut time: BTreeSet<&str> = BTreeSet::new();
-    let mut statics = String::new();
-    let mut ids = Vec::new();
-    let mut tasks = String::new();
-    let mut spawns = String::new();
-    let mut readings = String::new();
-    let mut any_pin = false;
-    let mut hal: BTreeSet<&str> = BTreeSet::new();
-    // Lines in `main` before the spawns (an ADC set up for a part).
-    let mut setup = String::new();
-    let mut adc_taken = false;
-
-    for part in &p.parts {
-        let k = part.kind;
-        iotkit.insert(k.ty);
-        let builder = k.builder;
-        for ty in ["DeviceClass", "Unit"] {
-            if builder.contains(&format!("{ty}::")) {
-                iotkit.insert(ty);
-            }
-        }
-        let _ = writeln!(
-            statics,
-            "static {}: {} = {}::{}({:?}, {:?}{}){builder};",
-            part.konst, k.ty, k.ty, k.ctor, part.id, part.name, k.new_args
-        );
-        ids.push(part.konst.clone());
-        let on_pin = match part.pin {
-            Some(n) => format!(", on GPIO{n}"),
-            None => String::new(),
-        };
-        let c = &part.konst;
-        let set = format!("{}, then `{c}.set(..)`", k.todo);
-
-        if sleepy && k.is_reading() {
-            readings.push_str(&todo(4, part, &set, true));
-            continue;
-        }
-
-        let doc_extra = match (sleepy, p.esphome()) {
-            (false, _) => "",
-            (true, false) => " Commands sent while the device sleeps arrive at its next wake-up.",
-            (true, true) => " Commands reach it only while it is awake.",
-        };
-        let task = format!("{}_task", part.id);
-        if let (false, Some(comp), Some(_)) = (sleepy, k.component, part.pin)
-            && !(comp == Component::Analog && adc_taken)
-        {
-            adc_taken |= comp == Component::Analog;
-            let (param, arg, body) = component(comp, part, p.board.chip, &mut iotkit, &mut hal, &mut time, &mut setup);
-            let _ = writeln!(spawns, "    spawner.spawn({task}({arg}).unwrap());");
-            task_fn(&mut tasks, part, &on_pin, doc_extra, &task, &param, &body);
-            continue;
-        }
-
-        let (param, arg) = match part.pin {
-            Some(n) => {
-                any_pin = true;
-                ("_pin: AnyPin<'static>".to_string(), format!("p.GPIO{n}.into()"))
-            }
-            None => (String::new(), String::new()),
-        };
-        let _ = writeln!(spawns, "    spawner.spawn({task}({arg}).unwrap());");
-        // Commands: the TODO sits between the command and the state it reports.
-        let t = todo(8, part, k.todo, false);
-        let body = match k.stub {
-            Stub::Reading => {
-                time.extend(["Duration", "Ticker"]);
-                format!(
-                    "    let mut ticker = Ticker::every(Duration::from_secs(30));
-    loop {{
-{}        ticker.next().await;
-    }}",
-                    todo(8, part, &set, false)
-                )
-            }
-            Stub::Detect | Stub::Presses => {
-                time.insert("Timer");
-                let head = match k.stub {
-                    Stub::Detect => format!("{set} at each change (`wait_for_any_edge().await`, not the timer)"),
-                    _ => k.todo.to_string(),
-                };
-                format!(
-                    "    loop {{
-{}        Timer::after_secs(1).await;
-    }}",
-                    todo(8, part, &head, false)
-                )
-            }
-            Stub::Switch => format!(
-                "    {c}.set(false);
-    loop {{
-        let on = {c}.wait_command().await;
-{t}        {c}.set(on);
-    }}"
-            ),
-            Stub::Light => {
-                iotkit.insert("LightState");
-                format!(
-                    "    let mut state = LightState {{ on: false, brightness: 255, rgb: [255, 255, 255] }};
-    loop {{
-{t}        {c}.set(state);
-        state = {c}.wait_command().await;
-    }}"
-                )
-            }
-            Stub::Cover => {
-                iotkit.extend(["CoverCommand", "CoverState"]);
-                format!(
-                    "    {c}.set(Some(CoverState::Closed), Some(0));
-    loop {{
-        let position = match {c}.wait_command().await {{
-            CoverCommand::Open => 100,
-            CoverCommand::Close => 0,
-            CoverCommand::Position(p) => p,
-            CoverCommand::Stop => continue,
-        }};
-{t}        {c}.set(Some(if position == 0 {{ CoverState::Closed }} else {{ CoverState::Open }}), Some(position));
-    }}"
-                )
-            }
-            Stub::Lock => {
-                iotkit.extend(["LockCommand", "LockState"]);
-                format!(
-                    "    {c}.set(LockState::Locked);
-    loop {{
-        let state = match {c}.wait_command().await {{
-            LockCommand::Lock => LockState::Locked,
-            LockCommand::Unlock | LockCommand::Open => LockState::Unlocked,
-        }};
-{t}        {c}.set(state);
-    }}"
-                )
-            }
-            Stub::Fan => {
-                iotkit.insert("FanState");
-                format!(
-                    "    {c}.set(FanState::OFF);
-    loop {{
-        let wanted = {c}.wait_command().await;
-{t}        {c}.set(wanted);
-    }}"
-                )
-            }
-            Stub::Climate => {
-                iotkit.extend(["ClimateState", "HvacMode"]);
-                format!(
-                    "    let mut state = ClimateState {{ mode: HvacMode::Heat, target: 20.0, current: None, action: None }};
-    loop {{
-{t}        {c}.set(state);
-        let wanted = {c}.wait_command().await;
-        state.mode = wanted.mode;
-        state.target = wanted.target;
-    }}"
-                )
-            }
-            Stub::Number => format!(
-                "    {c}.set(50.0);
-    loop {{
-        let value = {c}.wait_command().await;
-{t}        {c}.set(value);
-    }}"
-            ),
-            Stub::Select => format!(
-                "    {c}.set(0);
-    loop {{
-        let index = {c}.wait_command().await;
-{t}        {c}.set(index);
-    }}"
-            ),
-        };
-        if k.ty == "Climate" {
-            iotkit.insert("HvacMode");
-        }
-        task_fn(&mut tasks, part, &on_pin, doc_extra, &task, &param, &body);
-    }
-
-    if led {
-        iotkit.insert("Light");
-        if status != Indicator::Rgb {
-            iotkit.insert("LightState");
-        }
-        // Kept across restarts (never on battery: no status LED there).
-        let _ = writeln!(statics, "static LED: Light = Light::new(\"status_led\", \"Status LED\").remember();");
-        ids.push("LED".into());
+    let mut uses = Uses::default();
+    uses.extend(["embassy_executor::Spawner", "iotkit::Board", "iotkit::Config", "iotkit::PublicKey"]);
+    if !p.board.init.is_empty() {
+        uses.extend(["esp_hal::gpio::Level", "esp_hal::gpio::Output", "esp_hal::gpio::OutputConfig"]);
     }
     if battery_pin.is_some() {
-        iotkit.insert("Sensor");
-        let _ = writeln!(statics, "static BATTERY: Sensor = Sensor::battery(\"battery\", \"Battery\");");
-        ids.push("BATTERY".into());
+        uses.extend(["iotkit::Sensor", "iotkit::battery::Battery", "iotkit::battery::BatteryCurve"]);
     }
     if sleepy {
-        iotkit.insert("SleepConfig");
-        time.insert("Duration");
+        uses.extend(["iotkit::SleepConfig", "embassy_time::Duration"]);
     } else {
-        time.insert("Timer");
+        uses.add("embassy_time::Timer");
     }
 
     let mut s = String::new();
@@ -249,61 +175,43 @@ pub fn main_rs(p: &Project) -> String {
         let _ = writeln!(s, "//! crash records, the watchdog and the USB console (`help`).");
     }
     if p.parts.is_empty() {
-        s.push_str("//! No parts yet: add entities below (https://tanguy-c.github.io/iotkit/entities.html).\n");
+        s.push_str("//! No parts yet: `cargo iotkit add` adds one (`cargo iotkit components` lists them).\n");
     } else {
         s.push_str(
-            "//! Each part's code is below: look for `TODO(<entity id>)`. The drivers named there are `no_std`\n\
-             //! and embedded-hal 1.0; prefer their async mode.\n",
+            "//! Each part is a module in `src/parts/`: look for `TODO(<entity id>)`. The drivers named there are\n\
+             //! `no_std` and embedded-hal 1.0; prefer their async mode.\n",
         );
     }
     s.push_str("\n#![no_std]\n#![no_main]\n\n");
-
-    // Imports.
-    s.push_str("use embassy_executor::Spawner;\n");
-    if plain_led {
-        s.push_str("use embassy_futures::select::{Either, select};\n");
+    if p.i2c().is_some() {
+        s.push_str("mod i2c;\n");
     }
-    if !time.is_empty() {
-        let _ = writeln!(s, "use embassy_time::{};", group(&time));
+    if led || status != Indicator::Off {
+        s.push_str("mod led;\n");
     }
-    if any_pin {
-        hal.insert("gpio::AnyPin");
-    }
-    if led || status == Indicator::Rgb {
-        hal.extend(["Async", "rmt::Rmt", "time::Rate"]);
-    }
-    if status == Indicator::Led || !p.board.init.is_empty() {
-        hal.extend(["gpio::Level", "gpio::Output", "gpio::OutputConfig"]);
-    }
-    if status == Indicator::Led {
-        iotkit.insert("Active");
-    }
-    if !hal.is_empty() {
-        let _ = writeln!(s, "use esp_hal::{};", group(&hal));
-    }
-    if led || status == Indicator::Rgb {
-        s.push_str("use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};\n");
-    }
-    if battery_pin.is_some() {
-        s.push_str("use iotkit::battery::{Battery, BatteryCurve};\n");
-    }
-    let _ = writeln!(s, "use iotkit::{};", group(&iotkit));
-
-    if plain_led {
-        s.push_str("use log::warn;\nuse smart_leds::{RGB8, SmartLedsWriteAsync, brightness};\n");
-    } else if status == Indicator::Rgb {
-        s.push_str("use smart_leds::RGB8;\n");
-    }
+    s.push_str("mod parts;\n\n");
+    s.push_str(&uses.lines());
     s.push_str(
         "
 /// Updates must be signed with the secret half (`cargo iotkit keygen`).
 static OTA_KEY: PublicKey = iotkit::public_key(include_str!(\"../keys/ota.pub\"));
-
 ",
     );
 
     // Entities and configuration.
-    s.push_str(&statics);
+    if battery_pin.is_some() {
+        s.push_str("\nstatic BATTERY: Sensor = Sensor::battery(\"battery\", \"Battery\");\n");
+    }
+    let mut list = format!("        {ENTITIES_MARK}\n");
+    for e in entities {
+        let _ = writeln!(list, "        {e},");
+    }
+    if led {
+        list.push_str("        &led::LED,\n");
+    }
+    if battery_pin.is_some() {
+        list.push_str("        &BATTERY,\n");
+    }
     let _ = writeln!(
         s,
         "
@@ -311,11 +219,9 @@ static CONFIG: Config = Config::new(iotkit::firmware!(&OTA_KEY))
     .manufacturer({:?})
     .model({:?})
     .product_name({:?})
-    .entities(&[{}]);",
-        p.answers.maker,
-        p.board.model,
-        p.answers.name,
-        ids.iter().map(|i| format!("&{i}")).collect::<Vec<_>>().join(", ")
+    .entities(&[
+{list}    ]);",
+        p.answers.maker, p.board.model, p.answers.name,
     );
     if sleepy {
         let _ = writeln!(
@@ -326,18 +232,15 @@ static SLEEP: SleepConfig = SleepConfig {{ interval: Duration::from_secs({}), ma
             u64::from(p.answers.report_every_min) * 60
         );
     }
-    if led || status == Indicator::Rgb {
-        let pin = p.board.rgb_led.expect("status LED on a board with one");
-        let _ = writeln!(
-            s,
-            "
-/// The board's WS2812 LED on GPIO{pin}, driven by an RMT channel.
-type Led = RmtSmartLeds<'static, {{ buffer_size::<RGB8>(1) }}, Async, RGB8, color_order::Grb>;"
-        );
-    }
 
-    // main. A part sharing the ADC with the battery reading needs `mut p` (to reborrow ADC1).
-    let shared_adc = battery_pin.is_some() && p.parts.iter().any(|part| part.kind.analog);
+    // main. A part sharing the ADC with the battery reading needs `mut p` (to reborrow ADC1); a
+    // ready-made one takes it after the battery reading.
+    let shared_adc = battery_pin.is_some() && p.parts.iter().any(|part| part.kind.analog());
+    let adc_taken = shared_adc
+        && p.parts
+            .iter()
+            .zip(ready(p))
+            .any(|(part, ready)| ready && part.kind.code.as_ref().is_some_and(|c| c.takes.contains(&"ADC1")));
     let _ = write!(
         s,
         "
@@ -361,13 +264,17 @@ async fn main(spawner: Spawner) -> ! {{
     }
     if let Some(pin) = battery_pin {
         let curve = if p.answers.battery_curve == super::Curve::TwoAa { "ALKALINE_2AA" } else { "LIPO" };
-        let shared = if shared_adc { "\n    // A part needs the ADC too: `p.ADC1.reborrow()` here." } else { "" };
+        let (shared, adc) = match (shared_adc, adc_taken) {
+            (true, false) => ("\n    // A part needs the ADC too: `p.ADC1.reborrow()` here.", "p.ADC1"),
+            (true, true) => ("", "p.ADC1.reborrow()"),
+            (false, _) => ("", "p.ADC1"),
+        };
         let _ = write!(
             s,
             "
     // Before Wi-Fi starts: the radio's load lowers the voltage. 2.0: two equal resistors
     // between the battery and GPIO{pin} (TODO(battery): your divider's ratio).{shared}
-    Battery::new(p.ADC1, p.GPIO{pin}, 2.0).curve(BatteryCurve::{curve}).report(&BATTERY, None);
+    Battery::new({adc}, p.GPIO{pin}, 2.0).curve(BatteryCurve::{curve}).report(&BATTERY, None);
 "
         );
     }
@@ -399,23 +306,14 @@ async fn main(spawner: Spawner) -> ! {{
         },
         p.button_pin()
     );
-    let rgb_led = |s: &mut String, task: &str| {
-        let pin = p.board.rgb_led.unwrap_or_default();
-        let _ = write!(
-            s,
-            "
-    let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).unwrap().into_async();
-    let led = Led::new(WS2812_TIMING, rmt.channel0, p.GPIO{pin}, Rate::from_mhz(80)).unwrap();
-    spawner.spawn({task}(led).unwrap());
-"
-        );
-    };
+    let rgb = p.board.rgb_led.unwrap_or_default();
     if led {
         // Before `start`, which keeps the CPU a while (Matter loads its state): until the first
         // write, the LED shows whatever a reset left on its data line.
-        s.push_str("\n    // Written right after the bootloader; its saved state comes once `start` restores it.");
-        rgb_led(&mut s, "led_task");
-        s.push('\n');
+        let _ = writeln!(
+            s,
+            "\n    // Written right after the bootloader; its saved state comes once `start` restores it.\n    led::spawn_rgb(spawner, p.RMT, p.GPIO{rgb});\n"
+        );
     }
     if sleepy {
         s.push_str("    let app = iotkit::start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP).await;\n");
@@ -423,29 +321,15 @@ async fn main(spawner: Spawner) -> ! {{
         s.push_str("    iotkit::start(spawner, board, &CONFIG).await;\n");
     }
     if status == Indicator::Rgb && !led {
-        rgb_led(&mut s, "status_task");
+        let _ = writeln!(s, "    led::spawn_rgb(spawner, p.RMT, p.GPIO{rgb});");
     }
     if let (Indicator::Led, Some(pin)) = (status, p.answers.status_pin) {
-        // Dark until the status task runs.
-        let dark = if p.answers.status_active == Some(super::Level::Low) { "High" } else { "Low" };
-        let _ = write!(
-            s,
-            "
-    let led = Output::new(p.GPIO{pin}, Level::{dark}, OutputConfig::default());
-    spawner.spawn(status_task(led).unwrap());
-"
-        );
+        let _ = writeln!(s, "    led::spawn_status(spawner, p.GPIO{pin});");
     }
-    if !spawns.is_empty() {
-        s.push('\n');
-        s.push_str(&setup);
-        s.push_str(&spawns);
-    }
+    let bus = bus_line(p).map(|l| format!("\n    {l}\n")).unwrap_or_default();
+    let _ = write!(s, "{}\n    {SPAWNS_MARK}\n{spawns}", if sleepy { "" } else { &bus });
     if sleepy {
-        if !readings.is_empty() {
-            s.push_str("\n    // Read once per wake-up.\n");
-            s.push_str(&readings);
-        }
+        let _ = write!(s, "{bus}\n    {READS_MARK}\n{reads}");
         s.push_str(
             "
     // Sends the states, waits for commands that came while asleep, then sleeps.
@@ -464,12 +348,64 @@ async fn main(spawner: Spawner) -> ! {{
 ",
         );
     }
-    s.push_str(&tasks);
-    match status {
-        Indicator::Off | Indicator::Auto => {}
-        // The light shows it (`led_task`).
-        Indicator::Rgb if led => {}
-        Indicator::Rgb => s.push_str(
+    wrap_comments(&s)
+}
+
+/// `src/led.rs`: the board's RGB LED as a light, and what shows the status. `None`: neither.
+fn led_rs(p: &Project) -> Option<String> {
+    let led = p.status_led();
+    let status = p.answers.status;
+    // The RGB LED is a light: plain, or showing the status too (`rgb_status_light`).
+    let plain_led = led && status != Indicator::Rgb;
+    if !led && matches!(status, Indicator::Off | Indicator::Auto) {
+        return None;
+    }
+    let link = if p.thread() { " over Matter" } else { " in Home Assistant" };
+    let mut uses = Uses::default();
+    uses.add("embassy_executor::Spawner");
+    let mut s = String::from(if led {
+        "//! The board's RGB LED, a light; the status shows over it (`iotkit::status`).\n"
+    } else {
+        "//! What shows the status (`iotkit::status`): pairing, connecting, updates.\n"
+    });
+    let mut items = String::new();
+    if led {
+        uses.add("iotkit::Light");
+        // Kept across restarts (never on battery: no status LED there).
+        items.push_str("\npub static LED: Light = Light::new(\"status_led\", \"Status LED\").remember();\n");
+    }
+    if let (true, Some(pin)) = (led || status == Indicator::Rgb, p.board.rgb_led) {
+        uses.extend([
+            "esp_hal::Async",
+            "esp_hal::rmt::Rmt",
+            "esp_hal::time::Rate",
+            "esp_hal_smartled::RmtSmartLeds",
+            "esp_hal_smartled::WS2812_TIMING",
+            "esp_hal_smartled::buffer_size",
+            "esp_hal_smartled::color_order",
+            "smart_leds::RGB8",
+            "esp_hal::peripherals::RMT",
+        ]);
+        uses.add(format!("esp_hal::peripherals::GPIO{pin}"));
+        let task = if led { "led_task" } else { "status_task" };
+        let _ = write!(
+            items,
+            "
+/// The board's WS2812 LED on GPIO{pin}, driven by an RMT channel.
+type Led = RmtSmartLeds<'static, {{ buffer_size::<RGB8>(1) }}, Async, RGB8, color_order::Grb>;
+
+/// Starts it (from `main`).
+pub fn spawn_rgb(spawner: Spawner, rmt: RMT<'static>, pin: GPIO{pin}<'static>) {{
+    let rmt = Rmt::new(rmt, Rate::from_mhz(80)).unwrap().into_async();
+    let led = Led::new(WS2812_TIMING, rmt.channel0, pin, Rate::from_mhz(80)).unwrap();
+    spawner.spawn({task}(led).unwrap());
+}}
+"
+        );
+    }
+    match (status, p.answers.status_pin) {
+        (Indicator::Rgb, _) if led => {}
+        (Indicator::Rgb, _) => items.push_str(
             "
 /// The board's RGB LED shows the status (`iotkit::status`): blue blinking while it waits to be set up.
 #[embassy_executor::task]
@@ -479,62 +415,88 @@ async fn status_task(led: Led) {
 }
 ",
         ),
-        Indicator::Led => s.push_str(
-            &"
+        (Indicator::Led, Some(pin)) => {
+            let low = p.answers.status_active == Some(super::Level::Low);
+            uses.extend([
+                "esp_hal::gpio::Level",
+                "esp_hal::gpio::Output",
+                "esp_hal::gpio::OutputConfig",
+                "iotkit::Active",
+            ]);
+            uses.add(format!("esp_hal::peripherals::GPIO{pin}"));
+            // Dark until the status task runs.
+            let _ = write!(
+                items,
+                "
+/// Starts the status LED on GPIO{pin} (from `main`).
+pub fn spawn_status(spawner: Spawner, pin: GPIO{pin}<'static>) {{
+    let led = Output::new(pin, Level::{}, OutputConfig::default());
+    spawner.spawn(status_task(led).unwrap());
+}}
+
 /// The LED shows the status (`iotkit::status`): slow blinking while it waits to be set up.
 #[embassy_executor::task]
-async fn status_task(led: Output<'static>) {
+async fn status_task(led: Output<'static>) {{
     // `Show::All` while developing; `Show::Pairing` for a release: lit only to set it up.
-    iotkit::components::status_led(led, Active::ACTIVE, iotkit::status::Show::All).await
-}
-"
-            .replace("ACTIVE", if p.answers.status_active == Some(super::Level::Low) { "Low" } else { "High" }),
-        ),
+    iotkit::components::status_led(led, Active::{}, iotkit::status::Show::All).await
+}}
+",
+                if low { "High" } else { "Low" },
+                if low { "Low" } else { "High" }
+            );
+        }
+        _ => {}
     }
     if led && !plain_led {
         let _ = write!(
-            s,
+            items,
             "
-/// The status LED, as a light{}; a short press of BOOT toggles it.
+/// The status LED, as a light{link}; a short press of BOOT toggles it.
 /// The status shows over it (`iotkit::status`): blue blinking while it waits to be set up.
 #[embassy_executor::task]
 async fn led_task(led: Led) {{
     // `Show::All` while developing; `Show::Pairing` for a release: only to set it up.
     iotkit::components::rgb_status_light(&LED, led, 1, iotkit::status::Show::All, true).await
 }}
-",
-            if p.thread() { " over Matter" } else { " in Home Assistant" }
+"
         );
     }
     if plain_led {
+        uses.extend([
+            "embassy_futures::select::Either",
+            "embassy_futures::select::select",
+            "iotkit::LightState",
+            "log::warn",
+            "smart_leds::SmartLedsWriteAsync",
+            "smart_leds::brightness",
+        ]);
         let _ = write!(
-            s,
+            items,
             "
-/// The status LED, as a light{}; a short press of BOOT toggles it.",
-            if p.thread() { " over Matter" } else { " in Home Assistant" }
-        );
-        s.push_str(
-            "
+/// The status LED, as a light{link}; a short press of BOOT toggles it.
 #[embassy_executor::task]
-async fn led_task(mut led: Led) {
+async fn led_task(mut led: Led) {{
     // Dark until its saved state comes back (or a command): brightness and colour for \"on\".
-    let mut state = LightState { on: false, brightness: 20, rgb: [0, 128, 255] };
-    loop {
+    let mut state = LightState {{ on: false, brightness: 20, rgb: [0, 128, 255] }};
+    loop {{
         LED.set(state);
-        let color = if state.on { RGB8::new(state.rgb[0], state.rgb[1], state.rgb[2]) } else { RGB8::default() };
-        if let Err(e) = led.write(brightness([color].into_iter(), state.brightness)).await {
-            warn!(\"LED write failed: {e:?}\");
-        }
-        state = match select(LED.wait_command(), iotkit::provision::gesture::wait_press()).await {
+        let color = if state.on {{ RGB8::new(state.rgb[0], state.rgb[1], state.rgb[2]) }} else {{ RGB8::default() }};
+        if let Err(e) = led.write(brightness([color].into_iter(), state.brightness)).await {{
+            warn!(\"LED write failed: {{e:?}}\");
+        }}
+        state = match select(LED.wait_command(), iotkit::provision::gesture::wait_press()).await {{
             Either::First(wanted) => wanted,
-            Either::Second(()) => LightState { on: !state.on, ..state },
-        };
-    }
-}
-",
+            Either::Second(()) => LightState {{ on: !state.on, ..state }},
+        }};
+    }}
+}}
+"
         );
     }
-    wrap_comments(&s)
+    s.push('\n');
+    s.push_str(&uses.lines());
+    s.push_str(&items);
+    Some(wrap_comments(&s))
 }
 
 /// A `//` comment line at `indent` (wrapped by [`wrap_comments`]).
@@ -542,43 +504,28 @@ fn comment(indent: usize, text: &str) -> String {
     format!("{:indent$}// {text}\n", "")
 }
 
-/// A part's `TODO(<id>)`: `head`, then a setup hint per bus and the driver crates. In `main`
-/// (`in_main`), the pin is still `p.GPIOn`; in a task it is `_pin`.
-fn todo(indent: usize, part: &Part, head: &str, in_main: bool) -> String {
-    let k = part.kind;
-    let unpinned =
-        if part.pin.is_none() && !k.buses.is_empty() { " (no pin chosen yet: pass one from `main`)" } else { "" };
-    let mut s = comment(indent, &format!("TODO({}): {head}{unpinned}.", part.id));
-    for &bus in k.buses {
-        let pin = match part.pin {
-            Some(n) if in_main || bus == Bus::Adc => format!("p.GPIO{n}"),
-            Some(_) => "_pin".into(),
-            None => "<pin>".into(),
-        };
-        s += &comment(indent, &format!("  {}", bus.hint(&pin)));
-    }
-    if !k.drivers.is_empty() {
-        s += &comment(indent, &format!("  drivers: {}", k.drivers));
-    }
-    s
-}
-
-/// Wraps `//` comments longer than 100 columns (rustfmt does not), keeping their indent. An
-/// indented line (a `TODO`'s hint, code-like) wraps only past `MAX_WIDTH`, 2 columns further.
+/// Wraps `//`, `///` and `//!` comments longer than 100 columns (rustfmt does not), keeping their
+/// indent. An indented line (a `TODO`'s hint, code-like) wraps only past `MAX_WIDTH`, 2 columns
+/// further.
 fn wrap_comments(source: &str) -> String {
     let mut out = String::new();
     for line in source.lines() {
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
-        let text = trimmed.strip_prefix("// ").unwrap_or_default();
+        let Some((mark, text)) = ["//! ", "/// ", "// "].iter().find_map(|m| Some((*m, trimmed.strip_prefix(m)?)))
+        else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
         let lead = text.len() - text.trim_start().len();
         let width = if lead > 0 { MAX_WIDTH } else { 100 };
-        if !trimmed.starts_with("// ") || line.chars().count() <= width {
+        if line.chars().count() <= width {
             out.push_str(line);
             out.push('\n');
             continue;
         }
-        let first = format!("{:indent$}// {:lead$}", "", "");
+        let first = format!("{:indent$}{mark}{:lead$}", "", "");
         let next = if lead > 0 { format!("{first}  ") } else { first.clone() };
         let mut current = first;
         let mut empty = true;
@@ -682,110 +629,7 @@ pub fn secrets(p: &Project) -> Option<String> {
     (s.len() > before).then_some(s)
 }
 
-/// The template's `Cargo.toml` with the features the answers need.
-/// A part's task.
-fn task_fn(tasks: &mut String, part: &Part, on_pin: &str, doc_extra: &str, task: &str, param: &str, body: &str) {
-    let _ = write!(
-        tasks,
-        "
-/// {}{on_pin}.{doc_extra}
-#[embassy_executor::task]
-async fn {task}({param}) {{
-{body}
-}}
-",
-        part.name
-    );
-}
-
-/// A ready-made part on its pin: the task's parameters, the spawn argument and the task's
-/// body. Adds the imports it needs, and its ADC set-up to `setup`.
-fn component<'a>(
-    comp: Component,
-    part: &Part,
-    chip: &str,
-    iotkit: &mut BTreeSet<&'a str>,
-    hal: &mut BTreeSet<&'a str>,
-    time: &mut BTreeSet<&'a str>,
-    setup: &mut String,
-) -> (String, String, String) {
-    let (c, id) = (&part.konst, &part.id);
-    let pin = part.pin.expect("ready-made parts have a pin");
-    iotkit.insert("components");
-    match comp {
-        Component::Relay => {
-            iotkit.insert("Active");
-            hal.extend(["gpio::Level", "gpio::Output", "gpio::OutputConfig"]);
-            (
-                "pin: Output<'static>".into(),
-                format!("Output::new(p.GPIO{pin}, Level::Low, OutputConfig::default())"),
-                format!(
-                    "    // `Active::Low` for a relay board switched by a low input.\n    components::relay(&{c}, pin, Active::High).await"
-                ),
-            )
-        }
-        Component::Input { .. } | Component::Button => {
-            let (pull_up, active_low) = match comp {
-                Component::Input { pull_up, active_low } => (pull_up, active_low),
-                _ => (true, true),
-            };
-            iotkit.insert("Active");
-            hal.extend(["gpio::Input", "gpio::InputConfig"]);
-            let config = if pull_up {
-                hal.insert("gpio::Pull");
-                "InputConfig::default().with_pull(Pull::Up)"
-            } else {
-                "InputConfig::default()"
-            };
-            let active = if active_low { "Low" } else { "High" };
-            let call = if comp == Component::Button {
-                format!("components::button(&{c}, pin, Active::{active}, components::PressTiming::DEFAULT)")
-            } else {
-                time.insert("Duration");
-                format!("components::binary_input(&{c}, pin, Active::{active}, Duration::from_millis(50))")
-            };
-            ("pin: Input<'static>".into(), format!("Input::new(p.GPIO{pin}, {config})"), format!("    {call}.await"))
-        }
-        Component::Analog => {
-            iotkit.extend(["components::filter::Clamp", "components::filter::Filter", "components::filter::Linear"]);
-            // The ESP32's ADC has no async mode: a reading takes microseconds, so it is polled.
-            let blocking = chip == "esp32";
-            let mode = if blocking { "Blocking" } else { "Async" };
-            hal.insert(mode);
-            hal.extend([
-                "analog::adc::Adc",
-                "analog::adc::AdcConfig",
-                "analog::adc::AdcPin",
-                "analog::adc::Attenuation",
-            ]);
-            time.insert("Duration");
-            let _ = writeln!(
-                setup,
-                "    let mut adc_config = AdcConfig::new();\n    let {id}_pin = adc_config.enable_pin(p.GPIO{pin}, Attenuation::_11dB);"
-            );
-            (
-                format!(
-                    "\n    mut adc: Adc<'static, esp_hal::peripherals::ADC1<'static>, {mode}>,\n    mut pin: AdcPin<esp_hal::peripherals::GPIO{pin}<'static>, esp_hal::peripherals::ADC1<'static>>,\n"
-                ),
-                format!("Adc::new(p.ADC1, adc_config){}, {id}_pin", if blocking { "" } else { ".into_async()" }),
-                format!(
-                    "    // TODO({id}): calibrate: the raw readings dry (0 %) and in water (100 %).
-    let percent = Linear::new((3000.0, 0.0), (1200.0, 100.0)).then(Clamp::new(0.0, 100.0));
-    components::poll(&{c}, Duration::from_secs(30), percent, async || {{
-        {read}
-    }})
-    .await",
-                    read = if blocking {
-                        "loop {\n            if let Ok(raw) = adc.read_oneshot(&mut pin) {\n                break Some(f32::from(raw));\n            }\n        }"
-                    } else {
-                        "Some(f32::from(adc.read_oneshot(&mut pin).await))"
-                    }
-                ),
-            )
-        }
-    }
-}
-
+/// The template's `Cargo.toml` with the features the answers need (its own and its parts').
 pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     let mut app_features = vec![p.board.chip];
     let updates = p.answers.updates;
@@ -811,6 +655,11 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     }
     if p.esphome() {
         app_features.push("esphome-api");
+    }
+    for f in part::features(p) {
+        if !app_features.contains(&f) {
+            app_features.push(f);
+        }
     }
     let source = match p.iotkit_path.as_str() {
         "" => format!("git = {:?}", crate::new::IOTKIT_GIT),
@@ -870,6 +719,9 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         if l.starts_with("iotkit ") || l.starts_with("iotkit=") {
             out.push_str(&line);
             replaced = true;
+        } else if l.starts_with("embassy-time") && !bus_dependencies(p).is_empty() {
+            let _ = writeln!(out, "{l}");
+            out.push_str(&bus_dependencies(p).join("\n"));
         } else if l.starts_with("esp-hal-smartled") && p.thread() {
             // Its 802.15.4 and Bluetooth drivers, for the chip.
             let _ = writeln!(out, "{l}");
@@ -893,7 +745,7 @@ fn summary(p: &Project) -> String {
     let power = if p.sleepy() {
         format!("on battery, reporting every {} min", a.report_every_min)
     } else if p.icd() {
-        "on battery (a Matter ICD)".into()
+        format!("on battery (a Matter ICD), reading its sensors every {} min", a.report_every_min)
     } else {
         "plugged in".into()
     };
@@ -905,6 +757,40 @@ fn summary(p: &Project) -> String {
     format!("A smart device on an {}, {power}, for {link}.", p.board.model)
 }
 
+/// A part's row in the README's wiring table.
+pub fn readme_row(p: &Project, part: &super::Part) -> String {
+    let matter: Vec<&str> = part
+        .entities
+        .iter()
+        .map(|e| match (p.answers.matter != MatterMode::Off, e.spec.matter) {
+            (true, Some(m)) => m,
+            (true, None) if p.thread() => "not shown (no Matter type)",
+            (true, None) => "Home Assistant only",
+            (false, _) => "-",
+        })
+        .collect();
+    let mut matter_cell = matter.clone();
+    matter_cell.dedup();
+    let entities: Vec<String> = part.entities.iter().map(|e| format!("{} `{}`", platform(e.spec.ty), e.id)).collect();
+    format!(
+        "| {} | {} | {} | {} | {} |",
+        part.name,
+        part.pin_cell(),
+        part.kind.wiring,
+        entities.join(", "),
+        matter_cell.join(", ")
+    )
+}
+
+/// The I²C bus's row in the README's wiring table, when it has parts.
+pub fn readme_bus_row(p: &Project) -> Option<String> {
+    let bus = p.i2c()?;
+    Some(format!(
+        "| I²C bus | GPIO{} (SDA), GPIO{} (SCL) | SDA and SCL of each I²C part, and its 3.3 V and GND | - | - |",
+        bus.sda, bus.scl
+    ))
+}
+
 /// The project's README: what it is, the wiring, and how to flash, set up and pair it.
 pub fn readme(p: &Project) -> String {
     let a = &p.answers;
@@ -914,21 +800,10 @@ pub fn readme(p: &Project) -> String {
 
     s.push_str("## Parts and wiring\n\n| Part | Pin | Connect | In Home Assistant | Over Matter |\n| --- | --- | --- | --- | --- |\n");
     for part in &p.parts {
-        let pin = part.pin.map_or("to choose".into(), |n| format!("GPIO{n}"));
-        let matter = match (a.matter != MatterMode::Off, part.kind.matter) {
-            (true, Some(m)) => m,
-            (true, None) if p.thread() => "not shown (no Matter type)",
-            (true, None) => "Home Assistant only",
-            (false, _) => "-",
-        };
-        let _ = writeln!(
-            s,
-            "| {} | {pin} | {} | {} `{}` | {matter} |",
-            part.name,
-            part.kind.wiring,
-            platform(part.kind.ty),
-            part.id
-        );
+        let _ = writeln!(s, "{}", readme_row(p, part));
+    }
+    if let Some(row) = readme_bus_row(p) {
+        let _ = writeln!(s, "{row}");
     }
     if p.status_led() {
         let _ = writeln!(
@@ -980,11 +855,12 @@ pub fn readme(p: &Project) -> String {
         );
     }
     if p.parts.is_empty() {
-        s.push_str(
-            "\nNo parts yet: add entities in `src/main.rs` (see https://tanguy-c.github.io/iotkit/entities.html).\n",
-        );
+        s.push_str("\nNo parts yet: `cargo iotkit add` adds one (`cargo iotkit components` lists them).\n");
     } else {
-        s.push_str("\nThe code for each part is a `TODO(<id>)` in `src/main.rs`: write the driver there.\n");
+        s.push_str(
+            "\nEach part is a module in `src/parts/`; the code left to write is a `TODO(<id>)` there.\n\
+             `cargo iotkit add` adds a part (`cargo iotkit components` lists them).\n",
+        );
     }
 
     s.push_str(
@@ -1134,9 +1010,9 @@ Pins and wiring: the table in README.md. {}
         a.name,
         summary(p),
         if p.parts.is_empty() {
-            "No parts yet: entities are added in `src/main.rs`."
+            "No parts yet: `cargo iotkit add <component>` adds one."
         } else {
-            "Each part's code is a `TODO(<entity id>)` in `src/main.rs`."
+            "Each part is a module in `src/parts/`, its code left to write a `TODO(<entity id>)`."
         }
     );
     if p.sleepy() {
@@ -1188,10 +1064,11 @@ Pins and wiring: the table in README.md. {}
 
 - `no_std`. Drivers must be `no_std`, preferably embedded-hal-async 1.0.
 - The heap is fixed (for Wi-Fi and Bluetooth): avoid `alloc`.
-- One task per part, never stalled: await a `Timer` or a pin edge. Short blocking bus reads are fine; no busy loops.
+- One module per part in `src/parts/` (`cargo iotkit add <component>` writes one: `cargo iotkit
+  components` lists them), one task each, never stalled: await a `Timer` or a pin edge. Short blocking bus reads are fine; no busy loops.
 - Report states with `.set(..)`; take commands with `.wait_command().await`.
 - Prefer the ready-made parts in `iotkit::components` (relay, binary_input, button, poll,
-  dimmer, fan, rgb_light); `poll` takes any driver in its read closure.
+  dimmer, fan, rgb_light; I²C chips in `components::i2c`); `poll` takes any driver in its read closure.
 - Versions are pinned (esp-hal ~1.2.2): check APIs in the docs or source below, not from memory.
 - Leave `partitions*.csv`, `[profile.*]` and `keys/` alone.
 - Bump `version` in `Cargo.toml` for each OTA update.

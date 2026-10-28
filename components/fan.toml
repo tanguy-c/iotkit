@@ -1,0 +1,18 @@
+label  = "Fan"
+group  = "controls"
+order  = 60
+name   = "Fan"
+wiring = "the fan's PWM input or its MOSFET gate"
+matter = "Fan"
+
+[entity]
+type    = "Fan"
+builder = ".speed()"
+
+[[pins]]
+use = "output"
+
+[todo]
+text    = "run the fan at `wanted` (on, speed in %; PWM at 25 kHz)"
+buses   = ["ledc"]
+drivers = "`components::fan` on the LEDC channel"

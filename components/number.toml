@@ -1,0 +1,15 @@
+label  = "Another reading (a number)"
+group  = "measures"
+order  = 80
+name   = "Reading"
+wiring = "your sensor"
+
+[entity]
+type    = "Sensor"
+builder = ".measurement()"
+
+[[pins]]
+use = "input"
+
+[todo]
+text = "read the value (and add `.unit(\"...\")`, `.device_class(\"...\")` to the entity)"

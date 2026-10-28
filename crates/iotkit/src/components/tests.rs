@@ -192,3 +192,72 @@ fn single_press_is_immediate_without_multiple_presses() {
         assert_eq!(last_event(&BUTTON), Some("press"), "no wait for a second press");
     });
 }
+
+/// An I²C bus that records the writes and answers each read with the next of `reads`.
+#[derive(Default)]
+struct I2cBus {
+    writes: std::vec::Vec<std::vec::Vec<u8>>,
+    reads: std::collections::VecDeque<std::vec::Vec<u8>>,
+}
+
+impl embedded_hal_async::i2c::ErrorType for I2cBus {
+    type Error = embedded_hal::i2c::ErrorKind;
+}
+
+impl embedded_hal_async::i2c::I2c for I2cBus {
+    async fn transaction(
+        &mut self,
+        _address: u8,
+        operations: &mut [embedded_hal_async::i2c::Operation<'_>],
+    ) -> Result<(), Self::Error> {
+        for op in operations {
+            match op {
+                embedded_hal_async::i2c::Operation::Write(w) => self.writes.push(w.to_vec()),
+                embedded_hal_async::i2c::Operation::Read(r) => {
+                    let next = self.reads.pop_front().ok_or(embedded_hal::i2c::ErrorKind::Other)?;
+                    r.copy_from_slice(&next);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Runs a sensor read to its end, the mock clock advancing 1 ms per poll.
+fn complete<T>(read: impl Future<Output = T>) -> T {
+    let _clock = CLOCK.lock().unwrap();
+    let mut read = core::pin::pin!(read);
+    loop {
+        if let core::task::Poll::Ready(v) = embassy_futures::poll_once(read.as_mut()) {
+            return v;
+        }
+        MockDriver::get().advance(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn i2c_sensors() {
+    use crate::components::i2c::{aht20, bh1750, crc8, sht4x};
+    let near = |got: f32, want: f32| (got - want).abs() < 0.01;
+    // SHT4x: two words with their CRC; a bad CRC is no reading.
+    let mut bus = I2cBus::default();
+    bus.reads.push_back(std::vec![0xBE, 0xEF, 0x92, 0x80, 0x00, crc8(&[0x80, 0x00])]);
+    let r = complete(sht4x(&mut bus, 0x44)).unwrap();
+    assert!(near(r.temperature, -45.0 + 175.0 * 48879.0 / 65535.0) && near(r.humidity, 56.5), "{r:?}");
+    assert_eq!(bus.writes, [[0xFD]]);
+    bus.reads.push_back(std::vec![0xBE, 0xEF, 0x93, 0x80, 0x00, 0x00]);
+    assert_eq!(complete(sht4x(&mut bus, 0x44)), None);
+    // AHT20: calibrated, then 50 % and 25 °C.
+    let mut bus = I2cBus::default();
+    let mut frame = std::vec![0x18, 0x80, 0x00, 0x06, 0x00, 0x00];
+    frame.push(crc8(&frame));
+    bus.reads.extend([std::vec![0x18], frame]);
+    let r = complete(aht20(&mut bus, 0x38)).unwrap();
+    assert!(near(r.humidity, 50.0) && near(r.temperature, 25.0), "{r:?}");
+    assert_eq!(bus.writes, [[0xAC, 0x33, 0x00]], "no calibration when calibrated");
+    // BH1750: counts / 1.2.
+    let mut bus = I2cBus::default();
+    bus.reads.push_back(std::vec![0x01, 0x2C]);
+    assert!(near(complete(bh1750(&mut bus, 0x23)).unwrap(), 250.0));
+    assert!(complete(bh1750(&mut I2cBus::default(), 0x23)).is_none(), "no answer");
+}
