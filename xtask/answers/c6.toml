@@ -1,5 +1,6 @@
 # `cargo iotkit new --answers answers/c6.toml`: a plugged-in ESP32-C6 with Matter (fixed code),
-# one part of every kind, and AGENTS.md. CI generates and builds it.
+# one part of every kind (the I²C chips on one bus, each at its own address), and AGENTS.md. CI
+# generates and builds it.
 name = "Kitchen hub"
 maker = "CI"
 board = "esp32c6-devkitc-1"
@@ -7,6 +8,10 @@ matter = "fixed"
 mqtt_host = "192.168.1.10"
 updates_url = "http://192.168.1.10:8080/kitchen-hub/manifest.json"
 ai_agents = true
+
+[i2c]
+sda = 0
+scl = 1
 
 [[parts]]
 kind = "relay"
@@ -88,3 +93,32 @@ kind = "mode"
 [[parts]]
 kind = "button"
 pin = 3
+
+[[parts]]
+kind = "sht4x"
+name = "Living room"
+
+[[parts]]
+kind = "sht3x"
+name = "Cellar"
+address = 0x45
+
+[[parts]]
+kind = "aht20"
+name = "Attic"
+
+[[parts]]
+kind = "bme280"
+name = "Outdoor"
+
+[[parts]]
+kind = "bmp280"
+name = "Greenhouse"
+address = 0x77
+
+[[parts]]
+kind = "bh1750"
+
+[[parts]]
+kind = "scd4x"
+name = "Office"

@@ -1,0 +1,22 @@
+label   = "Light level: BH1750 (I²C)"
+group   = "measures"
+order   = 39
+name    = "Illuminance"
+wiring  = "SDA and SCL to the bus, VCC to 3.3 V, GND; ADDR to GND (0x23) or 3.3 V (0x5C)"
+matter  = "Light sensor"
+sources = [
+    "https://github.com/esphome/esphome/blob/dev/esphome/components/bh1750/sensor.py",
+    "https://github.com/zephyrproject-rtos/zephyr/blob/main/dts/bindings/sensor/rohm,bh1750.yaml",
+]
+
+[entity]
+ctor = "illuminance"
+
+[i2c]
+addresses = [0x23, 0x5C]
+read      = "components::i2c::bh1750({{ i2c }}, ADDR).await"
+
+[todo]
+text    = "read lux"
+buses   = ["i2c"]
+drivers = "`components::i2c::bh1750(&mut i2c, 0x23)`"

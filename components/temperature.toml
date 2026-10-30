@@ -1,0 +1,18 @@
+label  = "Temperature (another sensor: DS18B20, analog)"
+group  = "measures"
+order  = 15
+name   = "Temperature"
+wiring = "the sensor's data pin (DS18B20 on 1-Wire with a 4.7 kΩ pull-up), or SDA of an I²C chip without its own part (SHT4x, SHT3x, AHT20, BME280 have one)"
+matter = "Temperature sensor"
+
+[entity]
+type = "Sensor"
+ctor = "temperature"
+
+[[pins]]
+use = "input"
+
+[todo]
+text    = "read °C"
+buses   = ["i2c", "one-wire"]
+drivers = "`sht4x`, `embedded-sht3x`, `bme280-rs`; DS18B20: `onewire` (blocking)"

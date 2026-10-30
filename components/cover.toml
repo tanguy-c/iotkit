@@ -1,0 +1,17 @@
+label  = "Blind / curtain / garage door"
+group  = "controls"
+order  = 30
+name   = "Blind"
+wiring = "the motor driver's direction / enable input"
+matter = "Window covering"
+
+[entity]
+type    = "Cover"
+builder = ".device_class(DeviceClass::BLIND).position()"
+
+[[pins]]
+use = "output"
+
+[todo]
+text  = "move the motor to `position` (0 closed, 100 open; halt it on `Stop`), e.g. timed runs"
+buses = ["gpio-out"]

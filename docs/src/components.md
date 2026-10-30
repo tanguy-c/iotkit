@@ -23,8 +23,36 @@ spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default()
 | `rgb_light` | `Light` | WS2812 LEDs (feature `smartled`, `esp-hal-smartled` on an RMT channel) |
 | `rgb_status_light` | `Light` | the same, showing the [status](#status-led) over the light |
 | `poll` | `Sensor` | any read function, every interval, through filters |
+| `i2c::bh1750`, `sht4x`, `sht3x`, `aht20`, `bme280`, `bmp280`, `scd4x` | `Sensor`s | an I²C chip: one reading per call ([below](#i²c-sensors)) |
 
-`cargo iotkit new` uses them where it can, and leaves a `TODO` with hints for the other parts.
+`cargo iotkit new` and `cargo iotkit add` use them where they can, and leave a `TODO` with hints for
+the other parts. What they know about each part is a file in the repository's
+[`components/`](https://github.com/tanguy-c/iotkit/tree/main/components): its entity, pins, wiring,
+the ready-made code as a template, and the hints; `cargo iotkit components` lists them.
+
+## I²C sensors
+
+`components::i2c` reads common I²C chips: BH1750 (lux), SHT4x, SHT3x and AHT20 (°C, %), BME280
+(°C, %, hPa), BMP280 (°C, hPa) and SCD4x (CO2 ppm, °C, %). Each call starts a measurement, waits
+for it and returns the reading, or `None` on a bus error or a bad checksum. They keep no state, so
+the same call serves a task every 30 s and a battery device once per wake-up; they take any
+embedded-hal-async `I2c`: esp-hal's `I2c<Async>`, or a device on a bus shared with
+`embassy-embedded-hal`.
+
+```rust,ignore
+if let Some(r) = components::i2c::sht4x(&mut i2c, 0x44).await {
+    AIR_TEMPERATURE.set(r.temperature);
+    AIR_HUMIDITY.set(r.humidity);
+}
+```
+
+`cargo iotkit new` asks for the bus's two pins once, at the first I²C part (`[i2c]`, `sda` and
+`scl`, in an answers file), and an address when the chip has several (`address = 0x45`; two parts
+at one address are refused). It writes `src/i2c.rs`: plugged in, the bus behind a mutex, one task
+per chip; on battery, `main` lends it to each chip in turn, once per wake-up. A chip measuring
+several values is one part with an entity each: an SHT4x named "Air" reports `air_temperature`
+and `air_humidity`. `cargo iotkit add sht4x --pin sda=6 --pin scl=7` adds the bus with the first
+I²C part.
 
 ## Status LED
 

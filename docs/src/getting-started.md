@@ -42,10 +42,26 @@ It asks, in plain words:
   updates): that LED (over the light, by default when plugged in), a LED on a pin, or nothing;
 - whether to add an `AGENTS.md` for AI coding agents.
 
-You get one entity per part, a [ready-made part](components.md) where there is one and a
-`TODO(<entity id>)` with hints elsewhere, a README with the wiring table, `.cargo/secrets.toml`
-with what you gave, and the update signing keys. `--defaults` asks nothing (a plugged-in C6 with
+You get one entity per part, each in its own module, `src/parts/<entity id>.rs`: a
+[ready-made part](components.md) where there is one, and a `TODO(<entity id>)` with hints
+elsewhere. You also get a README with the wiring table, `.cargo/secrets.toml` with what you gave,
+`iotkit.toml` with the other answers, and the update signing keys. `--defaults` asks nothing (a plugged-in C6 with
 its LED as a light that shows the status); `--answers FILE` reads the answers from TOML (scripts, CI).
+
+```text
+src/main.rs        the setup, iotkit::start, the parts' entities and spawns
+src/led.rs         the board's LED: a light, the status
+src/parts/*.rs     one module per part: its entity, `spawn`, and its task
+iotkit.toml        the answers (`cargo iotkit add` reads it)
+```
+
+Later parts come with `cargo iotkit add`: it writes the part's module, and adds its lines to
+`src/main.rs` (under the comments that mark the lists), to the README's table and to
+`iotkit.toml`. Code you wrote before is left as is. `cargo iotkit components` lists the parts.
+
+```bash
+cargo iotkit add relay --name "Garden lamp" --pin 4   # or `cargo iotkit add`: asked
+```
 
 The project depends on iotkit from GitHub; `Cargo.lock` pins the commit and `cargo update` moves
 it on. `--iotkit-path DIR` uses a local checkout instead.

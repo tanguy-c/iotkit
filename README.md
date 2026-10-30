@@ -42,19 +42,18 @@ async fn pump_task(pin: Output<'static>) {
 
 ## Quick start
 
-With an ESP32-C6 DevKit plugged in:
-
 ```bash
-rustup target add riscv32imac-unknown-none-elf
+rustup target add riscv32imac-unknown-none-elf riscv32imc-unknown-none-elf   # C6/C5/H2, C3
 cargo install espflash
 cargo install --locked --git https://github.com/tanguy-c/iotkit iotkit-cli
-cargo iotkit new my-light --defaults && cd my-light
+cargo iotkit new my-device && cd my-device
 cargo iotkit flash --release
 ```
 
-Join the `iotkit-XXXX` network from a phone to give it your Wi-Fi, then type `mqtt <your broker>`
-on the console: the board's LED shows up in Home Assistant. `cargo iotkit new` without
-`--defaults` asks about your own board and parts.
+`cargo iotkit new` asks about your board, how it connects (Wi-Fi or Thread; MQTT, the ESPHome
+API or Matter) and its parts, then writes a project that builds; `cargo iotkit add` adds parts
+later. The S3 and the ESP32 need Espressif's toolchain:
+[getting started](https://tanguy-c.github.io/iotkit/getting-started.html).
 
 ## Status
 

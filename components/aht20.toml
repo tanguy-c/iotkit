@@ -1,0 +1,32 @@
+label   = "Temperature + humidity: AHT20/21/25 (I²C)"
+group   = "measures"
+order   = 12
+name    = "Air"
+wiring  = "SDA and SCL to the bus, VIN to 3.3 V, GND (address 0x38)"
+sources = [
+    "https://github.com/esphome/esphome/blob/dev/esphome/components/aht10/sensor.py",
+    "the AHT20 datasheet (Aosong, v1.0): address 0x38, commands 0xBE and 0xAC, CRC-8 0x31",
+]
+
+[[entities]]
+key    = "temperature"
+name   = "temperature"
+ctor   = "temperature"
+matter = "Temperature sensor"
+value  = "r.temperature"
+
+[[entities]]
+key    = "humidity"
+name   = "humidity"
+ctor   = "humidity"
+matter = "Humidity sensor"
+value  = "r.humidity"
+
+[i2c]
+addresses = [0x38]
+read      = "components::i2c::aht20({{ i2c }}, ADDR).await"
+
+[todo]
+text    = "read °C and % RH"
+buses   = ["i2c"]
+drivers = "`components::i2c::aht20(&mut i2c, 0x38)`"

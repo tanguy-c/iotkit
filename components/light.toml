@@ -1,0 +1,17 @@
+label  = "Light (dimmable / colour LED strip)"
+group  = "controls"
+order  = 20
+name   = "Light"
+wiring = "DIN of a WS2812 strip, or the gate of a MOSFET for a single-colour strip"
+matter = "Extended colour light"
+
+[entity]
+type = "Light"
+
+[[pins]]
+use = "output"
+
+[todo]
+text    = "drive the light from `state.on`, `state.brightness`, `state.rgb`"
+buses   = ["rmt", "ledc"]
+drivers = "WS2812: `esp-hal-smartled` + `components::rgb_light` (feature `smartled`); dimmer: `components::dimmer`"

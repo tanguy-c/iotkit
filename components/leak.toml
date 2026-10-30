@@ -1,0 +1,35 @@
+label  = "Water leak"
+group  = "detects"
+order  = 30
+name   = "Leak"
+wiring = "one probe of the leak sensor (the other to GND)"
+matter = "Water leak detector"
+
+[entity]
+type    = "BinarySensor"
+builder = ".device_class(DeviceClass::MOISTURE)"
+
+[[pins]]
+use = "input"
+
+[todo]
+text  = "low when the probes are wet"
+buses = ["gpio-in"]
+
+# `components::binary_input`, debounced.
+[code]
+uses  = [
+    "embassy_time::Duration",
+    "esp_hal::gpio::Input",
+    "esp_hal::gpio::InputConfig",
+    "esp_hal::gpio::Pull",
+    "iotkit::Active",
+    "iotkit::components",
+]
+param = "pin: Input<'static>"
+arg   = "Input::new(pin, InputConfig::default().with_pull(Pull::Up))"
+body  = "components::binary_input(&{{ entity }}, pin, Active::Low, Duration::from_millis(50)).await"
+
+# On battery: its level once per wake-up.
+read      = "{{ entity }}.set(Input::new(pin, InputConfig::default().with_pull(Pull::Up)).is_low());"
+read_uses = ["esp_hal::gpio::Input", "esp_hal::gpio::InputConfig", "esp_hal::gpio::Pull"]
