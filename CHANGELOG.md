@@ -19,6 +19,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - `cargo iotkit flash --factory-reset`: erases the settings and Matter pairings as it flashes.
 - Wi-Fi: a joined network that gives no address within 30 s is left and joined again, backing
   off like a failed join (an access point that never answered DHCP kept the device there for good).
+- ESPHome API: Home Assistant took the device for another one ("Unexpected device found",
+  "Invalid encryption key"): the handshake's hello sent the MAC as `58:E6:C5:00:FD:20`, which
+  Home Assistant cuts to 16 characters; it is sent as ESPHome does, `58e6c500fd20`.
 - The setup page no longer closes by itself on a phone after about 30 s: opening the window
   restarts the radio, and the station then looked for its network on every channel, taking the
   access point off its channel each time; it now looks on the access point's channel first.

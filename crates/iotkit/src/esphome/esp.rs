@@ -310,10 +310,16 @@ async fn session(
     inbox.consume(hello.end);
     let handshake = inbox.next(socket).await?;
     let message = inbox.buf.get(handshake.clone()).and_then(|m| m.split_first());
-    // Ours: the protocol chosen, our name and MAC address.
+    // Ours: the protocol chosen, our name and MAC address. The MAC as ESPHome sends it here, 12
+    // lowercase hex digits (as the mDNS TXT `mac=`): aioesphomeapi keeps 16 characters, and
+    // Home Assistant compares them with the device's MAC (`58:E6:C5:00:FD:2` was another device).
+    let mut mac_hex = String::<12>::new();
+    for b in net.mac {
+        let _ = write!(mac_hex, "{b:02x}");
+    }
     let mut hello = heapless::Vec::<u8, 64>::new();
     let _ = hello.push(1);
-    for part in [net.hostname, mac] {
+    for part in [net.hostname, mac_hex.as_str()] {
         let _ = hello.extend_from_slice(part.as_bytes());
         let _ = hello.push(0);
     }
