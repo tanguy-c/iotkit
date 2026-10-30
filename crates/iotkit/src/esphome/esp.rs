@@ -89,19 +89,21 @@ impl crate::config::Setting for Client {
     const VERSION: u8 = 1;
 }
 
-/// The stored key; the first time, `ESPHOME_API_KEY` from build time (base64) or a random one,
-/// which is then stored.
+/// The key set on the device (`api-key` on the console), else `ESPHOME_API_KEY` from build time
+/// (base64), else a random one, made once and stored; also kept for [`api_key`](super::api_key).
 pub async fn key(store: &SharedStore) -> ApiKey {
     let mut store = store.lock().await;
-    if let Ok(Some(key)) = store.load::<ApiKey>().await {
-        return key;
-    }
-    let key = option_env!("ESPHOME_API_KEY").and_then(ApiKey::parse).unwrap_or_else(|| {
-        let mut key = [0; 32];
-        esp_hal::rng::Rng::new().read(&mut key);
-        ApiKey(key)
-    });
-    let _ = store.save(&key).await;
+    let key = match store.load_or(option_env!("ESPHOME_API_KEY").and_then(ApiKey::parse)).await {
+        Some(key) => key,
+        None => {
+            let mut key = [0; 32];
+            esp_hal::rng::Rng::new().read(&mut key);
+            let key = ApiKey(key);
+            let _ = store.save(&key).await;
+            key
+        }
+    };
+    super::set_api_key(&key);
     key
 }
 
@@ -308,10 +310,16 @@ async fn session(
     inbox.consume(hello.end);
     let handshake = inbox.next(socket).await?;
     let message = inbox.buf.get(handshake.clone()).and_then(|m| m.split_first());
-    // Ours: the protocol chosen, our name and MAC address.
+    // Ours: the protocol chosen, our name and MAC address. The MAC as ESPHome sends it here, 12
+    // lowercase hex digits (as the mDNS TXT `mac=`): aioesphomeapi keeps 16 characters, and
+    // Home Assistant compares them with the device's MAC (`58:E6:C5:00:FD:2` was another device).
+    let mut mac_hex = String::<12>::new();
+    for b in net.mac {
+        let _ = write!(mac_hex, "{b:02x}");
+    }
     let mut hello = heapless::Vec::<u8, 64>::new();
     let _ = hello.push(1);
-    for part in [net.hostname, mac] {
+    for part in [net.hostname, mac_hex.as_str()] {
         let _ = hello.extend_from_slice(part.as_bytes());
         let _ = hello.push(0);
     }

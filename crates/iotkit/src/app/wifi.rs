@@ -163,13 +163,14 @@ pub(super) async fn start_services(
     #[cfg(feature = "mqtt")]
     match crate::mqtt::esp::broker(store).await {
         Some(broker) => {
+            log::info!("mqtt: broker {}:{}", broker.host, broker.port);
             spawn(spawner, crate::mqtt::esp::mqtt_task(net, device, broker));
             spawn(spawner, broker_check_task());
         }
         None => {
             // With the ESPHome API, no broker is the normal setup: nothing to say.
             #[cfg(not(feature = "esphome-api"))]
-            warn!("no MQTT broker: set one with `mqtt HOST[:PORT]` on the console");
+            warn!("no MQTT broker: build one in (`MQTT_HOST`) or give it on the setup page");
             HEALTH.pass(BROKER);
         }
     }

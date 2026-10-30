@@ -25,6 +25,7 @@
 
 use core::{fmt, ops::Range};
 
+use embassy_futures::block_on;
 use embedded_storage_async::nor_flash::MultiwriteNorFlash;
 use sequential_storage::{cache::NoCache, map};
 use serde::{Serialize, de::DeserializeOwned};
@@ -44,7 +45,8 @@ pub mod keys {
     pub const OTA_PENDING: u16 = 0x0030;
     /// `iotkit::ota`: what the last update did.
     pub const OTA_LAST: u16 = 0x0031;
-    /// `iotkit::ota`: the manifest URL to check for updates.
+    /// Retired: the manifest URL, now built in (`OTA_MANIFEST_URL`). A value left in flash is
+    /// ignored; never reuse the key.
     pub const UPDATE_SOURCE: u16 = 0x0032;
     /// `iotkit::matter::ota`: the Matter OTA provider of the update on trial.
     pub const OTA_MATTER_FROM: u16 = 0x0033;
@@ -127,6 +129,8 @@ impl fmt::Display for Error {
 impl core::error::Error for Error {}
 
 impl<E> From<sequential_storage::Error<E>> for Error {
+    // Once, not inlined where each operation fails: each copy brings its lookup table into RAM.
+    #[inline(never)]
     fn from(e: sequential_storage::Error<E>) -> Self {
         use sequential_storage::Error as S;
         match e {
@@ -140,10 +144,18 @@ impl<E> From<sequential_storage::Error<E>> for Error {
 }
 
 /// Settings in a flash range.
+///
+/// For a blocking flash behind an async interface (esp-storage through `BlockingAsync`), whose
+/// futures are ready at once: each operation runs its flash work to the end before returning
+/// ([`block_on`]), so that work's state (about 600 bytes) is not kept in the future of every task
+/// that loads or saves a setting. A flash that truly waits would block the caller meanwhile.
 pub struct Store<F> {
     flash: F,
     range: Range<u32>,
     buf: [u8; BUF_LEN],
+    /// The setting being saved, encoded: here once, not in the future of every caller of
+    /// [`save`](Self::save) while it waits for the flash.
+    value: [u8; MAX_VALUE_LEN],
 }
 
 impl<F: MultiwriteNorFlash> Store<F> {
@@ -154,14 +166,14 @@ impl<F: MultiwriteNorFlash> Store<F> {
         if !aligned || range.end < range.start + 2 * sector {
             return Err(Error::Range);
         }
-        Ok(Self { flash, range, buf: [0; BUF_LEN] })
+        Ok(Self { flash, range, buf: [0; BUF_LEN], value: [0; MAX_VALUE_LEN] })
     }
 
     /// Checks that the range holds a store; if it holds something else (e.g. an old firmware, or
     /// it was never erased), erases it. Returns `true` when it did. Call once after [`new`](Self::new).
     pub async fn format_if_needed(&mut self) -> Result<bool, Error> {
         let probe: Result<Option<&[u8]>, _> =
-            map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &0u16).await;
+            block_on(map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &0u16));
         match probe.map_err(Error::from) {
             Ok(_) => Ok(false),
             Err(Error::Corrupted) => {
@@ -184,8 +196,13 @@ impl<F: MultiwriteNorFlash> Store<F> {
 
     /// Reads a setting; `None` if it was never saved (or its old version was dropped).
     pub async fn load<S: Setting>(&mut self) -> Result<Option<S>, Error> {
-        let raw: Option<&[u8]> =
-            map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;
+        let raw: Option<&[u8]> = block_on(map::fetch_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut NoCache::new(),
+            &mut self.buf,
+            &S::KEY,
+        ))?;
         let Some((&version, bytes)) = raw.and_then(<[u8]>::split_first) else {
             return Ok(None);
         };
@@ -200,32 +217,55 @@ impl<F: MultiwriteNorFlash> Store<F> {
         }
     }
 
+    /// The stored setting, else `built` (the value given at build time, never stored): a setting
+    /// is stored only when chosen on the device, and then wins until a factory reset.
+    pub async fn load_or<S: Setting>(&mut self, built: Option<S>) -> Option<S> {
+        match self.load::<S>().await {
+            Ok(Some(s)) => Some(s),
+            Ok(None) => built,
+            Err(e) => {
+                log::warn!("config: setting {:#06x} unreadable ({e}), using the built-in one", S::KEY);
+                built
+            }
+        }
+    }
+
     /// Writes a setting (only when it differs from what is stored, to spare the flash).
     pub async fn save<S: Setting>(&mut self, value: &S) -> Result<(), Error> {
-        let mut encoded = [0; MAX_VALUE_LEN];
-        encoded[0] = S::VERSION;
-        let n = postcard::to_slice(value, &mut encoded[1..]).map_err(|_| Error::TooLarge)?.len() + 1;
-        let encoded = &encoded[..n];
+        self.value[0] = S::VERSION;
+        let n = postcard::to_slice(value, &mut self.value[1..]).map_err(|_| Error::TooLarge)?.len() + 1;
+        let encoded = &self.value[..n];
 
-        let stored: Option<&[u8]> =
-            map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;
+        let stored: Option<&[u8]> = block_on(map::fetch_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut NoCache::new(),
+            &mut self.buf,
+            &S::KEY,
+        ))?;
         if stored == Some(encoded) {
             return Ok(());
         }
-        map::store_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY, &encoded)
-            .await?;
+        block_on(map::store_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut NoCache::new(),
+            &mut self.buf,
+            &S::KEY,
+            &encoded,
+        ))?;
         Ok(())
     }
 
     /// Forgets a setting.
     pub async fn remove<S: Setting>(&mut self) -> Result<(), Error> {
-        map::remove_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;
+        block_on(map::remove_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY))?;
         Ok(())
     }
 
     /// Erases every setting.
     pub async fn factory_reset(&mut self) -> Result<(), Error> {
-        self.flash.erase(self.range.start, self.range.end).await.map_err(|_| Error::Flash)
+        block_on(self.flash.erase(self.range.start, self.range.end)).map_err(|_| Error::Flash)
     }
 }
 
@@ -349,6 +389,19 @@ mod tests {
             assert_eq!(s.load::<Wifi>().await, Ok(Some(wifi)));
             s.remove::<Boots>().await.unwrap();
             assert_eq!(s.load::<Boots>().await, Ok(None));
+        });
+    }
+
+    #[test]
+    fn stored_setting_wins_over_built_in() {
+        block_on(async {
+            let mut s = store();
+            assert_eq!(s.load_or::<Boots>(None).await, None);
+            assert_eq!(s.load_or(Some(Boots(1))).await, Some(Boots(1)));
+            assert_eq!(s.load::<Boots>().await, Ok(None), "the built-in value is not stored");
+            s.save(&Boots(2)).await.unwrap();
+            assert_eq!(s.load_or(Some(Boots(1))).await, Some(Boots(2)));
+            assert_eq!(s.load_or::<Boots>(None).await, Some(Boots(2)));
         });
     }
 

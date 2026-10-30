@@ -48,12 +48,12 @@ Other entities are not on Matter (MQTT and the ESPHome API only).
 
 ## Pairing
 
-The pairing code is in the boot log, on the console (`matter`), or on the QR label
+The pairing code is in the boot log, on the [console](console.md) (`matter`), or on the QR label
 `cargo iotkit new` printed. Add the device in the controller with that code; in Home Assistant:
 *Settings > Devices > Add > Matter*.
 
-A second controller (multi-admin): `matter pair` on the console opens a pairing window for 15
-minutes; on Thread, holding BOOT 3 s opens one and a short press closes it. Most controllers can
+A second controller (multi-admin): `matter pair` on the console (the `console` feature) opens a
+pairing window for 15 minutes; on Thread, holding BOOT 3 s opens one and a short press closes it. Most controllers can
 also share a device they paired, which gives a code for the next one. `matter reset` forgets every
 pairing; holding BOOT 10 s erases every setting and pairing.
 

@@ -4,6 +4,8 @@ use core::fmt::Write;
 
 use heapless::String;
 
+use crate::mqtt::Broker;
+
 /// What a request asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Route {
@@ -33,20 +35,40 @@ pub fn content_length(head: &str) -> Option<usize> {
     })
 }
 
-/// `ssid` and `password` from an `application/x-www-form-urlencoded` body.
-pub fn parse_form(body: &[u8]) -> Option<(String<32>, String<64>)> {
+/// What the form sent.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Form {
+    /// The Wi-Fi network.
+    pub ssid: String<32>,
+    /// Its password, empty for an open network.
+    pub password: String<64>,
+    /// The MQTT broker, if one was given (else the current one stays).
+    pub broker: Option<Broker>,
+}
+
+/// The form from an `application/x-www-form-urlencoded` body; `None` without a network, or with
+/// a broker address that does not parse.
+pub fn parse_form(body: &[u8]) -> Option<Form> {
     let body = core::str::from_utf8(body).ok()?;
-    let (mut ssid, mut password) = (None, None);
+    let (mut ssid, mut password) = (None, String::new());
+    // The login straight into the broker; the address, once decoded, into its host and port.
+    let mut broker = Broker { host: String::new(), port: 0, user: String::new(), password: String::new() };
     for pair in body.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         match key {
-            "ssid" => ssid = Some(decode::<32>(value)?),
-            "password" => password = Some(decode::<64>(value)?),
+            "ssid" => ssid = Some(decode(value)?),
+            "password" => password = decode(value)?,
+            "broker" => match decode::<70>(value)?.trim() {
+                "" => {}
+                address => broker.set_address(address)?,
+            },
+            "broker_user" => broker.user = decode(value)?,
+            "broker_password" => broker.password = decode(value)?,
             _ => {}
         }
     }
-    let ssid = ssid.filter(|s| !s.is_empty())?;
-    Some((ssid, password.unwrap_or_default()))
+    let broker = (!broker.host.is_empty()).then_some(broker);
+    Some(Form { ssid: ssid.filter(|s| !s.is_empty())?, password, broker })
 }
 
 /// Percent-decoding, `+` for space.
@@ -105,8 +127,8 @@ pub enum Notice<'a> {
     },
 }
 
-/// The page: a message, then the form unless joined.
-pub fn page<const N: usize>(name: &str, notice: Notice) -> String<N> {
+/// The page: a message, then the form unless joined; with the MQTT broker's fields if `broker`.
+pub fn page<const N: usize>(name: &str, notice: Notice, broker: bool) -> String<N> {
     let mut s = String::new();
     let _ = (|| -> core::fmt::Result {
         s.write_str(
@@ -152,9 +174,17 @@ pub fn page<const N: usize>(name: &str, notice: Notice) -> String<N> {
         }
         s.write_str(
             "<form method=post action=/connect><label>Wi-Fi network<input name=ssid maxlength=32 required></label>\
-             <label>Password<input name=password type=password maxlength=64 pattern=\".{8,64}\" title=\"8 to 63 characters, or empty for an open network\"></label>\
-             <button>Connect</button></form></body></html>",
-        )
+             <label>Password<input name=password type=password maxlength=64 pattern=\".{8,64}\" title=\"8 to 63 characters, or empty for an open network\"></label>",
+        )?;
+        if broker {
+            s.write_str(
+                "<details><summary>MQTT broker (empty: keep the current one)</summary>\
+                 <label>Host or host:port<input name=broker maxlength=70 placeholder=homeassistant.local></label>\
+                 <label>User<input name=broker_user maxlength=32></label>\
+                 <label>Password<input name=broker_password type=password maxlength=64></label></details>",
+            )?;
+        }
+        s.write_str("<button>Connect</button></form></body></html>")
     })();
     s
 }
@@ -180,10 +210,13 @@ mod tests {
 
     #[test]
     fn forms() {
-        let (ssid, pw) = parse_form(b"ssid=My+Home%21&password=p%40ss+w%C3%B6rd").unwrap();
-        assert_eq!((ssid.as_str(), pw.as_str()), ("My Home!", "p@ss wörd"));
-        let (ssid, pw) = parse_form(b"password=&ssid=Open").unwrap();
-        assert_eq!((ssid.as_str(), pw.as_str()), ("Open", ""));
+        let f = parse_form(b"ssid=My+Home%21&password=p%40ss+w%C3%B6rd").unwrap();
+        assert_eq!((f.ssid.as_str(), f.password.as_str(), f.broker), ("My Home!", "p@ss wörd", None));
+        let f = parse_form(b"password=&ssid=Open&broker=&broker_user=").unwrap();
+        assert_eq!((f.ssid.as_str(), f.password.as_str(), f.broker), ("Open", "", None));
+        let f = parse_form(b"ssid=Home&broker=10.0.0.2%3A1884&broker_user=u&broker_password=p").unwrap();
+        assert_eq!(f.broker, Broker::parse("10.0.0.2:1884", "u", "p"));
+        assert_eq!(parse_form(b"ssid=Home&broker=host%3Ax"), None, "a broker's port must be a number");
         assert_eq!(parse_form(b"ssid=&password=x"), None);
         assert_eq!(parse_form(b"password=x"), None);
         assert_eq!(parse_form(b"ssid=%zz"), None);
@@ -197,12 +230,16 @@ mod tests {
 
     #[test]
     fn pages_escape_and_fit() {
-        let p: String<2048> = page("iotkit-aefc", Notice::Failed { ssid: "<script>" });
+        let p: String<2048> = page("iotkit-aefc", Notice::Failed { ssid: "<script>" }, false);
         assert!(p.contains("&lt;script&gt;") && !p.contains("<script>"));
-        assert!(p.contains("<form") && p.ends_with("</html>"));
-        let p: String<2048> = page("iotkit-aefc", Notice::Trying { ssid: "Home" });
+        assert!(p.contains("<form") && !p.contains("broker") && p.ends_with("</html>"));
+        // The largest page: the longest SSID, all escaped, and the broker's fields.
+        let p: String<2048> = page("iotkit-aefc", Notice::Failed { ssid: &"&".repeat(32) }, true);
+        assert!(p.contains("name=broker ") && p.ends_with("</html>"), "{} bytes", p.len());
+        let p: String<2048> = page("iotkit-aefc", Notice::Trying { ssid: "Home" }, true);
         assert!(p.contains("http-equiv=refresh") && !p.contains("<form") && p.ends_with("</html>"));
-        let p: String<2048> = page("iotkit-aefc", Notice::Joined { ssid: "Home", url: "http://iotkit-aefc.local/" });
+        let p: String<2048> =
+            page("iotkit-aefc", Notice::Joined { ssid: "Home", url: "http://iotkit-aefc.local/" }, true);
         assert!(p.contains("http://iotkit-aefc.local/") && !p.contains("<form") && p.ends_with("</html>"));
     }
 }

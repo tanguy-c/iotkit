@@ -9,7 +9,7 @@ repository.workspace   = true
 publish.workspace      = true
 
 [features]
-default = ["wifi", "mqtt", "improv-ble", "softap", "improv-serial", "console", "ota-push"]
+default = ["wifi", "mqtt", "improv-ble", "softap", "improv-serial", "ota-push"]
 
 ## The chip: one for firmware (none builds the host-testable parts only).
 esp32c6 = ["_esp", "esp-hal/esp32c6", "esp-println/esp32c6", "esp-alloc/esp32c6", "esp-rtos/esp32c6", "esp-bootloader-esp-idf/esp32c6", "esp-storage/esp32c6", "esp-backtrace/esp32c6", "esp-radio?/esp32c6"]
@@ -32,12 +32,13 @@ improv-ble = ["wifi", "esp-radio?/ble", "esp-radio?/coex", "dep:trouble-host", "
 softap = ["wifi"]
 ## Improv over the USB serial port (ESP Web Tools, improv-wifi.com).
 improv-serial = ["wifi"]
-## The USB console (`help`). Without it and `improv-serial`, the app keeps the USB port.
+## The USB console (`help`): diagnostics and settings by hand, for development (opt-in). Without
+## it and `improv-serial`, the app keeps the USB port.
 console = ["wifi"]
 ## Updates pushed over the network (`cargo iotkit ota push`).
 ota-push = ["wifi"]
 ## Updates from Home Assistant: a `firmware` update entity; the device checks the manifest URL
-## set with `update-url` (or `OTA_MANIFEST_URL` at build time) and installs on request.
+## built in (`OTA_MANIFEST_URL`) and installs on request.
 ha-update = ["wifi"]
 ## Deep-sleeping devices (`start_sleepy`) over MQTT (retained commands) or the ESPHome API
 ## (`esphome-api`): fast reconnect, report, sleep.

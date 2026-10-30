@@ -2,6 +2,13 @@
 
 ## USB console
 
+A tool for development, off by default: add the `console` feature (or answer yes to the console
+question of `cargo iotkit new`).
+
+```toml
+iotkit = { git = "https://github.com/tanguy-c/iotkit", features = ["esp32c6", "console"] }
+```
+
 `cargo iotkit flash` opens it after flashing. Type `help`:
 
 | Command | |
@@ -10,12 +17,16 @@
 | `net` | host name and address |
 | `mem` | heap and stack use, now and at their fullest since boot |
 | `provision` | open a 10-minute setup window |
-| `ota URL` | install the update whose manifest is at URL |
-| `mqtt [HOST[:PORT] [USER PASS]]` | the broker, or set it (then restarts) (`mqtt`) |
-| `update-url [URL]` | where updates from Home Assistant come from (`ha-update`) |
-| `api-key [KEY]` | the ESPHome API's encryption key, or set it (then restarts) (`esphome-api`) |
+| `ota URL` | install the update whose manifest is at URL, once (nothing is stored) |
+| `mqtt [HOST[:PORT] [USER PASS]]` | the broker, or set it\* (then restarts) (`mqtt`) |
+| `api-key [KEY]` | the ESPHome API's encryption key, or set it\* (then restarts) (`esphome-api`) |
 | `matter [pair \| reset]` | pairing codes, a pairing window, forget pairings (`matter-wifi`) |
 | `panic`, `hang`, `reboot`, `factory-reset` | failures on purpose, restart, erase everything |
+
+\* Stored on the device: it wins over the built-in value until a factory reset
+([where settings come from](getting-started.md#where-settings-come-from)).
+
+Without the console and `improv-serial`, the app keeps the USB port (`Board::usb`).
 
 Apps add their own commands with `Config::console`. `mem` reads
 `iotkit::diag::esp::memory()` (with `console`), which an app can publish too: the stack's deepest use is found

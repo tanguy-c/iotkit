@@ -3,12 +3,13 @@
 ## MQTT
 
 Install the Mosquitto add-on and the MQTT integration, then point the device at the broker:
-`mqtt 192.168.1.10` on the USB console (or `MQTT_HOST` at build time; `mqtt HOST USER PASS` with
-a login). The entities appear by themselves (MQTT discovery), and the device shows as unavailable
+`MQTT_HOST` (and `MQTT_USER`, `MQTT_PASS`) at build time, or on the setup page (*MQTT broker*,
+under the Wi-Fi network) ([where settings come from](getting-started.md#where-settings-come-from)).
+The entities appear by themselves (MQTT discovery), and the device shows as unavailable
 when it goes offline (last will, or `offline` before a planned restart).
 
 With the [`tls` feature](lean.md#tls), a broker on port 8883 is reached over TLS 1.3
-(`mqtt 192.168.1.10:8883`).
+(`MQTT_HOST = "192.168.1.10:8883"`).
 
 Topics: `iotkit/<host>/status` (`online` / `offline`), `iotkit/<host>/<entity>/state`,
 `iotkit/<host>/<entity>/set`, `iotkit/<host>/<entity>/<setting>/set` (one setting of a fan,
@@ -19,8 +20,9 @@ thermostat or cover), and discovery under `homeassistant/`. The `iotkit` prefix 
 
 With the `esphome-api` feature, Home Assistant's ESPHome integration finds the device by itself
 (*Settings > Devices*, discovered) and controls it directly, without a broker. It asks for the
-encryption key: `api-key` on the console shows it (made at first start; `ESPHOME_API_KEY` at
-build time sets it instead, `api-key KEY` changes it). Every entity kind is served.
+encryption key: `ESPHOME_API_KEY` at build time, else one the device makes at its first boot,
+which the app can show (`iotkit::esphome::api_key()`, on a screen) or the [console](console.md)
+prints (`api-key`; `api-key KEY` sets one). Every entity kind is served.
 `cargo iotkit new` sets this up when you answer "ESPHome API" (`esphome = "fixed"` or
 `"per-device"` in an answers file).
 

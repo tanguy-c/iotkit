@@ -172,7 +172,8 @@ fn main_rs(p: &Project, entities: &[String], spawns: &str, reads: &str) -> Strin
             s,
             "//! `iotkit::start` brings Wi-Fi setup (access point, Improv), Home Assistant, signed updates,"
         );
-        let _ = writeln!(s, "//! crash records, the watchdog and the USB console (`help`).");
+        let console = if p.answers.console { " and the USB console (`help`)" } else { "" };
+        let _ = writeln!(s, "//! crash records, the watchdog{console}.");
     }
     if p.parts.is_empty() {
         s.push_str("//! No parts yet: `cargo iotkit add` adds one (`cargo iotkit components` lists them).\n");
@@ -594,12 +595,34 @@ pub fn update_env(p: &Project) -> String {
     s
 }
 
+/// The `[env]` lines of the project's own servers, for `.cargo/config.toml` (committed: not secret,
+/// and the same for everyone building the project). The broker's login is in `secrets`.
+pub fn servers_env(p: &Project) -> String {
+    let a = &p.answers;
+    let mut s = String::new();
+    if let Some(host) = &a.mqtt_host {
+        let _ = writeln!(
+            s,
+            "# The MQTT broker (`host` or `host:port`), unless one is given on the device.\nMQTT_HOST = {}",
+            toml::Value::String(host.clone())
+        );
+    }
+    if let Some(url) = &a.updates_url {
+        let _ = writeln!(
+            s,
+            "# Where Home Assistant's updates come from (`cargo iotkit ota publish`).\nOTA_MANIFEST_URL = {}",
+            toml::Value::String(url.clone())
+        );
+    }
+    s
+}
+
 /// `.cargo/secrets.toml` (git-ignored): what the builder gave now, read at build time.
 pub fn secrets(p: &Project) -> Option<String> {
     let a = &p.answers;
     let mut s = String::from(
-        "# Read at build time (git-ignored). The device stores the network and the broker at its first\n\
-         # boot; `factory-reset` on the console forgets them. See secrets.toml.example.\n[env]\n",
+        "# Read at build time (git-ignored): used at every flash or update, unless set on the device\n\
+         # (setup page, console), which wins until a factory reset. See secrets.toml.example.\n[env]\n",
     );
     let before = s.len();
     let mut set = |key: &str, value: &str| {
@@ -609,15 +632,10 @@ pub fn secrets(p: &Project) -> Option<String> {
         set("WIFI_SSID", ssid);
         set("WIFI_PASS", a.wifi_password.as_deref().unwrap_or(""));
     }
-    if let Some(host) = &a.mqtt_host {
-        set("MQTT_HOST", host);
-        if let Some(user) = &a.mqtt_user {
-            set("MQTT_USER", user);
-            set("MQTT_PASS", a.mqtt_password.as_deref().unwrap_or(""));
-        }
-    }
-    if let Some(url) = &a.updates_url {
-        set("OTA_MANIFEST_URL", url);
+    // The broker's host and the update URL are in `.cargo/config.toml` (`servers_env`).
+    if let (Some(_), Some(user)) = (&a.mqtt_host, &a.mqtt_user) {
+        set("MQTT_USER", user);
+        set("MQTT_PASS", a.mqtt_password.as_deref().unwrap_or(""));
     }
     if let Some(setup) = p.matter_setup {
         set("MATTER_PASSCODE", &setup.passcode.to_string());
@@ -674,13 +692,12 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         (true, "wifi"),
         (setup.contains(&SetupWay::AccessPoint), "softap"),
         (setup.contains(&SetupWay::Serial), "improv-serial"),
-        (p.answers.console, "console"),
         (updates, "ota-push"),
     ]
     .into_iter()
     .filter_map(|(on, f)| on.then_some(f))
     .collect();
-    let all = ["improv-ble", "mqtt", "wifi", "softap", "improv-serial", "console", "ota-push"];
+    let all = ["improv-ble", "mqtt", "wifi", "softap", "improv-serial", "ota-push"];
     let defaults = if p.thread() {
         "default-features = false, "
     } else if wifi != all {
@@ -689,6 +706,10 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     } else {
         ""
     };
+    // Opt-in: added to the defaults or to the list.
+    if p.answers.console && !p.thread() {
+        app_features.push("console");
+    }
     let line = format!(
         "iotkit = {{ {source}, {defaults}features = [{}] }}",
         app_features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
@@ -879,7 +900,7 @@ pub fn readme(p: &Project) -> String {
         );
     } else if a.wifi_ssid.is_some() {
         s.push_str("## Wi-Fi and Home Assistant\n\n");
-        s.push_str("The Wi-Fi network is built in (`.cargo/secrets.toml`) and stored at the first boot.\n");
+        s.push_str("The Wi-Fi network is built in (`.cargo/secrets.toml`): each flash brings it, unless one was given on the device.\n");
     } else {
         s.push_str("## Wi-Fi and Home Assistant\n\n");
         s.push_str(
@@ -893,12 +914,15 @@ pub fn readme(p: &Project) -> String {
             match &p.esphome_key {
                 // Not the key itself: the README is committed, secrets.toml is not.
                 Some(_) => s.push_str("It asks for the encryption key:\n`ESPHOME_API_KEY` in `.cargo/secrets.toml`, the same on every device flashed from this project.\n"),
-                None => s.push_str("It asks for the encryption key:\neach device makes its own at its first boot, and `api-key` on the USB console shows it.\n"),
+                None => s.push_str("It asks for the encryption key:\neach device makes its own at its first boot: `api-key` on the USB console shows it, or the app\nwith `iotkit::esphome::api_key()`.\n"),
             }
         }
         Some(host) => {
             let _ = writeln!(s, "It connects to the MQTT broker at `{host}`; Home Assistant finds it by itself.");
         }
+        None if p.setup().contains(&SetupWay::AccessPoint) => s.push_str(
+            "Give the MQTT broker (Home Assistant's Mosquitto add-on) on the setup page, under the Wi-Fi network\n(*MQTT broker*); Home Assistant finds the device by itself.\n",
+        ),
         None => s.push_str(
             "Set the MQTT broker (Home Assistant's Mosquitto add-on) with `mqtt 192.168.1.10` on the USB console;\nHome Assistant finds the device by itself.\n",
         ),
@@ -927,16 +951,18 @@ pub fn readme(p: &Project) -> String {
                     setup.manual_code_pretty()
                 );
             }
-            // Thread builds have no console.
-            None if p.thread() => s.push_str("Each device draws its pairing code at its first boot: it is in the boot log.\n"),
-            None => s.push_str(
+            // Thread builds have no console; Wi-Fi ones only if asked.
+            None if a.console => s.push_str(
                 "Each device draws its pairing code at its first boot: it is in the boot log, and `matter` on the console prints it.\n",
             ),
+            None => s.push_str("Each device draws its pairing code at its first boot: it is in the boot log.\n"),
         }
         s.push_str(if p.thread() {
             "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. Holding BOOT 3 s lets another\ncontroller pair for 15 minutes.\n"
-        } else {
+        } else if a.console {
             "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. `matter pair` on the console lets\nanother controller pair for 15 minutes.\n"
+        } else {
+            "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. Another controller pairs through the\nfirst one (most controllers share a device they paired).\n"
         });
     }
 
@@ -978,7 +1004,7 @@ pub fn readme(p: &Project) -> String {
             );
         }
         None => s.push_str(
-            "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it (`update-url URL` on the console)\n```\n",
+            "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it to devices built with `OTA_MANIFEST_URL`\n```\n",
         ),
     }
     if p.auto_update() {

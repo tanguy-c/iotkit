@@ -15,7 +15,7 @@ use embassy_net::{
     udp::{PacketMetadata, UdpSocket},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal};
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::Write;
 use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{
@@ -86,20 +86,18 @@ pub enum StartError {
     Radio,
 }
 
-/// The stored network; the first time, the one given at build time (`WIFI_SSID`, `WIFI_PASS`
-/// in `.cargo/secrets.toml`), which is then stored.
+/// The network given on the device (setup window), else the one given at build time
+/// (`WIFI_SSID`, `WIFI_PASS` in `.cargo/secrets.toml`).
 pub async fn credentials(store: &SharedStore) -> Option<WifiCredentials> {
-    let mut store = store.lock().await;
-    match store.load::<WifiCredentials>().await {
-        Ok(Some(c)) => return Some(c),
-        Ok(None) => {}
-        Err(e) => log::warn!("net: stored Wi-Fi network unreadable: {e}"),
-    }
-    let built_in = WifiCredentials::new(option_env!("WIFI_SSID")?, option_env!("WIFI_PASS").unwrap_or(""))?;
-    if let Err(e) = store.save(&built_in).await {
-        log::warn!("net: could not store the Wi-Fi network: {e}");
-    }
-    Some(built_in)
+    let built_in =
+        option_env!("WIFI_SSID").and_then(|ssid| WifiCredentials::new(ssid, option_env!("WIFI_PASS").unwrap_or("")));
+    store.lock().await.load_or(built_in).await
+}
+
+/// Whether the device has a network, built in or given, without making it (a smaller future
+/// for the tasks that only ask).
+pub async fn has_credentials(store: &SharedStore) -> bool {
+    option_env!("WIFI_SSID").is_some() || matches!(store.lock().await.load::<WifiCredentials>().await, Ok(Some(_)))
 }
 
 /// What a deep-sleeping device remembers to join faster: the access point (channel, BSSID) and
@@ -241,6 +239,10 @@ pub async fn access_point(on: bool) {
     COMMANDS.send(Command::AccessPoint(on)).await;
 }
 
+/// Longest wait for an address once joined: past it, the station leaves and joins again (an
+/// access point that never answers DHCP would keep it there for good).
+const ADDRESS_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// How often a connected station checks its link and signal: rarely, as the disconnect event
 /// comes at once. On battery (`matter-icd`) power saving follows the setup window within it.
 const LINK_POLL: Duration = if cfg!(feature = "matter-icd") { Duration::from_secs(2) } else { Duration::from_secs(30) };
@@ -292,33 +294,48 @@ async fn wifi_task(
                 }
             }
         }
-        backoff.succeeded();
-        // Connected: stay until the link drops or a command comes. esp-radio's disconnect event
-        // ends the wait at once; the poll catches a disconnection that came before the wait
-        // subscribed to it (esp-radio checks, then subscribes).
+        // Connected: stay until the link drops, no address comes, or a command comes. esp-radio's
+        // disconnect event ends the wait at once; the poll catches a disconnection that came
+        // before the wait subscribed to it (esp-radio checks, then subscribes). A join counts as
+        // working once it has an address: an access point that never gives one backs off too.
         #[cfg(feature = "matter-icd")]
         let mut saving = None;
+        let mut no_address_since = None;
         let dropped = loop {
             if !w.controller.is_connected() {
-                break true;
+                break Some("Wi-Fi disconnected");
+            }
+            if w.stack.config_v4().is_some() {
+                if no_address_since.take().is_some() {
+                    backoff.succeeded();
+                }
+            } else if no_address_since.get_or_insert_with(Instant::now).elapsed() >= ADDRESS_TIMEOUT {
+                break Some("no address");
             }
             #[cfg(feature = "matter-icd")]
             power_save(&mut w.controller, &mut saving);
             if let Ok(rssi) = w.controller.rssi() {
                 RSSI.store(rssi, Ordering::Relaxed);
             }
-            let woke =
-                select3(w.controller.wait_for_disconnect_async(), Timer::after(LINK_POLL), COMMANDS.receive()).await;
+            let poll = Instant::now() + LINK_POLL;
+            let wake = no_address_since.map_or(poll, |since: Instant| (since + ADDRESS_TIMEOUT).min(poll));
+            let woke = select3(w.controller.wait_for_disconnect_async(), Timer::at(wake), COMMANDS.receive()).await;
             if let Either3::Third(c) = woke {
                 connected = w.command(c).await;
-                break false;
+                break None;
             }
         };
-        if dropped {
-            log::warn!("net: Wi-Fi disconnected, reconnecting");
+        if let Some(why) = dropped {
             RSSI.store(0, Ordering::Relaxed);
             connected = false;
-            Timer::after_secs(1).await;
+            if w.controller.is_connected() {
+                let _ = w.controller.disconnect_async().await;
+            }
+            let delay = backoff.failed();
+            log::warn!("net: {why} on '{}', joining again in {delay} s", current.ssid);
+            if let Either::Second(c) = select(Timer::after_secs(delay.into()), COMMANDS.receive()).await {
+                connected = w.command(c).await;
+            }
         }
     }
 }
@@ -382,6 +399,14 @@ impl Wifi {
     /// Applies the station network (or none) and the access point, if open.
     fn configure(&mut self, credentials: Option<&WifiCredentials>) {
         let station = credentials.map_or_else(StationConfig::default, station_config);
+        // While the access point is open, the usual network is looked for on its channel first
+        // (the one the access point took from it): found there, the radio never leaves the
+        // channel, and phones on the setup page keep the access point. Opening it restarts the
+        // radio (a new mode), so the station joins again then. A network being tried scans all.
+        let station = match (&self.ap, credentials) {
+            (Some(_), Some(c)) if self.credentials.as_ref() == Some(c) => station.with_channel(self.channel),
+            _ => station,
+        };
         // The remembered access point, for the first connection only: later ones scan.
         #[cfg(feature = "deep-sleep")]
         let station = match AP_HINT.lock(core::cell::Cell::take) {

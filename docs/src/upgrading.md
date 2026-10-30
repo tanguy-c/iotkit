@@ -3,6 +3,34 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
+## Unreleased (from 0.4)
+
+### Built-in values are no longer copied to flash
+
+`.cargo/secrets.toml`'s values (`WIFI_SSID`, `MQTT_HOST`, `ESPHOME_API_KEY`...) were stored at the
+first boot, and that copy won over every later build. They now stay built in, and only a value
+given on the device is stored ([where settings come
+from](getting-started.md#where-settings-come-from)). A device flashed before keeps the old copies,
+which now count as given on the device: flash it once with `cargo iotkit flash --factory-reset`
+(this erases its Matter pairings too), or hold BOOT 10 s.
+
+### The update URL is built in
+
+`update-url` is gone from the console, and a URL set with it is ignored: build the firmware with
+`OTA_MANIFEST_URL`, best in `.cargo/config.toml`'s `[env]` (committed), as `cargo iotkit new` now
+does with it and `MQTT_HOST`; `.cargo/secrets.toml` keeps the logins. `ota::UpdateSource` is gone.
+
+### The console is opt-in
+
+`console` is no longer a default feature. To keep it, add it:
+
+```toml
+iotkit = { git = "https://github.com/tanguy-c/iotkit", features = ["esp32c6", "console"] }
+```
+
+The MQTT broker no longer needs it: build it in (`MQTT_HOST`) or give it on the setup page. Without
+the console and `improv-serial`, the app gets the USB port (`Board::usb`).
+
 ## To 0.4 (from 0.3)
 
 ### MQTT is a feature

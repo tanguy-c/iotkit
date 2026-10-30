@@ -11,10 +11,9 @@ without it: `default-features = false`, then list the ones to keep.
 | `improv-ble` | Wi-Fi setup over Bluetooth (Improv) | no Bluetooth stack: about 300 KB less flash; no `Board::bt` |
 | `softap` | the setup access point and its page | no portal, DHCP or DNS server |
 | `improv-serial` | Wi-Fi setup over USB (ESP Web Tools) | |
-| `console` | the USB console | with `improv-serial` off too, the app keeps the USB port (no `Board::usb`) |
 | `ota-push` | updates pushed with `cargo iotkit ota push` | updates only from Home Assistant (`ha-update`), or none |
 
-Opt-in features: `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`, `tls`,
+Opt-in features: `console` ([the USB console](console.md)), `ha-update`, `deep-sleep`, `matter-wifi`, `matter-thread`, `smartled`, `tls`,
 `esphome-api` ([ESPHome API](home-assistant.md#esphome-api)), `panic-handler`.
 
 ```toml

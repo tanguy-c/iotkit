@@ -80,7 +80,7 @@ pub struct Answers {
     pub update_time: Option<String>,
     /// How it gets its Wi-Fi network at the first boot (default: every way the chip has).
     pub setup: Option<Vec<SetupWay>>,
-    /// The USB console (`help`, `mqtt HOST`, `update-url URL`).
+    /// The USB console (`help`, `info`, `mqtt HOST`): for development, off by default.
     pub console: bool,
     /// The I²C bus its I²C parts share (`[i2c]`, `sda` and `scl`); left out: to choose.
     pub i2c: Option<I2cPins>,
@@ -122,7 +122,7 @@ impl Default for Answers {
             auto_update: None,
             update_time: None,
             setup: None,
-            console: true,
+            console: false,
             i2c: None,
             parts: Vec::new(),
             ai_agents: false,
@@ -440,7 +440,7 @@ impl Project {
                 "Thread devices update over Matter (`cargo iotkit ota build`, then a Matter OTA provider): remove `updates_url`"
             );
             ensure!(
-                answers.setup.is_none() && answers.console,
+                answers.setup.is_none() && !answers.console,
                 "Thread has no Wi-Fi setup or console: remove `setup` and `console`"
             );
         } else {
@@ -480,17 +480,20 @@ impl Project {
             answers.updates || (answers.updates_url.is_none() && answers.auto_update != Some(true)),
             "`updates = false`: remove `updates_url` and `auto_update`"
         );
-        // The broker is set on the console; the setup page and Improv only give the network.
+        // A broker not built in is given on the setup page or the console (Improv gives only the
+        // network).
+        let access_point = answers.setup.as_ref().is_none_or(|s| s.contains(&SetupWay::AccessPoint));
         ensure!(
             answers.console
+                || access_point
                 || answers.transport == Transport::Thread
                 || answers.esphome != EsphomeMode::Off
                 || answers.mqtt_host.is_some(),
-            "without the console the MQTT broker is built in: set `mqtt_host`"
+            "with no setup page and no console the MQTT broker is built in: set `mqtt_host`"
         );
         ensure!(
             answers.console || answers.esphome != EsphomeMode::PerDevice,
-            "a key drawn by each device is read on the console (`api-key`): keep `console`, or `esphome = \"fixed\"`"
+            "a key drawn by each device is read on the console (`api-key`): set `console = true`, or `esphome = \"fixed\"`"
         );
         if let Some(time) = &answers.update_time {
             ensure!(update_time_ok(time), "update_time `{time}`: `HH:MM` on the half hour (02:00, 13:30), or `wake`");
@@ -519,11 +522,9 @@ impl Project {
                 "with Matter, Home Assistant does not discover the ESPHome API: add the device by its address".into(),
             );
         }
-        if answers.transport == Transport::Wifi && answers.updates && !answers.console && answers.updates_url.is_none()
-        {
+        if answers.transport == Transport::Wifi && answers.updates && answers.updates_url.is_none() {
             warnings.push(
-                "no console and no `updates_url`: Home Assistant offers no updates (`cargo iotkit ota push` still works)"
-                    .into(),
+                "no `updates_url`: Home Assistant offers no updates (`cargo iotkit ota push` still works)".into(),
             );
         }
         // The board's own: its switches, set in `main`.
@@ -814,6 +815,7 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
                     );
                 }
                 // `[env]` is the last table.
+                text.push_str(&codegen::servers_env(p));
                 text.push_str(&codegen::update_env(p));
             }
             _ => {}
@@ -1030,7 +1032,9 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
             "Which encryption key?",
             vec!["One key built in: shown now", "A new key made by each device at its first boot"],
         )
-        .with_help_message("Home Assistant asks for it when adding the device; `api-key` on the console shows it")
+        .with_help_message(
+            "Home Assistant asks for it when adding the device. A device's own: `api-key` on the console, or the app shows `iotkit::esphome::api_key()`",
+        )
         .prompt()?
         .starts_with("One");
         a.esphome = if fixed { EsphomeMode::Fixed } else { EsphomeMode::PerDevice };
@@ -1040,7 +1044,7 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     } else {
         Text::new("Home Assistant's MQTT broker (IP or host name)?")
             .with_help_message(
-                "The Mosquitto add-on: Home Assistant's address. Leave empty to set it later on the console (`mqtt HOST`).",
+                "The Mosquitto add-on: Home Assistant's address. Leave empty to give it on the setup page (or the console: `mqtt HOST`).",
             )
             .prompt()?
     };
@@ -1355,13 +1359,15 @@ fn ask_extras(a: &mut Answers, board: &'static Board) -> Result<()> {
         })
         .prompt()?;
     let setup: Vec<SetupWay> = all.iter().copied().filter(|w| chosen.contains(&w.label())).collect();
+    // A device's own ESPHome key, or a broker with no setup page to give it: the console reads or sets it.
+    let needs_console = a.esphome == EsphomeMode::PerDevice
+        || (a.esphome == EsphomeMode::Off && a.mqtt_host.is_none() && !setup.contains(&SetupWay::AccessPoint));
     a.setup = (setup != all).then_some(setup);
-    let needs_console = a.esphome == EsphomeMode::PerDevice || (a.esphome == EsphomeMode::Off && a.mqtt_host.is_none());
     a.console = needs_console
-        || Confirm::new("Keep the USB console (`help`)?")
-            .with_default(true)
+        || Confirm::new("Add the USB console (`help`)?")
+            .with_default(false)
             .with_help_message(
-                "Settings and diagnostics over USB. Without: a little smaller, and the app gets the USB port",
+                "Diagnostics and settings by hand over USB, for development. Without: a little smaller, and the app gets the USB port",
             )
             .prompt()?;
     Ok(())
@@ -1524,13 +1530,22 @@ mod tests {
         assert!(!main.contains("status_task"), "{main}");
         let secrets = codegen::secrets(&p).unwrap();
         assert!(secrets.contains(&format!("MATTER_PASSCODE = \"{}\"", p.matter_setup.unwrap().passcode)));
+        // The broker and the update URL are not secret: committed, in `.cargo/config.toml`.
+        assert!(!secrets.contains("MQTT_HOST") && !secrets.contains("OTA_MANIFEST_URL"), "{secrets}");
+        let env = codegen::servers_env(&p);
+        assert!(env.contains("MQTT_HOST = \"192.168.1.10\""), "{env}");
+        assert!(env.contains("OTA_MANIFEST_URL = \"http://192.168.1.10:8080/kitchen-hub/manifest.json\""), "{env}");
         let cargo = codegen::cargo_toml(
             &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c6", "/opt/iotkit").unwrap(),
             &p,
         )
         .unwrap();
         assert!(cargo.contains("default     = [\"matter-wifi\"]"), "{cargo}");
-        assert!(cargo.contains("features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\"]"), "{cargo}");
+        // The default features, and the console on top.
+        assert!(
+            cargo.contains("{ path = \"/opt/iotkit/crates/iotkit\", features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\", \"console\"]"),
+            "{cargo}"
+        );
         assert!(codegen::readme(&p).contains(&p.matter_setup.unwrap().manual_code_pretty()));
     }
 
@@ -1594,12 +1609,12 @@ mod tests {
         assert!(err("updates = false\nupdates_url = \"http://h/m.json\"").contains("updates = false"));
         assert!(err("updates = false\nauto_update = true").contains("updates = false"));
         assert!(err("setup = []").contains("wifi_ssid"));
-        assert!(err("console = false").contains("mqtt_host"));
-        assert!(err("console = false\nesphome = \"per-device\"").contains("api-key"));
+        assert!(err("setup = [\"serial\"]").contains("mqtt_host"));
+        assert!(err("esphome = \"per-device\"").contains("api-key"));
         assert!(err("update_time = \"02:15\"\nesphome = \"fixed\"").contains("half hour"));
         assert!(err("update_time = \"02:00\"").contains("ESPHome API"));
         assert!(err("board = \"esp32-devkitc\"\nsetup = [\"bluetooth\"]").contains("ESP32"));
-        assert!(err("transport = \"thread\"\nmatter = \"fixed\"\nconsole = false").contains("Thread"));
+        assert!(err("transport = \"thread\"\nmatter = \"fixed\"\nconsole = true").contains("Thread"));
         let features = |p: &Project| {
             let rendered = render::render("Cargo.toml", render::FILES[1].1, &p.package, p.board.chip, "/x").unwrap();
             codegen::cargo_toml(&rendered, p).unwrap()
@@ -1613,11 +1628,12 @@ mod tests {
         let p = project(include_str!("../../answers/xiao.toml"));
         let cargo = features(&p);
         assert!(
-            cargo.contains("default-features = false, features = [\"esp32c6\", \"ha-update\", \"mqtt\", \"wifi\", \"softap\", \"console\", \"ota-push\"]"),
+            cargo.contains("default-features = false, features = [\"esp32c6\", \"ha-update\", \"mqtt\", \"wifi\", \"softap\", \"ota-push\"]"),
             "{cargo}"
         );
         let main = code(&p);
-        assert!(!main.contains("bt: p.BT") && main.contains("usb: p.USB_DEVICE"), "{main}");
+        // No console or Improv over USB: the app keeps the port.
+        assert!(!main.contains("bt: p.BT") && !main.contains("usb: p.USB_DEVICE"), "{main}");
         assert!(codegen::update_env(&p).contains("IOTKIT_AUTO_UPDATE = \"on\""));
         assert!(codegen::readme(&p).contains("once found"));
 
@@ -1678,7 +1694,7 @@ mod tests {
             "{readme}"
         );
 
-        let p = project("esphome = \"per-device\"\nmatter = \"fixed\"");
+        let p = project("esphome = \"per-device\"\nmatter = \"fixed\"\nconsole = true");
         assert!(p.esphome_key.is_none() && codegen::readme(&p).contains("`api-key`"));
         assert!(p.warnings.iter().any(|w| w.contains("by its address")));
         // A given key is kept; the firmware's own encoding of 32 zero bytes.

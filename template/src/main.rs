@@ -3,7 +3,7 @@
 //! blinking while it waits to be set up, then while it connects or updates.
 //!
 //! `iotkit::start` brings the rest: Wi-Fi setup (access point, Improv), signed updates
-//! (`cargo iotkit ota push`), crash records, the watchdog, the USB console (`help`).
+//! (`cargo iotkit ota push`), crash records, the watchdog.
 
 #![no_std]
 #![no_main]

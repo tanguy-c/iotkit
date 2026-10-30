@@ -1,9 +1,9 @@
 //! The device model over the ESPHome native API (`esphome-api` feature): Home Assistant's
 //! ESPHome integration finds the device over mDNS and controls it directly, with no broker.
 //!
-//! The API is encrypted (`Noise_NNpsk0_25519_ChaChaPoly_SHA256`) with a key of the device's own,
-//! made at first start; `api-key` on the console shows it, for Home Assistant to ask. One client
-//! at a time, on TCP port 6053.
+//! The API is encrypted (`Noise_NNpsk0_25519_ChaChaPoly_SHA256`) with the key given at build time
+//! (`ESPHOME_API_KEY`), else one of the device's own, made at first start: [`api_key`] gives it,
+//! for the app to show, as does `api-key` on the console. One client at a time, on TCP port 6053.
 //!
 //! [`proto`] (the protobuf subset), [`noise`] and [`api`] (the messages) are host-testable; the
 //! `esp` module (chip feature) runs the server. The messages follow ESPHome's `api.proto` at the
@@ -17,11 +17,26 @@ pub mod noise;
 pub mod proto;
 
 use crate::config::{Setting, keys};
+use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 use serde::{Deserialize, Serialize};
 
-/// The API's encryption key, kept in flash.
+/// The API's encryption key; kept in flash when set on the device or made by it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiKey(pub [u8; 32]);
+
+static KEY: Mutex<CriticalSectionRawMutex, core::cell::RefCell<Option<ApiKey>>> =
+    Mutex::new(core::cell::RefCell::new(None));
+
+/// The key in use, once the API has started: for the app to show it ([`ApiKey::to_text`], what
+/// Home Assistant asks for).
+pub fn api_key() -> Option<ApiKey> {
+    KEY.lock(|k| k.borrow().clone())
+}
+
+#[cfg(esp_wifi)]
+pub(crate) fn set_api_key(key: &ApiKey) {
+    KEY.lock(|k| *k.borrow_mut() = Some(key.clone()));
+}
 
 impl Setting for ApiKey {
     const KEY: u16 = keys::ESPHOME_API_KEY;

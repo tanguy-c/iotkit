@@ -95,6 +95,12 @@ enum PortalStatus {
 static PORTAL: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::RefCell<PortalStatus>> =
     embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(PortalStatus::Idle));
 static PORTAL_JOB: Signal<CriticalSectionRawMutex, (String<32>, String<64>)> = Signal::new();
+/// The broker sent with the network, for the job to store once the network works. Apart from
+/// [`PORTAL_JOB`]: with it, the signal's empty state would not be zero, and would sit in `.data`.
+static PORTAL_BROKER: embassy_sync::blocking_mutex::Mutex<
+    CriticalSectionRawMutex,
+    core::cell::RefCell<Option<crate::mqtt::Broker>>,
+> = embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(None));
 
 /// Joins the networks sent through the portal (outside the HTTP exchange: joining restarts the
 /// access point). Its own task, not one of the [`servers`]: a join can outlast the window, and
@@ -105,9 +111,19 @@ pub async fn portal_job_task(p: Provisioner) {
         let (ssid, password) = PORTAL_JOB.wait().await;
         // Let the "joining" page reach the client first.
         Timer::after_millis(300).await;
-        let status =
-            if p.provision(&ssid, &password).await { PortalStatus::Joined(ssid) } else { PortalStatus::Failed(ssid) };
-        PORTAL.lock(|s| *s.borrow_mut() = status);
+        let joined = p.provision(&ssid, &password).await;
+        PORTAL.lock(|s| *s.borrow_mut() = if joined { PortalStatus::Joined(ssid) } else { PortalStatus::Failed(ssid) });
+        let broker = PORTAL_BROKER.lock(|b| b.borrow_mut().take());
+        // The MQTT task reads the broker at start: restart once the page has shown the outcome.
+        #[cfg(feature = "mqtt")]
+        if let Some(broker) = broker.filter(|_| joined) {
+            Timer::after_secs(5).await;
+            if let Err(e) = crate::mqtt::esp::set_broker(p.store, &broker).await {
+                log::error!("provision: could not store the MQTT broker: {e}");
+            }
+        }
+        #[cfg(not(feature = "mqtt"))]
+        let _ = broker;
     }
 }
 
@@ -134,6 +150,7 @@ async fn portal(p: &Provisioner, b: &mut PortalBuffers) {
         let line = head.lines().next().unwrap_or("");
         let (method, target) = crate::net::http::parse_request_line(line).unwrap_or(("", "/"));
         let url = p.url();
+        let page = |notice| -> String<2048> { portal::page(p.net.hostname, notice, cfg!(feature = "mqtt")) };
         let page: String<2048> = match portal::route(method, crate::net::http::target_path(target)) {
             portal::Route::Redirect => {
                 let _ = socket
@@ -145,22 +162,21 @@ async fn portal(p: &Provisioner, b: &mut PortalBuffers) {
             portal::Route::Page => {
                 let status = PORTAL.lock(|s| s.borrow().clone());
                 match &status {
-                    PortalStatus::Idle => portal::page(p.net.hostname, portal::Notice::None),
-                    PortalStatus::Trying(ssid) => portal::page(p.net.hostname, portal::Notice::Trying { ssid }),
-                    PortalStatus::Joined(ssid) => {
-                        portal::page(p.net.hostname, portal::Notice::Joined { ssid, url: &url })
-                    }
-                    PortalStatus::Failed(ssid) => portal::page(p.net.hostname, portal::Notice::Failed { ssid }),
+                    PortalStatus::Idle => page(portal::Notice::None),
+                    PortalStatus::Trying(ssid) => page(portal::Notice::Trying { ssid }),
+                    PortalStatus::Joined(ssid) => page(portal::Notice::Joined { ssid, url: &url }),
+                    PortalStatus::Failed(ssid) => page(portal::Notice::Failed { ssid }),
                 }
             }
             portal::Route::Connect => match portal::parse_form(&buf[head_len + 4..total]) {
-                Some((ssid, password)) => {
-                    let page = portal::page(p.net.hostname, portal::Notice::Trying { ssid: &ssid });
+                Some(portal::Form { ssid, password, broker }) => {
+                    let shown = page(portal::Notice::Trying { ssid: &ssid });
                     PORTAL.lock(|s| *s.borrow_mut() = PortalStatus::Trying(ssid.clone()));
+                    PORTAL_BROKER.lock(|b| *b.borrow_mut() = broker);
                     PORTAL_JOB.signal((ssid, password));
-                    page
+                    shown
                 }
-                None => portal::page(p.net.hostname, portal::Notice::None),
+                None => page(portal::Notice::None),
             },
         };
         let mut head: String<160> = String::new();

@@ -6,6 +6,7 @@ name        = "Xiao sensor"
 maker       = "CI"
 board       = "xiao-esp32c6"
 auto_update = true
+updates_url = "http://192.168.1.10:8080/xiao-sensor/manifest.json"
 setup       = ["access-point"]
 
 [[parts]]

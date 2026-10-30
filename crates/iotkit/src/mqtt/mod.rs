@@ -33,6 +33,15 @@ impl Setting for Broker {
 impl Broker {
     /// `host` or `host:port` (1883 by default); `None` if too long or the port is invalid.
     pub fn parse(address: &str, user: &str, password: &str) -> Option<Self> {
+        let mut broker =
+            Self { host: String::new(), port: 0, user: user.try_into().ok()?, password: password.try_into().ok()? };
+        broker.set_address(address)?;
+        Some(broker)
+    }
+
+    /// Sets `host` and `port` from `host` or `host:port` (1883 by default); `None` if too long or
+    /// the port is invalid.
+    pub fn set_address(&mut self, address: &str) -> Option<()> {
         let (host, port) = match address.rsplit_once(':') {
             Some((h, p)) => (h, p.parse().ok()?),
             None => (address, 1883),
@@ -40,12 +49,9 @@ impl Broker {
         if host.is_empty() {
             return None;
         }
-        Some(Self {
-            host: host.try_into().ok()?,
-            port,
-            user: user.try_into().ok()?,
-            password: password.try_into().ok()?,
-        })
+        self.host = host.try_into().ok()?;
+        self.port = port;
+        Some(())
     }
 }
 

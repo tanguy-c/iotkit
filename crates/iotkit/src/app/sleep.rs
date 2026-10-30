@@ -461,6 +461,7 @@ async fn start_services(
     #[cfg(feature = "mqtt")]
     match crate::mqtt::esp::broker(store).await {
         Some(broker) => {
+            log::info!("mqtt: broker {}:{}", broker.host, broker.port);
             let sleepy = crate::mqtt::esp::Sleepy {
                 expire_after_s: (2 * sleep.interval.as_secs() + 60).min(u64::from(u32::MAX)) as u32,
                 discovery_hash: rtc(|r| r[DISCOVERY_HASH]),
@@ -471,7 +472,7 @@ async fn start_services(
         }
         None => {
             #[cfg(not(feature = "esphome-api"))]
-            warn!("no MQTT broker: set one with `mqtt HOST[:PORT]` on the console");
+            warn!("no MQTT broker: build one in (`MQTT_HOST`) or give it on the setup page");
             HEALTH.pass(BROKER);
         }
     }

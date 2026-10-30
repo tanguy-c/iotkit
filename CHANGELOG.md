@@ -5,6 +5,26 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
 ## Unreleased
 
+- **Breaking:** settings are predictable. A value built in (`.cargo/secrets.toml`) is no longer
+  copied to flash at the first boot, where it hid every later build's: each flash or update brings
+  the new one, unless a value was given on the device (setup window, console), which wins until a
+  factory reset. The update URL is built in only (`OTA_MANIFEST_URL`; `update-url` and
+  `ota::UpdateSource` are gone). The console is opt-in (the `console` feature)
+  ([Upgrading](docs/src/upgrading.md), [where settings come
+  from](docs/src/getting-started.md#where-settings-come-from)).
+- The setup page takes the MQTT broker too (*MQTT broker*, under the Wi-Fi network), and an app can
+  set it (`iotkit::mqtt::esp::set_broker`); the broker in use is logged at boot.
+- `iotkit::esphome::api_key()`: the ESPHome API's key, for an app to show (a device's own key, on a
+  screen).
+- `cargo iotkit flash --factory-reset`: erases the settings and Matter pairings as it flashes.
+- Wi-Fi: a joined network that gives no address within 30 s is left and joined again, backing
+  off like a failed join (an access point that never answered DHCP kept the device there for good).
+- ESPHome API: Home Assistant took the device for another one ("Unexpected device found",
+  "Invalid encryption key"): the handshake's hello sent the MAC as `58:E6:C5:00:FD:20`, which
+  Home Assistant cuts to 16 characters; it is sent as ESPHome does, `58e6c500fd20`.
+- The setup page no longer closes by itself on a phone after about 30 s: opening the window
+  restarts the radio, and the station then looked for its network on every channel, taking the
+  access point off its channel each time; it now looks on the access point's channel first.
 - Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
   (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
   allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more

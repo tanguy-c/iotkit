@@ -55,20 +55,20 @@ pub async fn wait_connected() {
     }
 }
 
-/// The stored broker; the first time, the one given at build time (`MQTT_HOST` as `host` or
-/// `host:port`, `MQTT_USER`, `MQTT_PASS` in `.cargo/secrets.toml`), which is then stored.
+/// The broker set on the device ([`set_broker`]), else the one given at build time (`MQTT_HOST`
+/// as `host` or `host:port`, `MQTT_USER`, `MQTT_PASS` in `.cargo/secrets.toml`).
 pub async fn broker(store: &SharedStore) -> Option<Broker> {
-    let mut store = store.lock().await;
-    if let Ok(Some(b)) = store.load::<Broker>().await {
-        return Some(b);
-    }
-    let built_in = Broker::parse(
-        option_env!("MQTT_HOST").filter(|h| !h.is_empty())?,
-        option_env!("MQTT_USER").unwrap_or(""),
-        option_env!("MQTT_PASS").unwrap_or(""),
-    )?;
-    let _ = store.save(&built_in).await;
-    Some(built_in)
+    let built_in = option_env!("MQTT_HOST").filter(|h| !h.is_empty()).and_then(|host| {
+        Broker::parse(host, option_env!("MQTT_USER").unwrap_or(""), option_env!("MQTT_PASS").unwrap_or(""))
+    });
+    store.lock().await.load_or(built_in).await
+}
+
+/// Stores `broker` in place of the built-in one, and restarts to use it.
+pub async fn set_broker(store: &SharedStore, broker: &Broker) -> Result<(), crate::config::Error> {
+    store.lock().await.save(broker).await?;
+    log::info!("mqtt: broker {}:{} saved, restarting", broker.host, broker.port);
+    crate::diag::esp::restart().await
 }
 
 #[derive(Debug)]
