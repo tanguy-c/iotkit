@@ -3,51 +3,55 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
-## Unreleased
+## 0.5.0 (2026-10-30)
 
-- **Breaking:** settings are predictable. A value built in (`.cargo/secrets.toml`) is no longer
-  copied to flash at the first boot, where it hid every later build's: each flash or update brings
-  the new one, unless a value was given on the device (setup window, console), which wins until a
-  factory reset. The update URL is built in only (`OTA_MANIFEST_URL`; `update-url` and
-  `ota::UpdateSource` are gone). The console is opt-in (the `console` feature)
-  ([Upgrading](docs/src/upgrading.md), [where settings come
+- **Breaking:** settings are predictable. A value built in (`.cargo/config.toml`,
+  `.cargo/secrets.toml`) is no longer copied to flash at the first boot, where it hid every later
+  build's: each flash or update brings the new one, unless a value was given on the device (setup
+  window, console), which wins until a factory reset (`cargo iotkit flash --factory-reset` erases
+  them as it flashes). The update URL is built in only (`OTA_MANIFEST_URL`; `update-url` and
+  `ota::UpdateSource` are gone) ([Upgrading](docs/src/upgrading.md), [where settings come
   from](docs/src/getting-started.md#where-settings-come-from)).
-- The setup page takes the MQTT broker too (*MQTT broker*, under the Wi-Fi network), and an app can
-  set it (`iotkit::mqtt::esp::set_broker`); the broker in use is logged at boot.
-- `iotkit::esphome::api_key()`: the ESPHome API's key, for an app to show (a device's own key, on a
-  screen).
-- `cargo iotkit flash --factory-reset`: erases the settings and Matter pairings as it flashes.
-- Wi-Fi: a joined network that gives no address within 30 s is left and joined again, backing
-  off like a failed join (an access point that never answered DHCP kept the device there for good).
-- ESPHome API: Home Assistant took the device for another one ("Unexpected device found",
-  "Invalid encryption key"): the handshake's hello sent the MAC as `58:E6:C5:00:FD:20`, which
-  Home Assistant cuts to 16 characters; it is sent as ESPHome does, `58e6c500fd20`.
-- The setup page no longer closes by itself on a phone after about 30 s: opening the window
-  restarts the radio, and the station then looked for its network on every channel, taking the
-  access point off its channel each time; it now looks on the access point's channel first.
-- Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
-  (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
-  allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more
-  stack.
-- Matter over Thread: a device whose last pairing a controller removes forgets the Thread network,
-  instead of joining it while pairing over Bluetooth on the same radio (a busy loop that also
-  ignored the BOOT button).
-- Adafruit Feather ESP32-C6 (`cargo iotkit new`): GPIO20 high at boot, powering the NeoPixel and
-  the STEMMA QT port.
-- `cargo iotkit new` writes one module per part, `src/parts/<entity id>.rs`, and the board's LED in
-  `src/led.rs`; `src/main.rs` keeps the setup and the lists of parts. `iotkit.toml` keeps the
-  answers (without the secrets).
-- `cargo iotkit add [<component>] [--name] [--pin [ROLE=]GPIO]` adds a part to such a project, and
-  `cargo iotkit components` lists them. The parts are files in `components/`, one each, like
-  `boards/`: a part with several pins (`pins = { sda = 4, scl = 5 }` in an answers file) fits.
+- **Breaking:** the USB console is opt-in (the `console` feature). Nothing needs it any more: the
+  setup page takes the MQTT broker too (*MQTT broker*), an app can set it
+  (`mqtt::esp::set_broker`) or show the ESPHome API's key (`esphome::api_key()`, a device's own
+  key on a screen), and the broker in use is logged at boot.
+- Less RAM and flash:
+  - the settings store runs its flash work at once, instead of keeping it in every task that loads
+    or saves a setting: about 4.5 KB of RAM and 13 KB of code less on a Wi-Fi device, 2 KB and
+    16 KB over Thread;
+  - without Wi-Fi, `init!`'s heap is only the 64 KB reclaimed from the bootloader (`DEFAULT_HEAP`
+    is 0; `init!(p, heap: ...)` adds more), and the Matter stack's allocations are sized to their
+    measured use: Matter over Thread on the C6 has about 100 KB more stack.
 - I²C sensor chips, ready-made: BH1750, SHT4x, SHT3x, AHT20, BME280, BMP280 and SCD4x
-  (`components::i2c`, one reading per call). The project's I²C bus is asked once (`[i2c]`, `sda`
-  and `scl`) and shared; a chip measuring several values is one part with an entity each; two
-  chips at one address are refused (`address = 0x45`).
-- On a battery device, ready-made readings too: once per wake-up, the I²C chips, the contact, leak,
-  smoke and motion inputs, and the soil probe (on the ADC after the battery level).
-- A Matter ICD (Thread on battery) reads its sensors every `report_every_min` (asked now), not
-  every 30 s: each report wakes its radio.
+  (`components::i2c`, one reading per call). On a battery device the ready-made parts read once
+  per wake-up (the I²C chips, contact, leak, smoke and motion inputs, the soil probe); a Matter ICD
+  reads its sensors every `report_every_min`, not every 30 s, as each report wakes its radio.
+- `cargo iotkit new` and `add`:
+  - a project has one module per part (`src/parts/<entity id>.rs`) and the board's LED in
+    `src/led.rs`; `iotkit.toml` keeps the answers, `.cargo/config.toml` the broker and update URL,
+    `.cargo/secrets.toml` only the secrets;
+  - `cargo iotkit add [<component>] [--name] [--pin [ROLE=]GPIO]` adds a part to such a project,
+    `cargo iotkit components` lists them: one file each in [`components/`](components/), like
+    `boards/`, several pins included (`pins = { sda = 4, scl = 5 }`). The I²C bus is asked once
+    and shared; two chips at one address are refused;
+  - the console is a question (no by default).
+- Fixes:
+  - The setup page closed by itself on a phone after about 30 s: opening the window restarts the
+    radio, and the station looked for its network on every channel, taking the access point off
+    its channel each time. It now looks on the access point's channel first.
+  - Wi-Fi: a joined network that gives no address within 30 s is left and joined again, backing
+    off like a failed join (an access point that never answered DHCP kept the device there).
+  - ESPHome API: Home Assistant took a device for another one ("Unexpected device found",
+    "Invalid encryption key") and did not match it with its discovery: the handshake sent the MAC
+    with colons, which Home Assistant cuts to 16 characters. It is sent as ESPHome does
+    (`58e6c500fd20`).
+  - Matter over Thread: a device whose last pairing a controller removes forgets the Thread
+    network, instead of joining it while pairing over Bluetooth on the same radio (a busy loop
+    that also ignored the BOOT button).
+  - The console: an `I` typed (the end of a base64 key) was held as the start of an Improv frame
+    and lost; it is given back when no frame follows.
+  - Adafruit Feather ESP32-C6: GPIO20 high at boot, powering the NeoPixel and the STEMMA QT port.
 
 ## 0.4.0 (2026-10-27)
 

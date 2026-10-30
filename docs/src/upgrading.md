@@ -3,7 +3,7 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
-## Unreleased (from 0.4)
+## To 0.5 (from 0.4)
 
 ### Built-in values are no longer copied to flash
 
@@ -30,6 +30,15 @@ iotkit = { git = "https://github.com/tanguy-c/iotkit", features = ["esp32c6", "c
 
 The MQTT broker no longer needs it: build it in (`MQTT_HOST`) or give it on the setup page. Without
 the console and `improv-serial`, the app gets the USB port (`Board::usb`).
+
+### Without Wi-Fi, a smaller heap
+
+Without the `wifi` feature, `init!`'s heap is only the 64 KB reclaimed from the bootloader
+(`DEFAULT_HEAP` is 0; it was 96 KB more). An app without Wi-Fi that allocates more asks for it:
+
+```rust
+iotkit::init!(p, heap: 32 * 1024);
+```
 
 ## To 0.4 (from 0.3)
 

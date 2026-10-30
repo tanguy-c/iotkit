@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -457,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "critical-section",
  "embassy-futures",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "iotkit-image"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ed25519-compact",
  "serde",
