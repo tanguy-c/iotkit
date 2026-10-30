@@ -23,7 +23,7 @@ spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default()
 | `rgb_light` | `Light` | WS2812 LEDs (feature `smartled`, `esp-hal-smartled` on an RMT channel) |
 | `rgb_status_light` | `Light` | the same, showing the [status](#status-led) over the light |
 | `poll` | `Sensor` | any read function, every interval, through filters |
-| `i2c::bh1750`, `sht4x`, `sht3x`, `aht20`, `bme280`, `bmp280`, `scd4x` | `Sensor`s | an I²C chip: one reading per call ([below](#i2c-sensors)) |
+| `i2c::bh1750`, `sht4x`, `sht3x`, `aht20`, `bme280`, `bmp280`, `scd4x` | `Sensor`s | an I²C chip: one reading per call ([below](#i²c-sensors)) |
 
 `cargo iotkit new` and `cargo iotkit add` use them where they can, and leave a `TODO` with hints for
 the other parts. What they know about each part is a file in the repository's
