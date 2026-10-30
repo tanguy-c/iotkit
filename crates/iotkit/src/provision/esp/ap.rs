@@ -94,7 +94,13 @@ enum PortalStatus {
 
 static PORTAL: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::RefCell<PortalStatus>> =
     embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(PortalStatus::Idle));
-static PORTAL_JOB: Signal<CriticalSectionRawMutex, portal::Form> = Signal::new();
+static PORTAL_JOB: Signal<CriticalSectionRawMutex, (String<32>, String<64>)> = Signal::new();
+/// The broker sent with the network, for the job to store once the network works. Apart from
+/// [`PORTAL_JOB`]: with it, the signal's empty state would not be zero, and would sit in `.data`.
+static PORTAL_BROKER: embassy_sync::blocking_mutex::Mutex<
+    CriticalSectionRawMutex,
+    core::cell::RefCell<Option<crate::mqtt::Broker>>,
+> = embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(None));
 
 /// Joins the networks sent through the portal (outside the HTTP exchange: joining restarts the
 /// access point). Its own task, not one of the [`servers`]: a join can outlast the window, and
@@ -102,11 +108,12 @@ static PORTAL_JOB: Signal<CriticalSectionRawMutex, portal::Form> = Signal::new()
 #[embassy_executor::task]
 pub async fn portal_job_task(p: Provisioner) {
     loop {
-        let portal::Form { ssid, password, broker } = PORTAL_JOB.wait().await;
+        let (ssid, password) = PORTAL_JOB.wait().await;
         // Let the "joining" page reach the client first.
         Timer::after_millis(300).await;
         let joined = p.provision(&ssid, &password).await;
         PORTAL.lock(|s| *s.borrow_mut() = if joined { PortalStatus::Joined(ssid) } else { PortalStatus::Failed(ssid) });
+        let broker = PORTAL_BROKER.lock(|b| b.borrow_mut().take());
         // The MQTT task reads the broker at start: restart once the page has shown the outcome.
         #[cfg(feature = "mqtt")]
         if let Some(broker) = broker.filter(|_| joined) {
@@ -162,10 +169,11 @@ async fn portal(p: &Provisioner, b: &mut PortalBuffers) {
                 }
             }
             portal::Route::Connect => match portal::parse_form(&buf[head_len + 4..total]) {
-                Some(form) => {
-                    let shown = page(portal::Notice::Trying { ssid: &form.ssid });
-                    PORTAL.lock(|s| *s.borrow_mut() = PortalStatus::Trying(form.ssid.clone()));
-                    PORTAL_JOB.signal(form);
+                Some(portal::Form { ssid, password, broker }) => {
+                    let shown = page(portal::Notice::Trying { ssid: &ssid });
+                    PORTAL.lock(|s| *s.borrow_mut() = PortalStatus::Trying(ssid.clone()));
+                    PORTAL_BROKER.lock(|b| *b.borrow_mut() = broker);
+                    PORTAL_JOB.signal((ssid, password));
                     shown
                 }
                 None => page(portal::Notice::None),

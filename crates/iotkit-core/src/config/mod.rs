@@ -129,6 +129,8 @@ impl fmt::Display for Error {
 impl core::error::Error for Error {}
 
 impl<E> From<sequential_storage::Error<E>> for Error {
+    // Once, not inlined where each operation fails: each copy brings its lookup table into RAM.
+    #[inline(never)]
     fn from(e: sequential_storage::Error<E>) -> Self {
         use sequential_storage::Error as S;
         match e {
