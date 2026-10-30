@@ -181,9 +181,13 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
         }
         #[cfg(feature = "mqtt")]
         "mqtt" => {
-            match store.lock().await.load::<crate::mqtt::Broker>().await {
-                Ok(Some(b)) => println!("broker {}:{}", b.host, b.port),
-                _ => println!("no broker set"),
+            // The one in use: set on the device (stored), else built in.
+            let set = matches!(store.lock().await.load::<crate::mqtt::Broker>().await, Ok(Some(_)));
+            match crate::mqtt::esp::broker(store).await {
+                Some(b) => {
+                    println!("broker {}:{} ({})", b.host, b.port, if set { "set on the device" } else { "built in" })
+                }
+                None => println!("no broker"),
             }
             println!("connected: {}", crate::mqtt::esp::is_connected());
         }
