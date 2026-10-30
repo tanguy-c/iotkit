@@ -1,5 +1,6 @@
 //! `cargo iotkit new`: a new device project from a few questions (or an answers file).
 
+pub mod add;
 mod boards;
 mod codegen;
 pub mod matter;
@@ -7,6 +8,7 @@ mod parts;
 mod render;
 
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -14,7 +16,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use boards::{Board, PinCheck, PinUse, boards, check_pin};
 use inquire::{Confirm, InquireError, MultiSelect, Password, PasswordDisplayMode, Select, Text, validator::Validation};
-use parts::{Group, KINDS, Kind, slug};
+use parts::{Group, Kind, kinds, slug};
 use serde::{Deserialize, Serialize};
 
 /// What the questions ask; also the format of `--answers FILE` (TOML).
@@ -34,7 +36,7 @@ pub struct Answers {
     /// How it talks to the home: Wi-Fi, or Matter over Thread.
     pub transport: Transport,
     pub power: Power,
-    /// Battery: how often it wakes up.
+    /// Battery: how often it wakes up (deep sleep), or reads its sensors (a Matter ICD).
     pub report_every_min: u32,
     /// Battery: the ADC1 pin behind a divider, to report the charge.
     pub battery_pin: Option<u8>,
@@ -80,6 +82,8 @@ pub struct Answers {
     pub setup: Option<Vec<SetupWay>>,
     /// The USB console (`help`, `info`, `mqtt HOST`): for development, off by default.
     pub console: bool,
+    /// The I²C bus its I²C parts share (`[i2c]`, `sda` and `scl`); left out: to choose.
+    pub i2c: Option<I2cPins>,
     pub parts: Vec<PartAnswer>,
     /// Writes AGENTS.md, for AI coding agents.
     pub ai_agents: bool,
@@ -119,6 +123,7 @@ impl Default for Answers {
             update_time: None,
             setup: None,
             console: false,
+            i2c: None,
             parts: Vec::new(),
             ai_agents: false,
         }
@@ -223,14 +228,30 @@ pub enum EsphomeMode {
     PerDevice,
 }
 
+/// The I²C bus's pins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct I2cPins {
+    pub sda: u8,
+    pub scl: u8,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartAnswer {
+    /// A component's id (`components/<id>.toml`).
     pub kind: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default)]
+    /// Its first pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin: Option<u8>,
+    /// Its pins by role (`{ sda = 4, scl = 5 }`), for a part with several.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pins: BTreeMap<String, u8>,
+    /// An I²C chip's address, if not its default (`0x45`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u8>,
 }
 
 /// The answers, checked and completed.
@@ -251,11 +272,45 @@ pub struct Project {
 pub struct Part {
     pub kind: &'static Kind,
     pub name: String,
-    /// Entity id (`living_room_temperature`).
+    /// Its id (`living_room_temperature`): its entity's, or with several the start of theirs;
+    /// its `TODO(<id>)`.
+    pub id: String,
+    /// Its module in `src/parts/`: the id, unless a Rust keyword.
+    pub module: String,
+    /// One per `kind.pins`: `None` to choose.
+    pub pins: Vec<Option<u8>>,
+    /// One per `kind.entities`.
+    pub entities: Vec<Entity>,
+    /// An I²C chip's address.
+    pub address: Option<u8>,
+}
+
+pub struct Entity {
+    pub spec: &'static parts::EntitySpec,
     pub id: String,
     /// Its `static` (`LIVING_ROOM_TEMPERATURE`).
     pub konst: String,
-    pub pin: Option<u8>,
+    pub name: String,
+}
+
+impl Part {
+    /// The README's pin cell: `GPIO4`, `GPIO4 (sda), GPIO5 (scl)`, `to choose`, `I²C 0x44`.
+    pub fn pin_cell(&self) -> String {
+        if let Some(address) = self.address {
+            return format!("I²C {address:#04x}");
+        }
+        let cells: Vec<String> = self
+            .kind
+            .pins
+            .iter()
+            .zip(&self.pins)
+            .map(|(spec, pin)| {
+                let pin = pin.map_or("to choose".into(), |n| format!("GPIO{n}"));
+                if self.kind.pins.len() > 1 { format!("{pin} ({})", spec.role) } else { pin }
+            })
+            .collect();
+        if cells.is_empty() { "-".into() } else { cells.join(", ") }
+    }
 }
 
 impl Project {
@@ -308,6 +363,17 @@ impl Project {
     /// The board's RGB LED is a light (showing the status too with `status = "rgb"`).
     pub fn status_led(&self) -> bool {
         self.answers.status_led && !self.battery() && self.board.rgb_led.is_some()
+    }
+
+    /// The I²C bus, when a part is on it and its pins are chosen.
+    pub fn i2c(&self) -> Option<I2cPins> {
+        self.answers.i2c.filter(|_| self.parts.iter().any(|p| p.kind.i2c.is_some()))
+    }
+
+    /// How often a sensor's task reads it: plugged in every 30 s; a Matter ICD every
+    /// `report_every_min`, as each report wakes its radio.
+    pub fn read_every_secs(&self) -> u64 {
+        if self.icd() { u64::from(self.answers.report_every_min) * 60 } else { 30 }
     }
 
     /// The setup button's pin.
@@ -516,16 +582,12 @@ impl Project {
                 None => format!("the setup button (GPIO{button}) cannot wake the chip"),
             });
         }
+        if let Some(bus) = answers.i2c {
+            take(bus.sda, PinUse::Output, "I²C SDA", &mut taken, &mut warnings)?;
+            take(bus.scl, PinUse::Output, "I²C SCL", &mut taken, &mut warnings)?;
+        }
         let mut ids: Vec<String> = vec!["firmware".into(), "status_led".into(), "battery".into()];
-        let mut parts = Vec::new();
-        for a in &answers.parts {
-            let Some(kind) = parts::kind(&a.kind) else {
-                let kinds: Vec<_> = KINDS.iter().map(|k| k.id).collect();
-                bail!("unknown part `{}` (one of {kinds:?})", a.kind);
-            };
-            let name = a.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| kind.name.to_string());
-            let base = slug(&name, '_');
-            let base = if base.is_empty() { kind.id.to_string() } else { base };
+        let unique = |base: String, ids: &mut Vec<String>| {
             let mut id = base.clone();
             let mut n = 2;
             while ids.contains(&id) {
@@ -533,13 +595,71 @@ impl Project {
                 n += 1;
             }
             ids.push(id.clone());
+            id
+        };
+        let mut parts: Vec<Part> = Vec::new();
+        for a in &answers.parts {
+            let Some(kind) = parts::kind(&a.kind) else {
+                let ids: Vec<_> = kinds().iter().map(|k| k.id).collect();
+                bail!("unknown part `{}` (one of {ids:?}; `cargo iotkit components` describes them)", a.kind);
+            };
+            let name = a.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| kind.name.to_string());
+            let base = slug(&name, '_');
+            let base = if base.is_empty() { kind.id.to_string() } else { base };
+            let id = unique(base, &mut ids);
+            // One entity: the part's id and name; several: theirs after the part's.
+            let entities: Vec<Entity> = match kind.entities.as_slice() {
+                [one] => vec![Entity { spec: one, id: id.clone(), konst: id.to_uppercase(), name: name.clone() }],
+                many => many
+                    .iter()
+                    .map(|spec| {
+                        let id = unique(format!("{id}_{}", spec.key), &mut ids);
+                        Entity { spec, konst: id.to_uppercase(), id, name: format!("{name} {}", spec.name) }
+                    })
+                    .collect(),
+            };
+            let address = match &kind.i2c {
+                None => {
+                    ensure!(a.address.is_none(), "{name}: not on the I²C bus (remove `address`)");
+                    None
+                }
+                Some(i2c) => {
+                    let address = a.address.unwrap_or(i2c.addresses[0]);
+                    let others: Vec<String> = i2c.addresses.iter().map(|a| format!("{a:#04x}")).collect();
+                    ensure!(
+                        i2c.addresses.contains(&address),
+                        "{name}: address {address:#04x}: the {} answers at {}",
+                        kind.id,
+                        others.join(" or ")
+                    );
+                    if let Some(other) = parts.iter().find(|p| p.address == Some(address)) {
+                        bail!(
+                            "{name} and {} are both at {address:#04x} on the I²C bus: give one another `address` ({})",
+                            other.name,
+                            others.join(" or ")
+                        );
+                    }
+                    Some(address)
+                }
+            };
             // Without Wi-Fi, ADC1 feeds the random number generator.
             ensure!(
                 !(answers.transport == Transport::Thread && kind.pin_use() == PinUse::Analog),
                 "{name}: on Thread, the ADC is the random number generator's entropy: no analog parts yet"
             );
-            if let Some(pin) = a.pin {
-                take(pin, kind.pin_use(), &name, &mut taken, &mut warnings)?;
+            if let Some(role) = a.pins.keys().find(|r| !kind.pins.iter().any(|s| s.role == r.as_str())) {
+                let roles: Vec<_> = kind.pins.iter().map(|s| s.role).collect();
+                bail!("{name}: no pin `{role}` (its pins: {roles:?})");
+            }
+            ensure!(a.pin.is_none() || !kind.pins.is_empty(), "{name}: takes no pin (remove `pin`)");
+            let mut pins = Vec::new();
+            for (i, spec) in kind.pins.iter().enumerate() {
+                let pin = a.pins.get(spec.role).copied().or(if i == 0 { a.pin } else { None });
+                if let Some(pin) = pin {
+                    let what = if kind.pins.len() > 1 { format!("{name} ({})", spec.role) } else { name.clone() };
+                    take(pin, spec.pin_use, &what, &mut taken, &mut warnings)?;
+                }
+                pins.push(pin);
             }
             if battery && answers.matter == MatterMode::Off && !kind.is_reading() {
                 let when = match answers.esphome {
@@ -549,10 +669,11 @@ impl Project {
                 };
                 warnings.push(format!("{name}: on a battery device, {when}"));
             }
-            if answers.transport == Transport::Thread && kind.matter.is_none() {
+            if answers.transport == Transport::Thread && kind.entities.iter().all(|e| e.matter.is_none()) {
                 warnings.push(format!("{name}: Matter has no such device type, so it does not show over Thread"));
             }
-            parts.push(Part { kind, konst: id.to_uppercase(), name, id, pin: a.pin });
+            let module = if parts::ident(&id) { id.clone() } else { format!("{id}_part") };
+            parts.push(Part { kind, module, name, id, pins, entities, address });
         }
 
         let matter_setup = match answers.matter {
@@ -680,8 +801,8 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
         let mut text = render::render(path, source, &p.package, p.board.chip, &p.iotkit_path)?;
         match *path {
             "Cargo.toml" => text = codegen::cargo_toml(&text, p)?,
-            // Always generated: the template's has its placeholder maker and entity ids.
-            "src/main.rs" => text = codegen::main_rs(p),
+            // Always generated (below): the template's has its placeholder maker and entity ids.
+            "src/main.rs" => continue,
             ".cargo/config.toml" => {
                 if p.flash != default_flash(p.board.chip) {
                     text = text.replace(
@@ -706,8 +827,13 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
         }
         put(&dir.join(path), &text)?;
     }
-    // The generated code, in the project's style (best effort: rustfmt may be missing).
-    let _ = std::process::Command::new("rustfmt").args(["--edition", "2024", "src/main.rs"]).current_dir(dir).status();
+    for (path, text) in codegen::sources(p)? {
+        put(&dir.join(path), &text)?;
+    }
+    // The generated code, in the project's style (best effort: rustfmt may be missing); it
+    // follows `mod` to the other files.
+    rustfmt(dir, "src/main.rs");
+    put(&dir.join(add::RECORD), &record(&p.answers)?)?;
     put(&dir.join("README.md"), &codegen::readme(p))?;
     if p.answers.ai_agents {
         put(&dir.join("AGENTS.md"), &codegen::agents_md(p))?;
@@ -729,6 +855,28 @@ fn default_flash(chip: &str) -> &'static str {
 
 fn table(flash: &str) -> &'static str {
     if flash == "4mb" { "partitions-4mb.csv" } else { "partitions.csv" }
+}
+
+/// Formats a generated file in the project's style (best effort: rustfmt may be missing).
+fn rustfmt(dir: &Path, file: &str) {
+    let _ = std::process::Command::new("rustfmt").args(["--edition", "2024", file]).current_dir(dir).status();
+}
+
+/// `iotkit.toml`: the answers, without what `.cargo/secrets.toml` holds.
+fn record(a: &Answers) -> Result<String> {
+    let mut a = a.clone();
+    a.wifi_ssid = None;
+    a.wifi_password = None;
+    a.mqtt_user = None;
+    a.mqtt_password = None;
+    a.esphome_key = None;
+    a.matter_passcode = None;
+    a.matter_discriminator = None;
+    Ok(format!(
+        "# How `cargo iotkit new` made this project (its secrets are in .cargo/secrets.toml). `cargo iotkit add`\n\
+         # reads it and adds its parts here.\n{}",
+        toml::to_string(&a)?
+    ))
 }
 
 fn put(path: &Path, text: &str) -> Result<()> {
@@ -755,7 +903,11 @@ fn report(p: &Project, dir: &Path) {
     println!(
         "\nNext:\n  cd {}\n  cargo iotkit flash --release{flash}\n\nWiring and setup: README.md. {}",
         dir.display(),
-        if p.parts.is_empty() { "Add entities in src/main.rs." } else { "Each part's code is a TODO in src/main.rs." }
+        if p.parts.is_empty() {
+            "Add parts with `cargo iotkit add` (`cargo iotkit components` lists them)."
+        } else {
+            "Each part is a module in src/parts/, its code left to write a TODO."
+        }
     );
     if p.answers.ai_agents {
         println!("AI coding agents: AGENTS.md.");
@@ -998,36 +1150,9 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     }
     println!("\nWhat does it do? Add its parts one by one (sensors, relays, buttons...).");
     a.parts.clear();
-    loop {
-        let mut options: Vec<String> = vec!["Done".into()];
-        let mut kinds: Vec<&Kind> = Vec::new();
-        for g in [Group::Measures, Group::Detects, Group::Controls, Group::Inputs] {
-            // On Thread, the ADC feeds the random number generator.
-            for k in KINDS.iter().filter(|k| k.group == g && !(thread && k.pin_use() == PinUse::Analog)) {
-                options.push(format!("{}: {}", g.label(), k.label));
-                kinds.push(k);
-            }
-        }
-        let prompt = if a.parts.is_empty() { "Add a part?" } else { "Add another part?" };
-        let choice = Select::new(prompt, options.clone())
-            .with_page_size(12)
-            .with_help_message("Type to filter. Each part becomes an entity, with a TODO in the code for its driver.")
-            .prompt()?;
-        if choice == "Done" {
-            break;
-        }
-        let kind = kinds[options.iter().position(|o| *o == choice).expect("chosen") - 1];
-        let name = Text::new("Its name?")
-            .with_default(kind.name)
-            .with_help_message("As Home Assistant shows it, e.g. \"Kitchen temperature\"")
-            .prompt()?;
-        let pin = if kind.wiring.starts_with("(none") {
-            None
-        } else {
-            ask_pin(board, &format!("Which GPIO for {name}? ({})", kind.wiring), kind.pin_use(), &taken, true)?
-        };
-        taken.extend(pin);
-        a.parts.push(PartAnswer { kind: kind.id.into(), name: Some(name), pin });
+    a.i2c = None;
+    while let Some(part) = ask_part(board, thread, &mut taken, a.parts.is_empty(), &mut a.i2c)? {
+        a.parts.push(part);
     }
 
     // 6. Tooling.
@@ -1042,6 +1167,87 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
         return Err(InquireError::OperationCanceled.into());
     }
     Ok(project)
+}
+
+/// A part: its component, name and pins (`None`: done). `taken` gets its pins; the first I²C
+/// part asks for the bus.
+pub(crate) fn ask_part(
+    board: &'static Board,
+    thread: bool,
+    taken: &mut Vec<u8>,
+    first: bool,
+    bus: &mut Option<I2cPins>,
+) -> Result<Option<PartAnswer>> {
+    let mut options: Vec<String> = vec!["Done".into()];
+    let mut choices: Vec<&Kind> = Vec::new();
+    for g in [Group::Measures, Group::Detects, Group::Controls, Group::Inputs] {
+        // On Thread, the ADC feeds the random number generator.
+        for k in kinds().iter().filter(|k| k.group == g && !(thread && k.analog())) {
+            options.push(format!("{}: {}", g.label(), k.label));
+            choices.push(k);
+        }
+    }
+    let prompt = if first { "Add a part?" } else { "Add another part?" };
+    let choice = Select::new(prompt, options.clone())
+        .with_page_size(12)
+        .with_help_message("Type to filter. Each part becomes an entity and a module in src/parts/.")
+        .prompt()?;
+    if choice == "Done" {
+        return Ok(None);
+    }
+    let kind = choices[options.iter().position(|o| *o == choice).expect("chosen") - 1];
+    let name = Text::new("Its name?")
+        .with_default(kind.name)
+        .with_help_message("As Home Assistant shows it, e.g. \"Kitchen temperature\"")
+        .prompt()?;
+    let mut part = ask_pins(board, kind, name, taken)?;
+    if let Some(i2c) = &kind.i2c {
+        if bus.is_none() {
+            *bus = ask_bus(board, taken)?;
+        }
+        if i2c.addresses.len() > 1 {
+            let labels: Vec<String> = i2c.addresses.iter().map(|a| format!("{a:#04x}")).collect();
+            let chosen = Select::new("Its I²C address?", labels.clone())
+                .with_help_message(&format!("The first is the chip's default; the other: {}", kind.wiring))
+                .prompt()?;
+            let at = labels.iter().position(|l| *l == chosen).unwrap_or(0);
+            part.address = (at > 0).then_some(i2c.addresses[at]);
+        }
+    }
+    Ok(Some(part))
+}
+
+/// The I²C bus's pins (`None`: to choose later).
+fn ask_bus(board: &'static Board, taken: &mut Vec<u8>) -> Result<Option<I2cPins>> {
+    println!("  The I²C bus, shared by every I²C part (most breakout boards have its pull-ups):");
+    let Some(sda) = ask_pin(board, "Which GPIO for SDA?", PinUse::Output, taken, true)? else { return Ok(None) };
+    taken.push(sda);
+    let Some(scl) = ask_pin(board, "Which GPIO for SCL?", PinUse::Output, taken, false)? else { return Ok(None) };
+    taken.push(scl);
+    Ok(Some(I2cPins { sda, scl }))
+}
+
+/// A part's pins (each may be left to choose later).
+fn ask_pins(board: &'static Board, kind: &Kind, name: String, taken: &mut Vec<u8>) -> Result<PartAnswer> {
+    let mut part =
+        PartAnswer { kind: kind.id.into(), name: Some(name), pin: None, pins: BTreeMap::new(), address: None };
+    for (i, spec) in kind.pins.iter().enumerate() {
+        let name = part.name.as_deref().unwrap_or_default();
+        let question = if kind.pins.len() > 1 {
+            format!("Which GPIO for {name}'s {}? ({})", spec.role, kind.wiring)
+        } else {
+            format!("Which GPIO for {name}? ({})", kind.wiring)
+        };
+        let pin = ask_pin(board, &question, spec.pin_use, taken, true)?;
+        taken.extend(pin);
+        match pin {
+            Some(n) if i > 0 || kind.pins.len() > 1 => {
+                part.pins.insert(spec.role.into(), n);
+            }
+            pin => part.pin = pin,
+        }
+    }
+    Ok(part)
 }
 
 /// `HH:MM` on the half hour, or `wake`: iotkit's `IOTKIT_UPDATE_TIME`.
@@ -1167,21 +1373,23 @@ fn ask_extras(a: &mut Answers, board: &'static Board) -> Result<()> {
 }
 
 fn ask_battery(a: &mut Answers, board: &'static Board, thread: bool) -> Result<()> {
-    if a.matter == MatterMode::Off {
-        let every = Select::new(
-            "How often should it report?",
-            vec!["Every minute", "Every 5 minutes", "Every 15 minutes", "Every hour"],
-        )
-        .with_starting_cursor(1)
-        .with_help_message("More often drains the battery faster")
-        .prompt()?;
-        a.report_every_min = match every {
-            "Every minute" => 1,
-            "Every 15 minutes" => 15,
-            "Every hour" => 60,
-            _ => 5,
-        };
-    }
+    let every = Select::new(
+        "How often should it report?",
+        vec!["Every minute", "Every 5 minutes", "Every 15 minutes", "Every hour"],
+    )
+    .with_starting_cursor(1)
+    .with_help_message(if a.matter == MatterMode::Off {
+        "It wakes up, reports and sleeps again. More often drains the battery faster"
+    } else {
+        "How often it reads its sensors (each report wakes its radio); commands still arrive within seconds"
+    })
+    .prompt()?;
+    a.report_every_min = match every {
+        "Every minute" => 1,
+        "Every 15 minutes" => 15,
+        "Every hour" => 60,
+        _ => 5,
+    };
     if thread {
         // The ADC feeds the random number generator.
         return Ok(());
@@ -1240,7 +1448,7 @@ fn summary(p: &Project) {
     if p.sleepy() {
         println!("  power    battery, reports every {} min", a.report_every_min);
     } else if p.icd() {
-        println!("  power    battery, a Matter ICD (`matter-icd`)");
+        println!("  power    battery, a Matter ICD (`matter-icd`), reads every {} min", a.report_every_min);
     } else {
         println!("  power    plugged in");
     }
@@ -1253,8 +1461,12 @@ fn summary(p: &Project) {
     println!("  talks to {}", links.join(" + "));
     println!("  Wi-Fi    {}", if a.wifi_ssid.is_some() { "built in" } else { "set up from a phone at first boot" });
     for part in &p.parts {
-        let pin = part.pin.map_or("pin to choose".into(), |n| format!("GPIO{n}"));
-        println!("  part     {} ({}), {pin}", part.name, part.kind.label);
+        println!(
+            "  part     {} ({}), {}",
+            part.name,
+            part.kind.label,
+            part.pin_cell().replace("to choose", "pin to choose")
+        );
     }
     if a.ai_agents {
         println!("  agents   AGENTS.md");
@@ -1279,6 +1491,11 @@ mod tests {
         Project::new(toml::from_str(toml).unwrap(), "/opt/iotkit".into()).unwrap()
     }
 
+    /// Every Rust file of the project, `src/main.rs` first.
+    fn code(p: &Project) -> String {
+        codegen::sources(p).unwrap().into_iter().map(|(path, text)| format!("// == {path}\n{text}")).collect()
+    }
+
     #[test]
     fn checks() {
         let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
@@ -1291,20 +1508,17 @@ mod tests {
             project("name = \"Garden sensor\"\n[[parts]]\nkind = \"temperature\"\n[[parts]]\nkind = \"temperature\"");
         assert_eq!(p.package, "garden-sensor");
         assert_eq!(p.parts[1].id, "temperature_2");
-        assert_eq!(p.parts[1].konst, "TEMPERATURE_2");
+        assert_eq!(p.parts[1].entities[0].konst, "TEMPERATURE_2");
     }
 
     #[test]
     fn plugged_main() {
         let p = project(include_str!("../../answers/c6.toml"));
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(main.contains("static PUMP: Switch = Switch::new(\"pump\", \"Pump\");"), "{main}");
         // Ready-made parts where there is one, a TODO elsewhere.
-        assert!(
-            main.contains(
-                "spawner.spawn(pump_task(Output::new(p.GPIO4, Level::Low, OutputConfig::default())).unwrap());"
-            )
-        );
+        assert!(main.contains("parts::pump::spawn(spawner, p.GPIO4);"), "{main}");
+        assert!(main.contains("spawner.spawn(task(Output::new(pin, Level::Low, OutputConfig::default())).unwrap());"));
         assert!(main.contains("components::relay(&PUMP, pin, Active::High).await"), "{main}");
         assert!(main.contains("components::button(&BUTTON, pin, Active::Low"), "{main}");
         assert!(main.contains("components::poll(&SOIL_MOISTURE"), "{main}");
@@ -1332,11 +1546,17 @@ mod tests {
     #[test]
     fn battery_main() {
         let p = project(include_str!("../../answers/c3.toml"));
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(main.contains("start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP)"), "{main}");
         assert!(main.contains("Duration::from_secs(900)"));
-        assert!(main.contains("Battery::new(p.ADC1, p.GPIO3, 2.0).curve(BatteryCurve::ALKALINE_2AA)"));
-        assert!(main.contains("`p.ADC1.reborrow()`"), "the soil probe shares the ADC");
+        // The soil probe reads the ADC after the battery level, once per wake-up.
+        assert!(main.contains("Battery::new(p.ADC1.reborrow(), p.GPIO3, 2.0).curve(BatteryCurve::ALKALINE_2AA)"));
+        assert!(main.contains("parts::soil_moisture::read(p.GPIO2, p.ADC1).await;"), "{main}");
+        assert!(main.contains("SOIL_MOISTURE.set(value);") && main.contains("TODO(soil_moisture): calibrate"));
+        // An I²C chip on battery: the bus lent to it in `main`, no mutex.
+        assert!(main.contains("let mut bus = i2c::bus(p.I2C0, p.GPIO7, p.GPIO10);"), "{main}");
+        assert!(main.contains("parts::air::read(&mut bus).await;") && !main.contains("Mutex"), "{main}");
+        assert!(main.contains("match components::i2c::sht4x(i2c, ADDR).await {"), "{main}");
         assert!(!main.contains("led_task") && !main.contains("Ticker"));
         let cargo = codegen::cargo_toml(
             &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c3", "/opt/iotkit").unwrap(),
@@ -1354,11 +1574,10 @@ mod tests {
             [(include_str!("../../answers/c6.toml"), false), (include_str!("../../answers/c3.toml"), true)]
         {
             let p = project(answers);
-            let main = codegen::main_rs(&p);
+            let main = code(&p);
             // One TODO per part, but none for a ready-made part (the soil probe keeps one: calibrate).
-            for part in &p.parts {
-                let ready = !battery && part.pin.is_some() && part.kind.component.is_some();
-                let want = usize::from(!ready || part.kind.analog);
+            for (part, ready) in p.parts.iter().zip(codegen::ready(&p)) {
+                let want = usize::from(!ready || part.kind.analog());
                 assert_eq!(main.matches(&format!("TODO({}):", part.id)).count(), want, "{}", part.id);
             }
             assert!(!main.contains("TODO:"), "{main}");
@@ -1366,7 +1585,12 @@ mod tests {
                 assert!(line.chars().count() <= codegen::MAX_WIDTH, "{line}");
             }
             if battery {
-                assert!(main.contains("with_sda(p.GPIO4)") && main.contains("Input::new(p.GPIO5"), "{main}");
+                // Read once per wake-up, in `main`, with their pins.
+                assert!(main.contains("parts::temperature::read(p.GPIO4).await;"), "{main}");
+                assert!(main.contains("with_sda(_pin)"), "{main}");
+                assert!(
+                    main.contains("GATE.set(Input::new(pin, InputConfig::default().with_pull(Pull::Up)).is_high());")
+                );
             }
         }
     }
@@ -1401,7 +1625,7 @@ mod tests {
             cargo.contains("default-features = false, features = [\"esp32c6\", \"ha-update\", \"mqtt\", \"wifi\", \"softap\", \"ota-push\"]"),
             "{cargo}"
         );
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         // No console or Improv over USB: the app keeps the port.
         assert!(!main.contains("bt: p.BT") && !main.contains("usb: p.USB_DEVICE"), "{main}");
         assert!(codegen::update_env(&p).contains("IOTKIT_AUTO_UPDATE = \"on\""));
@@ -1488,7 +1712,7 @@ mod tests {
         assert!(err("board = \"other-esp32h2\"\nflash_size = \"8mb\"").contains("no Wi-Fi"));
 
         let p = project(include_str!("../../answers/thread.toml"));
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(
             main.contains("radio: p.IEEE802154") && main.contains("adc1: p.ADC1") && !main.contains("WIFI"),
             "{main}"
@@ -1496,7 +1720,7 @@ mod tests {
         assert!(main.contains("Show::All, true)") && main.contains("over Matter"), "{main}");
         // The status LED keeps its state, and is written before `start` keeps the CPU.
         assert!(main.contains("Light::new(\"status_led\", \"Status LED\").remember()"), "{main}");
-        assert!(main.find("spawner.spawn(led_task") < main.find("iotkit::start("), "{main}");
+        assert!(main.find("led::spawn_rgb(") < main.find("iotkit::start("), "{main}");
         let cargo = codegen::cargo_toml(
             &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c6", "/opt/iotkit").unwrap(),
             &p,
@@ -1519,7 +1743,7 @@ mod tests {
 
         let h2 =
             project("board = \"other-esp32h2\"\nflash_size = \"8mb\"\ntransport = \"thread\"\nmatter = \"per-device\"");
-        assert!(codegen::main_rs(&h2).contains("radio: p.IEEE802154"));
+        assert!(code(&h2).contains("radio: p.IEEE802154"));
         let part = project(&format!("{thread}[[parts]]\nkind = \"setting\""));
         assert!(part.warnings.iter().any(|w| w.contains("does not show over Thread")), "{:?}", part.warnings);
     }
@@ -1535,11 +1759,12 @@ mod tests {
         let p = project(include_str!("../../answers/xiao.toml"));
         assert!(p.warnings.is_empty(), "{:?}", p.warnings);
         assert_eq!((p.answers.status, p.answers.status_pin), (Indicator::Led, Some(15)));
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(main.contains("let _gpio3 = Output::new(p.GPIO3, Level::Low, OutputConfig::default());"), "{main}");
         assert!(main.contains("let _gpio14 = Output::new(p.GPIO14, Level::Low, OutputConfig::default());"), "{main}");
         assert!(main.find("p.GPIO3") < main.find("iotkit::start("), "before the radio: {main}");
-        assert!(main.contains("Output::new(p.GPIO15, Level::High,") && main.contains("Active::Low"), "{main}");
+        assert!(main.contains("led::spawn_status(spawner, p.GPIO15);"), "{main}");
+        assert!(main.contains("Output::new(pin, Level::High,") && main.contains("Active::Low"), "{main}");
         assert!(codegen::readme(&p).contains("| Status LED | GPIO15 | on the board |"));
         let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
         assert!(err("board = \"xiao-esp32c6\"\n[[parts]]\nkind = \"relay\"\npin = 3").contains("antenna switch"));
@@ -1555,7 +1780,7 @@ mod tests {
     fn battery_modes() {
         let p = project(include_str!("../../answers/esphome-battery.toml"));
         assert!(p.sleepy() && !p.icd());
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(main.contains("start_sleepy(spawner, board, p.LPWR, &CONFIG, &SLEEP)"), "{main}");
         assert!(main.contains("Battery::new(p.ADC1, p.GPIO2, 2.0)") && !main.contains("battery_task"), "{main}");
         assert!(
@@ -1568,7 +1793,8 @@ mod tests {
         assert!(main.contains("boot_button: Some(p.GPIO3.into())") && !p.warnings.iter().any(|w| w.contains("wake")));
         assert!(
             main.contains("components::status_led(led, Active::High, iotkit::status::Show::All)")
-                && main.contains("p.GPIO6, Level::Low")
+                && main.contains("led::spawn_status(spawner, p.GPIO6)")
+                && main.contains("Output::new(pin, Level::Low")
         );
         assert!(codegen::readme(&p).contains("The button on GPIO3"));
         let boot = project(&include_str!("../../answers/esphome-battery.toml").replace("button_pin = 3\n", ""));
@@ -1576,9 +1802,17 @@ mod tests {
 
         let p = project(include_str!("../../answers/thread-battery.toml"));
         assert!(p.icd() && !p.sleepy());
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(main.contains("iotkit::start(spawner, board, &CONFIG).await") && !main.contains("SleepConfig"));
         assert!(main.contains("components::button(&BUTTON"), "ready-made parts, as plugged in: {main}");
+        // Its sensors read every `report_every_min`: each report wakes the radio.
+        let sensor = project(&format!(
+            "{}\n[i2c]\nsda = 0\nscl = 1\n[[parts]]\nkind = \"bh1750\"",
+            include_str!("../../answers/thread-battery.toml")
+        ));
+        let main = code(&sensor);
+        assert!(main.contains("Ticker::every(Duration::from_secs(300))") && main.contains("every 5 min"), "{main}");
+        assert!(codegen::readme(&sensor).contains("reading its sensors every 5 min"));
         let cargo = cargo_toml(&p);
         assert!(
             cargo.contains("[\"esp32c6\", \"matter-thread\", \"matter-ota\", \"matter-icd\", \"smartled\"]"),
@@ -1599,10 +1833,66 @@ mod tests {
     #[test]
     fn no_parts_main() {
         let p = project("name = \"C6 devkit\"\nmaker = \"Tanguy\"");
-        let main = codegen::main_rs(&p);
+        let main = code(&p);
         assert!(main.contains(".manufacturer(\"Tanguy\")") && main.contains(".product_name(\"C6 devkit\")"), "{main}");
         assert!(main.contains("Light::new(\"status_led\"") && codegen::readme(&p).contains("`status_led`"));
-        assert!(!main.contains("TODO(") && main.contains("entities.html"), "{main}");
+        assert!(!main.contains("TODO(") && main.contains("`cargo iotkit add` adds one"), "{main}");
+    }
+
+    /// Every component's ready-made code renders on every chip, its pins accepted there.
+    #[test]
+    fn components_render() {
+        for chip in ["esp32c6", "esp32c3", "esp32c5", "esp32s3", "esp32", "esp32h2"] {
+            let board = boards().iter().find(|b| b.chip == chip).unwrap();
+            let thread = if board.wifi() { "" } else { "transport = \"thread\"\nmatter = \"per-device\"\n" };
+            for k in kinds().iter().filter(|k| k.code.is_some() && !(!thread.is_empty() && k.analog())) {
+                let mut taken = vec![board.boot_pin];
+                taken.extend(board.rgb_led);
+                let pins: Vec<String> = k
+                    .pins
+                    .iter()
+                    .map(|spec| {
+                        let n = (0..=48).find(|&n| check_pin(board, n, spec.pin_use, &taken) == PinCheck::Ok).unwrap();
+                        taken.push(n);
+                        format!("{} = {n}", spec.role)
+                    })
+                    .collect();
+                let answers = format!(
+                    "board = \"{}\"\nflash_size = \"8mb\"\n{thread}[[parts]]\nkind = \"{}\"\npins = {{ {} }}",
+                    board.id,
+                    k.id,
+                    pins.join(", ")
+                );
+                let p = project(&answers);
+                assert!(codegen::ready(&p)[0], "{chip} {}", k.id);
+                let code = codegen::part(&p, 0).unwrap();
+                assert!(
+                    !code.file.contains("{{") && !code.file.contains("{%") && !code.file.contains("TODO:"),
+                    "{}",
+                    code.file
+                );
+            }
+        }
+        let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
+        assert!(err("[[parts]]\nkind = \"relay\"\npins = { sda = 4 }").contains("no pin `sda`"));
+        assert!(err("[[parts]]\nkind = \"setting\"\npin = 4").contains("takes no pin"));
+        // A keyword is not a module name.
+        let p = project("[[parts]]\nkind = \"mode\"\nname = \"Type\"");
+        assert_eq!((p.parts[0].id.as_str(), p.parts[0].module.as_str()), ("type", "type_part"));
+    }
+
+    /// `iotkit.toml` reads back as the same project, without the secrets.
+    #[test]
+    fn record_roundtrip() {
+        let p = project(&format!(
+            "wifi_ssid = \"Home\"\nwifi_password = \"hunter2\"\n{}",
+            include_str!("../../answers/c6.toml")
+        ));
+        let text = record(&p.answers).unwrap();
+        assert!(!text.contains("Home") && !text.contains("hunter2") && !text.contains("passcode"), "{text}");
+        let back = Project::new(toml::from_str(&text).unwrap(), "/x".into()).unwrap();
+        assert_eq!(back.parts.len(), p.parts.len());
+        assert_eq!(code(&back), code(&p));
     }
 
     /// AGENTS.md only when asked for, with the lines that apply to the device.

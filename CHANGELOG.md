@@ -26,6 +26,20 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   ignored the BOOT button).
 - Adafruit Feather ESP32-C6 (`cargo iotkit new`): GPIO20 high at boot, powering the NeoPixel and
   the STEMMA QT port.
+- `cargo iotkit new` writes one module per part, `src/parts/<entity id>.rs`, and the board's LED in
+  `src/led.rs`; `src/main.rs` keeps the setup and the lists of parts. `iotkit.toml` keeps the
+  answers (without the secrets).
+- `cargo iotkit add [<component>] [--name] [--pin [ROLE=]GPIO]` adds a part to such a project, and
+  `cargo iotkit components` lists them. The parts are files in `components/`, one each, like
+  `boards/`: a part with several pins (`pins = { sda = 4, scl = 5 }` in an answers file) fits.
+- I²C sensor chips, ready-made: BH1750, SHT4x, SHT3x, AHT20, BME280, BMP280 and SCD4x
+  (`components::i2c`, one reading per call). The project's I²C bus is asked once (`[i2c]`, `sda`
+  and `scl`) and shared; a chip measuring several values is one part with an entity each; two
+  chips at one address are refused (`address = 0x45`).
+- On a battery device, ready-made readings too: once per wake-up, the I²C chips, the contact, leak,
+  smoke and motion inputs, and the soil probe (on the ADC after the battery level).
+- A Matter ICD (Thread on battery) reads its sensors every `report_every_min` (asked now), not
+  every 30 s: each report wakes its radio.
 
 ## 0.4.0 (2026-10-27)
 

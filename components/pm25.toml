@@ -1,0 +1,18 @@
+label  = "Fine dust (PM2.5)"
+group  = "measures"
+order  = 60
+name   = "PM2.5"
+wiring = "TX of a PMS5003 / SDS011 (UART)"
+matter = "Air quality sensor"
+
+[entity]
+type = "Sensor"
+ctor = "pm25"
+
+[[pins]]
+use = "input"
+
+[todo]
+text    = "read PM2.5 in µg/m³"
+buses   = ["uart"]
+drivers = "PMS5003: `pmsx003` (blocking `embedded-io`)"

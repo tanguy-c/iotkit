@@ -1,0 +1,35 @@
+label  = "Door or window (reed switch)"
+group  = "detects"
+order  = 20
+name   = "Door"
+wiring = "one side of the reed switch (the other to GND)"
+matter = "Contact sensor"
+
+[entity]
+type    = "BinarySensor"
+builder = ".device_class(DeviceClass::DOOR)"
+
+[[pins]]
+use = "input"
+
+[todo]
+text  = "low while closed (`true` = open)"
+buses = ["gpio-in"]
+
+# `components::binary_input`, debounced.
+[code]
+uses  = [
+    "embassy_time::Duration",
+    "esp_hal::gpio::Input",
+    "esp_hal::gpio::InputConfig",
+    "esp_hal::gpio::Pull",
+    "iotkit::Active",
+    "iotkit::components",
+]
+param = "pin: Input<'static>"
+arg   = "Input::new(pin, InputConfig::default().with_pull(Pull::Up))"
+body  = "components::binary_input(&{{ entity }}, pin, Active::High, Duration::from_millis(50)).await"
+
+# On battery: its level once per wake-up.
+read      = "{{ entity }}.set(Input::new(pin, InputConfig::default().with_pull(Pull::Up)).is_high());"
+read_uses = ["esp_hal::gpio::Input", "esp_hal::gpio::InputConfig", "esp_hal::gpio::Pull"]

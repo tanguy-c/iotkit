@@ -1,5 +1,7 @@
-//! The parts a builder can add: what Home Assistant (and Matter) sees, and the TODO left in
-//! the generated code.
+//! The parts a builder can add, from `components/*.toml`: what Home Assistant (and Matter) sees,
+//! and the code or the TODO left in the generated project.
+
+use super::boards::PinUse;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Group {
@@ -20,7 +22,7 @@ impl Group {
     }
 }
 
-/// How the generated code drives the part.
+/// How the generated code drives the part without ready-made code: the entity type's loop.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Stub {
     /// A reading (`Sensor::set`), every 30 s.
@@ -53,7 +55,21 @@ pub enum Bus {
 }
 
 impl Bus {
-    /// The esp-hal 1.2 setup, on one line, for `pin` (the ADC needs `p.GPIOn`, not an `AnyPin`).
+    fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "gpio-in" => Bus::GpioIn,
+            "gpio-out" => Bus::GpioOut,
+            "adc" => Bus::Adc,
+            "i2c" => Bus::I2c,
+            "one-wire" => Bus::OneWire,
+            "uart" => Bus::Uart,
+            "ledc" => Bus::Ledc,
+            "rmt" => Bus::Rmt,
+            _ => return None,
+        })
+    }
+
+    /// The esp-hal 1.2 setup, on one line, for `pin`.
     pub fn hint(self, pin: &str) -> String {
         match self {
             Bus::GpioIn => format!("GPIO: `Input::new({pin}, InputConfig::default().with_pull(Pull::Up))`"),
@@ -88,478 +104,395 @@ impl Bus {
     }
 }
 
-/// A ready-made part from `iotkit::components`, used on plugged-in devices with a pin
-/// chosen (else the TODO stays).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Component {
-    /// `components::relay`.
-    Relay,
-    /// `components::binary_input`: whether the pin needs a pull-up, and whether low means
-    /// detected.
-    Input { pull_up: bool, active_low: bool },
-    /// `components::button`: pull-up, pressed low.
-    Button,
-    /// `components::poll` on an ADC1 pin, calibrated to 0-100 %.
-    Analog,
+/// One of a part's entities: most parts have one; a sensor chip one per value it measures.
+pub struct EntitySpec {
+    /// In a part with several, what this one measures (`temperature`): its id is the part's,
+    /// then this; its name the part's, then `name`.
+    pub key: &'static str,
+    pub name: &'static str,
+    /// The entity type, its constructor (`new`, or a shortcut such as `temperature`), the
+    /// arguments after the id and the name, and the builder calls after it.
+    pub ty: &'static str,
+    pub ctor: &'static str,
+    pub args: &'static str,
+    pub builder: &'static str,
+    /// The Matter device type it shows as, if any.
+    pub matter: Option<&'static str>,
+    /// For an I²C chip: its value in the reading `r` (`r.temperature`).
+    pub value: &'static str,
 }
 
-impl Kind {
-    /// What it does with its pin.
-    pub fn pin_use(&self) -> super::boards::PinUse {
-        use super::boards::PinUse;
-        if self.analog {
-            PinUse::Analog
-        } else if self.buses.iter().any(|b| matches!(b, Bus::GpioOut | Bus::Ledc | Bus::Rmt)) {
-            PinUse::Output
-        } else {
-            PinUse::Input
-        }
-    }
+/// A sensor chip on the project's I²C bus.
+pub struct I2cSpec {
+    /// Its addresses, the default first.
+    pub addresses: Vec<u8>,
+    /// Liquid: an `Option` of the reading, from `{{ i2c }}` (a `&mut` I²C bus) and `ADDR`.
+    pub read: &'static str,
+}
+
+/// A pin a part needs.
+pub struct PinSpec {
+    /// Its variable in the generated code (`pin`, `sda`).
+    pub role: &'static str,
+    pub pin_use: PinUse,
+}
+
+/// Ready-made code (Liquid templates): the part works as generated.
+pub struct Code {
+    /// `use` paths, one item each.
+    pub uses: Vec<&'static str>,
+    /// Peripherals only one part can have (`ADC1`), passed from `main`.
+    pub takes: Vec<&'static str>,
+    /// iotkit features it needs.
+    pub features: Vec<&'static str>,
+    /// Lines in `spawn` before the task starts, the task's parameters, what `spawn` passes it,
+    /// and its body.
+    pub setup: &'static str,
+    pub param: &'static str,
+    pub arg: &'static str,
+    pub body: &'static str,
+    /// On a battery device, a reading's code once per wake-up (the body of `read`, which gets
+    /// the same parameters as `spawn`) and its `use` paths; empty: a TODO there.
+    pub read: &'static str,
+    pub read_uses: Vec<&'static str>,
 }
 
 pub struct Kind {
-    /// In answers files: `kind = "temperature"`.
+    /// The file's name in `components/`: `kind = "temperature"` in answers files.
     pub id: &'static str,
     pub group: Group,
+    order: u32,
     /// In the menu.
     pub label: &'static str,
     /// The default entity name.
     pub name: &'static str,
-    /// The entity type, its constructor (`new`, or a shortcut such as `temperature`), and the
-    /// builder calls after `::ctor(id, name)`.
-    pub ty: &'static str,
-    pub ctor: &'static str,
-    pub new_args: &'static str,
-    pub builder: &'static str,
-    /// Read with the ADC (an ADC1 pin).
-    pub analog: bool,
-    /// What to connect to the pin (README's wiring table).
+    /// Its entities, one at least.
+    pub entities: Vec<EntitySpec>,
+    /// What to connect (README's wiring table).
     pub wiring: &'static str,
+    pub pins: Vec<PinSpec>,
     /// The TODO in the generated code: what to do, in the part's terms.
     pub todo: &'static str,
     /// How it can be wired (alternatives): one setup hint each under the TODO.
-    pub buses: &'static [Bus],
+    pub buses: Vec<Bus>,
     /// Driver crates (no_std, embedded-hal 1.0), checked on crates.io.
     pub drivers: &'static str,
-    pub stub: Stub,
-    /// The ready-made part, if there is one.
-    pub component: Option<Component>,
-    /// The Matter device type it shows as, if any.
-    pub matter: Option<&'static str>,
-}
-
-pub const KINDS: &[Kind] = &[
-    // Measures
-    Kind {
-        id: "temperature",
-        group: Group::Measures,
-        label: "Temperature",
-        name: "Temperature",
-        ty: "Sensor",
-        ctor: "temperature",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "the sensor's data pin (DS18B20 on 1-Wire with a 4.7 kΩ pull-up), or SDA of an I²C sensor (BME280, SHT31)",
-        todo: "read °C",
-        buses: &[Bus::I2c, Bus::OneWire],
-        drivers: "`sht4x`, `embedded-sht3x`, `bme280-rs`; DS18B20: `onewire` (blocking)",
-        stub: Stub::Reading,
-        component: None,
-        matter: Some("Temperature sensor"),
-    },
-    Kind {
-        id: "humidity",
-        group: Group::Measures,
-        label: "Humidity",
-        name: "Humidity",
-        ty: "Sensor",
-        ctor: "humidity",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "SDA of an I²C sensor (BME280, SHT31, AHT20)",
-        todo: "read % RH",
-        buses: &[Bus::I2c],
-        drivers: "`sht4x`, `embedded-sht3x`, `bme280-rs`, `aht20-async`",
-        stub: Stub::Reading,
-        component: None,
-        matter: Some("Humidity sensor"),
-    },
-    Kind {
-        id: "pressure",
-        group: Group::Measures,
-        label: "Air pressure",
-        name: "Pressure",
-        ty: "Sensor",
-        ctor: "pressure",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "SDA of an I²C sensor (BME280, BMP280)",
-        todo: "read hPa",
-        buses: &[Bus::I2c],
-        drivers: "`bme280-rs`; BMP280: `bme280` (blocking)",
-        stub: Stub::Reading,
-        component: None,
-        matter: Some("Pressure sensor"),
-    },
-    Kind {
-        id: "light_level",
-        group: Group::Measures,
-        label: "Light level",
-        name: "Illuminance",
-        ty: "Sensor",
-        ctor: "illuminance",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "SDA of an I²C light sensor (BH1750, VEML7700)",
-        todo: "read lux",
-        buses: &[Bus::I2c],
-        drivers: "`bh1750` (blocking), `veml7700`",
-        stub: Stub::Reading,
-        component: None,
-        matter: Some("Light sensor"),
-    },
-    Kind {
-        id: "co2",
-        group: Group::Measures,
-        label: "CO2",
-        name: "CO2",
-        ty: "Sensor",
-        ctor: "carbon_dioxide",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "SDA of an SCD4x (I²C), or TX of a MH-Z19 (UART)",
-        todo: "read ppm",
-        buses: &[Bus::I2c, Bus::Uart],
-        drivers: "SCD4x: `scd4x`; MH-Z19: `mh-z19` (frames only; add `.with_tx`)",
-        stub: Stub::Reading,
-        component: None,
-        matter: Some("Air quality sensor"),
-    },
-    Kind {
-        id: "pm25",
-        group: Group::Measures,
-        label: "Fine dust (PM2.5)",
-        name: "PM2.5",
-        ty: "Sensor",
-        ctor: "pm25",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "TX of a PMS5003 / SDS011 (UART)",
-        todo: "read PM2.5 in µg/m³",
-        buses: &[Bus::Uart],
-        drivers: "PMS5003: `pmsx003` (blocking `embedded-io`)",
-        stub: Stub::Reading,
-        component: None,
-        matter: Some("Air quality sensor"),
-    },
-    Kind {
-        id: "soil_moisture",
-        group: Group::Measures,
-        label: "Soil moisture (analog probe)",
-        name: "Soil moisture",
-        ty: "Sensor",
-        ctor: "new",
-        new_args: "",
-        builder: ".unit(Unit::PERCENT).device_class(DeviceClass::MOISTURE).measurement()",
-        analog: true,
-        wiring: "the probe's analog output (AOUT)",
-        todo: "read the probe, map dry..wet to 0..100 %",
-        buses: &[Bus::Adc],
-        drivers: "",
-        stub: Stub::Reading,
-        component: Some(Component::Analog),
-        matter: None,
-    },
-    Kind {
-        id: "number",
-        group: Group::Measures,
-        label: "Another reading (a number)",
-        name: "Reading",
-        ty: "Sensor",
-        ctor: "new",
-        new_args: "",
-        builder: ".measurement()",
-        analog: false,
-        wiring: "your sensor",
-        todo: "read the value (and add `.unit(\"...\")`, `.device_class(\"...\")` to the entity)",
-        buses: &[],
-        drivers: "",
-        stub: Stub::Reading,
-        component: None,
-        matter: None,
-    },
-    // Detects
-    Kind {
-        id: "motion",
-        group: Group::Detects,
-        label: "Motion (PIR sensor)",
-        name: "Motion",
-        ty: "BinarySensor",
-        ctor: "new",
-        new_args: "",
-        builder: ".device_class(DeviceClass::MOTION)",
-        analog: false,
-        wiring: "the PIR sensor's OUT pin (HC-SR501, AM312)",
-        todo: "high while the PIR sees motion",
-        buses: &[Bus::GpioIn],
-        drivers: "",
-        stub: Stub::Detect,
-        component: Some(Component::Input { pull_up: false, active_low: false }),
-        matter: Some("Occupancy sensor"),
-    },
-    Kind {
-        id: "contact",
-        group: Group::Detects,
-        label: "Door or window (reed switch)",
-        name: "Door",
-        ty: "BinarySensor",
-        ctor: "new",
-        new_args: "",
-        builder: ".device_class(DeviceClass::DOOR)",
-        analog: false,
-        wiring: "one side of the reed switch (the other to GND)",
-        todo: "low while closed (`true` = open)",
-        buses: &[Bus::GpioIn],
-        drivers: "",
-        stub: Stub::Detect,
-        component: Some(Component::Input { pull_up: true, active_low: false }),
-        matter: Some("Contact sensor"),
-    },
-    Kind {
-        id: "leak",
-        group: Group::Detects,
-        label: "Water leak",
-        name: "Leak",
-        ty: "BinarySensor",
-        ctor: "new",
-        new_args: "",
-        builder: ".device_class(DeviceClass::MOISTURE)",
-        analog: false,
-        wiring: "one probe of the leak sensor (the other to GND)",
-        todo: "low when the probes are wet",
-        buses: &[Bus::GpioIn],
-        drivers: "",
-        stub: Stub::Detect,
-        component: Some(Component::Input { pull_up: true, active_low: true }),
-        matter: Some("Water leak detector"),
-    },
-    Kind {
-        id: "smoke",
-        group: Group::Detects,
-        label: "Smoke alarm",
-        name: "Smoke",
-        ty: "BinarySensor",
-        ctor: "new",
-        new_args: "",
-        builder: ".device_class(DeviceClass::SMOKE)",
-        analog: false,
-        wiring: "the alarm's interconnect / relay output",
-        todo: "read the alarm's output",
-        buses: &[Bus::GpioIn],
-        drivers: "",
-        stub: Stub::Detect,
-        component: Some(Component::Input { pull_up: false, active_low: false }),
-        matter: Some("Smoke alarm"),
-    },
-    // Controls
-    Kind {
-        id: "relay",
-        group: Group::Controls,
-        label: "Relay / on-off (lamp, pump, socket)",
-        name: "Relay",
-        ty: "Switch",
-        ctor: "new",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "the relay module's IN pin",
-        todo: "switch the relay to `on`",
-        buses: &[Bus::GpioOut],
-        drivers: "",
-        stub: Stub::Switch,
-        component: Some(Component::Relay),
-        matter: Some("On/off plug"),
-    },
-    Kind {
-        id: "light",
-        group: Group::Controls,
-        label: "Light (dimmable / colour LED strip)",
-        name: "Light",
-        ty: "Light",
-        ctor: "new",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "DIN of a WS2812 strip, or the gate of a MOSFET for a single-colour strip",
-        todo: "drive the light from `state.on`, `state.brightness`, `state.rgb`",
-        buses: &[Bus::Rmt, Bus::Ledc],
-        drivers: "WS2812: `esp-hal-smartled` + `components::rgb_light` (feature `smartled`); dimmer: `components::dimmer`",
-        stub: Stub::Light,
-        component: None,
-        matter: Some("Extended colour light"),
-    },
-    Kind {
-        id: "cover",
-        group: Group::Controls,
-        label: "Blind / curtain / garage door",
-        name: "Blind",
-        ty: "Cover",
-        ctor: "new",
-        new_args: "",
-        builder: ".device_class(DeviceClass::BLIND).position()",
-        analog: false,
-        wiring: "the motor driver's direction / enable input",
-        todo: "move the motor to `position` (0 closed, 100 open; halt it on `Stop`), e.g. timed runs",
-        buses: &[Bus::GpioOut],
-        drivers: "",
-        stub: Stub::Cover,
-        component: None,
-        matter: Some("Window covering"),
-    },
-    Kind {
-        id: "valve",
-        group: Group::Controls,
-        label: "Water valve",
-        name: "Valve",
-        ty: "Valve",
-        ctor: "new",
-        new_args: "",
-        builder: ".device_class(DeviceClass::WATER)",
-        analog: false,
-        wiring: "the valve's relay or driver input",
-        todo: "open or close the valve (`position`: 0 closed, 100 open)",
-        buses: &[Bus::GpioOut],
-        drivers: "",
-        stub: Stub::Cover,
-        component: None,
-        matter: Some("Water valve"),
-    },
-    Kind {
-        id: "lock",
-        group: Group::Controls,
-        label: "Lock (door strike, smart lock)",
-        name: "Lock",
-        ty: "Lock",
-        ctor: "new",
-        new_args: "",
-        builder: "",
-        analog: false,
-        wiring: "the strike's relay or driver input",
-        todo: "drive the strike's relay",
-        buses: &[Bus::GpioOut],
-        drivers: "",
-        stub: Stub::Lock,
-        component: None,
-        matter: Some("Door lock"),
-    },
-    Kind {
-        id: "fan",
-        group: Group::Controls,
-        label: "Fan",
-        name: "Fan",
-        ty: "Fan",
-        ctor: "new",
-        new_args: "",
-        builder: ".speed()",
-        analog: false,
-        wiring: "the fan's PWM input or its MOSFET gate",
-        todo: "run the fan at `wanted` (on, speed in %; PWM at 25 kHz)",
-        buses: &[Bus::Ledc],
-        drivers: "`components::fan` on the LEDC channel",
-        stub: Stub::Fan,
-        component: None,
-        matter: Some("Fan"),
-    },
-    Kind {
-        id: "thermostat",
-        group: Group::Controls,
-        label: "Thermostat (heater control)",
-        name: "Thermostat",
-        ty: "Climate",
-        ctor: "new",
-        new_args: ", &[HvacMode::Heat, HvacMode::Off]",
-        builder: "",
-        analog: false,
-        wiring: "the heater's relay input",
-        todo: "read the room temperature into `state.current` (as for a temperature part), then switch the heater towards `state.target` (set `state.action`)",
-        buses: &[Bus::GpioOut],
-        drivers: "",
-        stub: Stub::Climate,
-        component: None,
-        matter: Some("Thermostat"),
-    },
-    Kind {
-        id: "setting",
-        group: Group::Controls,
-        label: "A setting (a number: threshold, duration…)",
-        name: "Setting",
-        ty: "Number",
-        ctor: "new",
-        new_args: ", 0.0, 100.0, 1.0",
-        builder: "",
-        analog: false,
-        wiring: "(none: a value the device uses)",
-        todo: "use the new value (and keep it across restarts with `App::save`, if needed)",
-        buses: &[],
-        drivers: "",
-        stub: Stub::Number,
-        component: None,
-        matter: None,
-    },
-    Kind {
-        id: "mode",
-        group: Group::Controls,
-        label: "A mode (a choice: auto / on / off…)",
-        name: "Mode",
-        ty: "Select",
-        ctor: "new",
-        new_args: r#", &["auto", "on", "off"]"#,
-        builder: "",
-        analog: false,
-        wiring: "(none: a choice the device uses)",
-        todo: "apply the chosen mode (`index` into the options)",
-        buses: &[],
-        drivers: "",
-        stub: Stub::Select,
-        component: None,
-        matter: Some("Mode select"),
-    },
-    // Inputs
-    Kind {
-        id: "button",
-        group: Group::Inputs,
-        label: "Push button (press, double press, long press)",
-        name: "Button",
-        ty: "Event",
-        ctor: "new",
-        new_args: r#", &["press", "double_press", "long_press"]"#,
-        builder: ".device_class(DeviceClass::BUTTON)",
-        analog: false,
-        wiring: "one side of the button (the other to GND)",
-        todo: "time the presses (`wait_for_falling_edge().await`, not the timer): `trigger(0)` press, `trigger(1)` double, `trigger(2)` long",
-        buses: &[Bus::GpioIn],
-        drivers: "",
-        stub: Stub::Presses,
-        component: Some(Component::Button),
-        matter: Some("Generic switch"),
-    },
-];
-
-pub fn kind(id: &str) -> Option<&'static Kind> {
-    KINDS.iter().find(|k| k.id == id)
+    /// The ready-made code, if there is one.
+    pub code: Option<Code>,
+    /// A chip on the I²C bus (ready-made once the bus has its pins).
+    pub i2c: Option<I2cSpec>,
 }
 
 impl Kind {
+    /// Its (first) entity's type.
+    pub fn ty(&self) -> &'static str {
+        self.entities[0].ty
+    }
+
+    /// Comes with code that works as generated (given its pins, or the I²C bus).
+    pub fn ready_made(&self) -> bool {
+        self.code.is_some() || self.i2c.is_some()
+    }
+
+    /// What its first pin does (`PinUse::Input` for a part with none).
+    pub fn pin_use(&self) -> PinUse {
+        self.pins.first().map_or(PinUse::Input, |p| p.pin_use)
+    }
+
+    /// Reads a pin with the ADC.
+    pub fn analog(&self) -> bool {
+        self.pins.iter().any(|p| p.pin_use == PinUse::Analog)
+    }
+
+    /// The task's loop around the TODO, from the entity type.
+    pub fn stub(&self) -> Stub {
+        stub(self.ty()).expect("checked when loaded")
+    }
+
     /// Read once per wake-up on a battery device (rather than driven by commands).
     pub fn is_reading(&self) -> bool {
-        matches!(self.stub, Stub::Reading | Stub::Detect)
+        matches!(self.stub(), Stub::Reading | Stub::Detect)
     }
+}
+
+fn stub(ty: &str) -> Option<Stub> {
+    Some(match ty {
+        "Sensor" => Stub::Reading,
+        "BinarySensor" => Stub::Detect,
+        "Event" => Stub::Presses,
+        "Switch" => Stub::Switch,
+        "Light" => Stub::Light,
+        "Cover" | "Valve" => Stub::Cover,
+        "Lock" => Stub::Lock,
+        "Fan" => Stub::Fan,
+        "Climate" => Stub::Climate,
+        "Number" => Stub::Number,
+        "Select" => Stub::Select,
+        _ => return None,
+    })
+}
+
+mod files {
+    include!(concat!(env!("OUT_DIR"), "/components.rs"));
+}
+
+/// A component file (`components/<id>.toml`; its README has the format).
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct File {
+    label: String,
+    group: String,
+    order: u32,
+    name: String,
+    wiring: String,
+    matter: Option<String>,
+    entity: Option<EntityFile>,
+    /// A chip measuring several values: one each.
+    #[serde(default)]
+    entities: Vec<EntityFile>,
+    #[serde(default)]
+    pins: Vec<PinFile>,
+    todo: TodoFile,
+    code: Option<CodeFile>,
+    i2c: Option<I2cFile>,
+    /// Where its facts come from (a sensor's bus and address: ESPHome's component, Zephyr's
+    /// binding, the datasheet).
+    #[serde(default)]
+    #[allow(dead_code)]
+    sources: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntityFile {
+    /// In `[[entities]]`: what it measures, and its name after the part's.
+    key: Option<String>,
+    name: Option<String>,
+    matter: Option<String>,
+    #[serde(rename = "type", default = "sensor")]
+    ty: String,
+    #[serde(default = "new")]
+    ctor: String,
+    #[serde(default)]
+    args: String,
+    #[serde(default)]
+    builder: String,
+    #[serde(default = "reading")]
+    value: String,
+}
+
+fn new() -> String {
+    "new".into()
+}
+
+fn sensor() -> String {
+    "Sensor".into()
+}
+
+fn reading() -> String {
+    "r".into()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct I2cFile {
+    addresses: Vec<u8>,
+    read: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PinFile {
+    #[serde(default = "pin")]
+    role: String,
+    #[serde(rename = "use")]
+    pin_use: String,
+}
+
+fn pin() -> String {
+    "pin".into()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TodoFile {
+    text: String,
+    #[serde(default)]
+    buses: Vec<String>,
+    #[serde(default)]
+    drivers: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CodeFile {
+    #[serde(default)]
+    uses: Vec<String>,
+    #[serde(default)]
+    takes: Vec<String>,
+    #[serde(default)]
+    features: Vec<String>,
+    #[serde(default)]
+    setup: String,
+    param: String,
+    arg: String,
+    body: String,
+    #[serde(default)]
+    read: String,
+    #[serde(default)]
+    read_uses: Vec<String>,
+}
+
+/// A lowercase Rust identifier, not a keyword (a variable or a module of the generated code).
+pub fn ident(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && !KEYWORDS.contains(&s)
+}
+
+const KEYWORDS: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate", "do", "dyn", "else",
+    "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl", "in", "let", "loop", "macro", "match", "mod",
+    "move", "mut", "override", "priv", "pub", "ref", "return", "self", "static", "struct", "super", "trait", "true",
+    "try", "type", "typeof", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+];
+
+/// The component files, checked: an error names the file.
+fn load() -> Result<Vec<Kind>, String> {
+    let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    let mut kinds = Vec::new();
+    for (id, text) in files::FILES {
+        let err = |e: &dyn std::fmt::Display| format!("components/{id}.toml: {e}");
+        let f: File = toml::from_str(text).map_err(|e| err(&e))?;
+        let group = match f.group.as_str() {
+            "measures" => Group::Measures,
+            "detects" => Group::Detects,
+            "controls" => Group::Controls,
+            "inputs" => Group::Inputs,
+            other => return Err(err(&format!("group `{other}`: measures, detects, controls or inputs"))),
+        };
+        let several = !f.entities.is_empty();
+        let files = match (f.entity, several) {
+            (Some(e), false) => vec![e],
+            (None, true) => f.entities,
+            _ => return Err(err(&"`[entity]`, or `[[entities]]` for a chip measuring several values")),
+        };
+        let mut entities: Vec<EntitySpec> = Vec::new();
+        for e in files {
+            if stub(&e.ty).is_none() {
+                return Err(err(&format!("entity type `{}`: not one the wizard has a loop for", e.ty)));
+            }
+            let (key, name, matter) = match (several, e.key, e.name) {
+                (false, None, None) => (String::new(), f.name.clone(), f.matter.clone().or(e.matter)),
+                (true, Some(key), Some(name)) if ident(&key) && !entities.iter().any(|x| x.key == key) => {
+                    (key, name, e.matter)
+                }
+                (false, ..) => return Err(err(&"`[entity]`: no `key` or `name` (the part's name is its name)")),
+                (true, ..) => return Err(err(&"`[[entities]]`: each a distinct `key` (a Rust name) and a `name`")),
+            };
+            entities.push(EntitySpec {
+                key: leak(key),
+                name: leak(name),
+                ty: leak(e.ty),
+                ctor: leak(e.ctor),
+                args: leak(e.args),
+                builder: leak(e.builder),
+                matter: matter.map(leak),
+                value: leak(e.value),
+            });
+        }
+        if several && (f.i2c.is_none() || f.matter.is_some()) {
+            return Err(err(&"`[[entities]]`: an I²C chip's (`[i2c]`), each with its own `matter`"));
+        }
+        let mut pins: Vec<PinSpec> = Vec::new();
+        for p in f.pins {
+            let pin_use = match p.pin_use.as_str() {
+                "input" => PinUse::Input,
+                "output" => PinUse::Output,
+                "analog" => PinUse::Analog,
+                other => return Err(err(&format!("pin use `{other}`: input, output or analog"))),
+            };
+            if !ident(&p.role) || pins.iter().any(|q| q.role == p.role) {
+                return Err(err(&format!("pin role `{}`: a distinct lowercase Rust name", p.role)));
+            }
+            pins.push(PinSpec { role: leak(p.role), pin_use });
+        }
+        let buses = f
+            .todo
+            .buses
+            .iter()
+            .map(|b| Bus::parse(b).ok_or_else(|| err(&format!("bus `{b}`"))))
+            .collect::<Result<_, _>>()?;
+        let i2c = match f.i2c {
+            None => None,
+            Some(_) if f.code.is_some() || !pins.is_empty() => {
+                return Err(err(&"`[i2c]`: its code is `read`, on the bus (no `[code]` or `[[pins]]`)"));
+            }
+            Some(_) if entities.iter().any(|e| stub(e.ty) != Some(Stub::Reading)) => {
+                return Err(err(&"`[i2c]`: sensors only (read every 30 s, or once per wake-up)"));
+            }
+            Some(i) if i.addresses.is_empty() || i.addresses.iter().any(|a| !(0x08..0x78).contains(a)) => {
+                return Err(err(&"`[i2c]`: `addresses`, 7-bit (0x08 to 0x77), the default first"));
+            }
+            Some(i) => Some(I2cSpec { addresses: i.addresses, read: leak(i.read) }),
+        };
+        let code = match f.code {
+            None => None,
+            Some(_) if pins.is_empty() => return Err(err(&"`[code]` drives pins: add `[[pins]]`")),
+            Some(c) => {
+                if let Some(u) = c
+                    .uses
+                    .iter()
+                    .chain(&c.read_uses)
+                    .find(|u| !u.contains("::") || u.contains(['{', ','].as_slice()) && !u.contains("{%"))
+                {
+                    return Err(err(&format!("uses `{u}`: one path each (`esp_hal::gpio::Output`)")));
+                }
+                if let Some(t) = c.takes.iter().find(|t| !ident(&t.to_lowercase())) {
+                    return Err(err(&format!("takes `{t}`: a peripheral of `p` (`ADC1`)")));
+                }
+                let all = |v: Vec<String>| v.into_iter().map(leak).collect();
+                Some(Code {
+                    uses: all(c.uses),
+                    takes: all(c.takes),
+                    features: all(c.features),
+                    setup: leak(c.setup),
+                    param: leak(c.param),
+                    arg: leak(c.arg),
+                    body: leak(c.body),
+                    read: leak(c.read),
+                    read_uses: all(c.read_uses),
+                })
+            }
+        };
+        kinds.push(Kind {
+            id,
+            group,
+            order: f.order,
+            label: leak(f.label),
+            name: leak(f.name),
+            entities,
+            wiring: leak(f.wiring),
+            pins,
+            todo: leak(f.todo.text),
+            buses,
+            drivers: leak(f.todo.drivers),
+            code,
+            i2c,
+        });
+    }
+    kinds.sort_by_key(|k| (k.group as u8, k.order, k.id));
+    Ok(kinds)
+}
+
+/// Every part, in menu order (by group).
+pub fn kinds() -> &'static [Kind] {
+    static KINDS: std::sync::OnceLock<Vec<Kind>> = std::sync::OnceLock::new();
+    KINDS.get_or_init(|| load().unwrap_or_else(|e| panic!("{e}")))
+}
+
+pub fn kind(id: &str) -> Option<&'static Kind> {
+    kinds().iter().find(|k| k.id == id)
 }
 
 /// `"Living room temperature"` → `"living_room_temperature"` (entity id, file names).
@@ -602,24 +535,35 @@ mod tests {
         assert_eq!(slug("CO2", '_'), "co2");
     }
 
+    /// Every file in `components/` loads, in its group's order.
     #[test]
-    fn catalog() {
-        let mut ids: Vec<_> = KINDS.iter().map(|k| k.id).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        assert_eq!(ids.len(), KINDS.len(), "unique ids");
+    fn component_files() {
+        let all = load().unwrap();
+        assert!(all.len() >= 20);
+        assert_eq!(all[0].id, "sht4x", "the menu's first");
+        for g in [Group::Measures, Group::Detects, Group::Controls, Group::Inputs] {
+            assert!(all.iter().any(|k| k.group == g), "{}", g.label());
+        }
+        let relay = kind("relay").unwrap();
+        assert!(relay.code.is_some() && relay.pin_use() == PinUse::Output && relay.entities[0].ctor == "new");
+        let bme = kind("bme280").unwrap();
+        assert_eq!(bme.entities.iter().map(|e| e.key).collect::<Vec<_>>(), ["temperature", "humidity", "pressure"]);
+        assert!(bme.i2c.is_some() && bme.pins.is_empty() && bme.ready_made());
+        assert!(kind("soil_moisture").unwrap().analog() && kind("setting").unwrap().pins.is_empty());
+        assert!(!ident("mod") && !ident("Pin") && ident("sda") && ident("living_room"));
     }
 
     /// Every wired part gets a hint per bus, on the pin it is given.
     #[test]
     fn hints() {
-        for k in KINDS {
+        for k in kinds() {
             let wired = !k.wiring.starts_with("(none") && k.id != "number";
             assert_eq!(!k.buses.is_empty(), wired, "{}", k.id);
-            for bus in k.buses {
+            assert_eq!(k.pins.is_empty() && k.i2c.is_none(), k.wiring.starts_with("(none"), "{}", k.id);
+            for bus in &k.buses {
                 assert!(bus.hint("p.GPIO23").contains("p.GPIO23"), "{} {bus:?}", k.id);
             }
-            assert_eq!(k.analog, k.buses == [Bus::Adc], "{}", k.id);
+            assert_eq!(k.analog(), k.buses == [Bus::Adc], "{}", k.id);
         }
     }
 }

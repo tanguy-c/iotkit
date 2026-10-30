@@ -1,0 +1,18 @@
+label  = "Light level (another sensor)"
+group  = "measures"
+order  = 40
+name   = "Illuminance"
+wiring = "the sensor's output, or SDA of an I²C chip without its own part (VEML7700; the BH1750 has one)"
+matter = "Light sensor"
+
+[entity]
+type = "Sensor"
+ctor = "illuminance"
+
+[[pins]]
+use = "input"
+
+[todo]
+text    = "read lux"
+buses   = ["i2c"]
+drivers = "`bh1750` (blocking), `veml7700`"

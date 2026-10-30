@@ -1,0 +1,12 @@
+label  = "A setting (a number: threshold, duration…)"
+group  = "controls"
+order  = 80
+name   = "Setting"
+wiring = "(none: a value the device uses)"
+
+[entity]
+type = "Number"
+args = ", 0.0, 100.0, 1.0"
+
+[todo]
+text = "use the new value (and keep it across restarts with `App::save`, if needed)"

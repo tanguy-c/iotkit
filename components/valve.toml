@@ -1,0 +1,17 @@
+label  = "Water valve"
+group  = "controls"
+order  = 40
+name   = "Valve"
+wiring = "the valve's relay or driver input"
+matter = "Water valve"
+
+[entity]
+type    = "Valve"
+builder = ".device_class(DeviceClass::WATER)"
+
+[[pins]]
+use = "output"
+
+[todo]
+text  = "open or close the valve (`position`: 0 closed, 100 open)"
+buses = ["gpio-out"]

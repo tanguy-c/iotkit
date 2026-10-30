@@ -88,6 +88,27 @@ enum Cmd {
         #[arg(long)]
         iotkit_path: Option<PathBuf>,
     },
+    /// Add a part to a project made by `cargo iotkit new`: its module in `src/parts/`, and its
+    /// lines in `src/main.rs`, the README and `iotkit.toml`. Without a component: asked.
+    Add {
+        /// A component's id (`cargo iotkit components` lists them).
+        component: Option<String>,
+        /// Its name in Home Assistant (default: the component's).
+        #[arg(long)]
+        name: Option<String>,
+        /// A pin: `4` (its first), or `ROLE=4` for a part with several; for the project's first
+        /// I²C part, the bus: `sda=6`, `scl=7`. Left out: to choose later.
+        #[arg(long = "pin", value_name = "[ROLE=]GPIO")]
+        pins: Vec<String>,
+        /// An I²C chip's address, if not its default (`0x45`).
+        #[arg(long, value_parser = parse_address)]
+        address: Option<u8>,
+        /// The project (default: here).
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+    },
+    /// List the parts `new` and `add` know (`components/` in the repository).
+    Components,
     /// Create the OTA signing key pair (`<out>.key` secret, `<out>.pub` public).
     Keygen {
         #[arg(long, default_value = DEFAULT_KEY)]
@@ -268,13 +289,24 @@ fn main() -> Result<()> {
     // As a cargo subcommand (`cargo iotkit ...`), cargo passes the subcommand name first.
     let args = std::env::args_os().enumerate().filter(|(i, a)| !(*i == 1 && a == "iotkit")).map(|(_, a)| a);
     let cli = Cli::parse_from(args);
-    if let Cmd::New { dir, answers, defaults, iotkit_path } = cli.command {
-        return new::run(new::NewArgs { dir, answers, defaults, iotkit_path });
+    // Not in a project's root: a new project, or the given one.
+    match cli.command {
+        Cmd::New { dir, answers, defaults, iotkit_path } => {
+            return new::run(new::NewArgs { dir, answers, defaults, iotkit_path });
+        }
+        Cmd::Add { component, name, pins, address, dir } => {
+            return new::add::run(new::add::AddArgs { component, name, pins, address, dir });
+        }
+        Cmd::Components => {
+            new::add::list();
+            return Ok(());
+        }
+        _ => {}
     }
     let root = project_root()?;
     std::env::set_current_dir(&root)?;
     match cli.command {
-        Cmd::New { .. } => unreachable!("handled above"),
+        Cmd::New { .. } | Cmd::Add { .. } | Cmd::Components => unreachable!("handled above"),
         Cmd::Keygen { out, force } => keygen(&out, force),
         Cmd::Build { app, min_version, release, key } => build(&Build::new(app)?, &min_version, &release, &key),
         Cmd::Verify { manifest, package, key } => {
@@ -836,6 +868,15 @@ fn hex(bytes: &[u8]) -> String {
 fn read_hex<const N: usize>(path: &Path) -> Result<[u8; N]> {
     let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     hex_decode(text.trim()).map_err(|_| anyhow::anyhow!("{}: expected {} hex bytes", path.display(), N))
+}
+
+/// `0x45` or `69`.
+fn parse_address(s: &str) -> Result<u8, String> {
+    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => u8::from_str_radix(hex, 16),
+        None => s.parse(),
+    }
+    .map_err(|_| format!("`{s}`: an I²C address, such as 0x45"))
 }
 
 #[cfg(test)]

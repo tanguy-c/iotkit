@@ -1,0 +1,31 @@
+label  = "Push button (press, double press, long press)"
+group  = "inputs"
+order  = 10
+name   = "Button"
+wiring = "one side of the button (the other to GND)"
+matter = "Generic switch"
+
+[entity]
+type    = "Event"
+args    = ', &["press", "double_press", "long_press"]'
+builder = ".device_class(DeviceClass::BUTTON)"
+
+[[pins]]
+use = "input"
+
+[todo]
+text  = "time the presses (`wait_for_falling_edge().await`, not the timer): `trigger(0)` press, `trigger(1)` double, `trigger(2)` long"
+buses = ["gpio-in"]
+
+# `components::button`: pull-up, pressed low.
+[code]
+uses  = [
+    "esp_hal::gpio::Input",
+    "esp_hal::gpio::InputConfig",
+    "esp_hal::gpio::Pull",
+    "iotkit::Active",
+    "iotkit::components",
+]
+param = "pin: Input<'static>"
+arg   = "Input::new(pin, InputConfig::default().with_pull(Pull::Up))"
+body  = "components::button(&{{ entity }}, pin, Active::Low, components::PressTiming::DEFAULT).await"

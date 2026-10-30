@@ -1,0 +1,34 @@
+label  = "Motion (PIR sensor)"
+group  = "detects"
+order  = 10
+name   = "Motion"
+wiring = "the PIR sensor's OUT pin (HC-SR501, AM312)"
+matter = "Occupancy sensor"
+
+[entity]
+type    = "BinarySensor"
+builder = ".device_class(DeviceClass::MOTION)"
+
+[[pins]]
+use = "input"
+
+[todo]
+text  = "high while the PIR sees motion"
+buses = ["gpio-in"]
+
+# `components::binary_input`, debounced.
+[code]
+uses  = [
+    "embassy_time::Duration",
+    "esp_hal::gpio::Input",
+    "esp_hal::gpio::InputConfig",
+    "iotkit::Active",
+    "iotkit::components",
+]
+param = "pin: Input<'static>"
+arg   = "Input::new(pin, InputConfig::default())"
+body  = "components::binary_input(&{{ entity }}, pin, Active::High, Duration::from_millis(50)).await"
+
+# On battery: its level once per wake-up.
+read      = "{{ entity }}.set(Input::new(pin, InputConfig::default()).is_high());"
+read_uses = ["esp_hal::gpio::Input", "esp_hal::gpio::InputConfig"]

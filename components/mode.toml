@@ -1,0 +1,13 @@
+label  = "A mode (a choice: auto / on / off…)"
+group  = "controls"
+order  = 90
+name   = "Mode"
+wiring = "(none: a choice the device uses)"
+matter = "Mode select"
+
+[entity]
+type = "Select"
+args = ', &["auto", "on", "off"]'
+
+[todo]
+text = "apply the chosen mode (`index` into the options)"

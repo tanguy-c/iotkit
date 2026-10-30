@@ -1,0 +1,75 @@
+label  = "Soil moisture (analog probe)"
+group  = "measures"
+order  = 70
+name   = "Soil moisture"
+wiring = "the probe's analog output (AOUT)"
+
+[entity]
+type    = "Sensor"
+builder = ".unit(Unit::PERCENT).device_class(DeviceClass::MOISTURE).measurement()"
+
+[[pins]]
+use = "analog"
+
+[todo]
+text  = "read the probe, map dry..wet to 0..100 %"
+buses = ["adc"]
+
+# `components::poll` on the ADC, calibrated to 0-100 %. The ESP32's ADC has no async mode.
+[code]
+takes = ["ADC1"]
+uses  = [
+    "embassy_time::Duration",
+    "esp_hal::analog::adc::Adc",
+    "esp_hal::analog::adc::AdcConfig",
+    "esp_hal::analog::adc::AdcPin",
+    "esp_hal::analog::adc::Attenuation",
+    "esp_hal::{% if chip == 'esp32' %}Blocking{% else %}Async{% endif %}",
+    "iotkit::components",
+    "iotkit::components::filter::Clamp",
+    "iotkit::components::filter::Filter",
+    "iotkit::components::filter::Linear",
+]
+setup = """
+let mut config = AdcConfig::new();
+let pin = config.enable_pin(pin, Attenuation::_11dB);
+"""
+param = "mut adc: Adc<'static, ADC1<'static>, {% if chip == 'esp32' %}Blocking{% else %}Async{% endif %}>, mut pin: AdcPin<GPIO{{ pins.pin }}<'static>, ADC1<'static>>"
+arg   = "Adc::new(adc1, config){% unless chip == 'esp32' %}.into_async(){% endunless %}, pin"
+body  = """
+// TODO({{ id }}): calibrate: the raw readings dry (0 %) and in water (100 %).
+let percent = Linear::new((3000.0, 0.0), (1200.0, 100.0)).then(Clamp::new(0.0, 100.0));
+components::poll(&{{ entity }}, Duration::from_secs(30), percent, async || {
+{%- if chip == "esp32" %}
+    // A reading takes microseconds: polled.
+    loop {
+        if let Ok(raw) = adc.read_oneshot(&mut pin) {
+            break Some(f32::from(raw));
+        }
+    }
+{%- else %}
+    Some(f32::from(adc.read_oneshot(&mut pin).await))
+{%- endif %}
+})
+.await
+"""
+
+# On battery: one reading per wake-up (no battery mode on the ESP32: always async).
+read = """
+let mut config = AdcConfig::new();
+let mut pin = config.enable_pin(pin, Attenuation::_11dB);
+let mut adc = Adc::new(adc1, config).into_async();
+// TODO({{ id }}): calibrate: the raw readings dry (0 %) and in water (100 %).
+let mut percent = Linear::new((3000.0, 0.0), (1200.0, 100.0)).then(Clamp::new(0.0, 100.0));
+if let Some(value) = percent.apply(f32::from(adc.read_oneshot(&mut pin).await)) {
+    {{ entity }}.set(value);
+}
+"""
+read_uses = [
+    "esp_hal::analog::adc::Adc",
+    "esp_hal::analog::adc::AdcConfig",
+    "esp_hal::analog::adc::Attenuation",
+    "iotkit::components::filter::Clamp",
+    "iotkit::components::filter::Filter",
+    "iotkit::components::filter::Linear",
+]
