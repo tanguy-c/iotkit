@@ -399,6 +399,14 @@ impl Wifi {
     /// Applies the station network (or none) and the access point, if open.
     fn configure(&mut self, credentials: Option<&WifiCredentials>) {
         let station = credentials.map_or_else(StationConfig::default, station_config);
+        // While the access point is open, the usual network is looked for on its channel first
+        // (the one the access point took from it): found there, the radio never leaves the
+        // channel, and phones on the setup page keep the access point. Opening it restarts the
+        // radio (a new mode), so the station joins again then. A network being tried scans all.
+        let station = match (&self.ap, credentials) {
+            (Some(_), Some(c)) if self.credentials.as_ref() == Some(c) => station.with_channel(self.channel),
+            _ => station,
+        };
         // The remembered access point, for the first connection only: later ones scan.
         #[cfg(feature = "deep-sleep")]
         let station = match AP_HINT.lock(core::cell::Cell::take) {

@@ -19,6 +19,9 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - `cargo iotkit flash --factory-reset`: erases the settings and Matter pairings as it flashes.
 - Wi-Fi: a joined network that gives no address within 30 s is left and joined again, backing
   off like a failed join (an access point that never answered DHCP kept the device there for good).
+- The setup page no longer closes by itself on a phone after about 30 s: opening the window
+  restarts the radio, and the station then looked for its network on every channel, taking the
+  access point off its channel each time; it now looks on the access point's channel first.
 - Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
   (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
   allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more
