@@ -6,7 +6,7 @@
 | `espflash` hangs on "Connecting" | Another program holds the serial port (a monitor): close it |
 | Board not detected | Hold BOOT, tap RESET, release BOOT, flash again |
 | Build fails: "No OTA key" or "no signing key" | `cargo iotkit keygen` |
-| `ota push`: name not resolved | Use the device's address (`net` on the console) |
+| `ota push`: name not resolved | Use the device's address (`net: address` in its log, or `net` on the console) |
 | `ota push`: connection timed out | The device is not on Wi-Fi yet, or on another network |
 | Update refused | Another signing key, product or chip; a version not newer, or the running one older than `--min-version`; an image too big for the slot; "on trial": the last update is not healthy yet, wait for it to be kept or rolled back |
 | No crash report, no early rollback, slow deep-sleep wake-ups, with code on the C6's LP core | The LP core overwrites iotkit's RTC memory: [not supported yet](battery.md#the-c6s-low-power-core-not-with-iotkit-yet) |

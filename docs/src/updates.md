@@ -9,7 +9,8 @@ cargo iotkit ota push --host iotkit-XXXX.local --release   # build, serve, have 
 ```
 
 `ota push` (feature `ota-push`, on by default) serves `dist/` from this machine (port 8000): the device must reach it. If the host
-name does not resolve, use the device's address (`net` on the console). Bump `version` in
+name does not resolve, use the device's address (`net: address` in its log, or `net` on the
+console). Bump `version` in
 `Cargo.toml` for each update. While a setup window is open the device answers 503 (its RAM is
 the window's): push again once it closes.
 
@@ -25,7 +26,7 @@ no updates).
 # Build, sign and copy to a folder a web server serves:
 cargo iotkit ota publish --to /srv/www --release --base-url http://192.168.1.10:8080 \
     --summary "Faster Wi-Fi" --release-url https://example.com/notes/1.2.0
-# The firmware is built with, in .cargo/secrets.toml:
+# The firmware is built with, in .cargo/config.toml's [env]:
 #   OTA_MANIFEST_URL = "http://192.168.1.10:8080/my-device/manifest.json"
 ```
 

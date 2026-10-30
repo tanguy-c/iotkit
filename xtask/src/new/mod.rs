@@ -815,6 +815,7 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
                     );
                 }
                 // `[env]` is the last table.
+                text.push_str(&codegen::servers_env(p));
                 text.push_str(&codegen::update_env(p));
             }
             _ => {}
@@ -1529,6 +1530,11 @@ mod tests {
         assert!(!main.contains("status_task"), "{main}");
         let secrets = codegen::secrets(&p).unwrap();
         assert!(secrets.contains(&format!("MATTER_PASSCODE = \"{}\"", p.matter_setup.unwrap().passcode)));
+        // The broker and the update URL are not secret: committed, in `.cargo/config.toml`.
+        assert!(!secrets.contains("MQTT_HOST") && !secrets.contains("OTA_MANIFEST_URL"), "{secrets}");
+        let env = codegen::servers_env(&p);
+        assert!(env.contains("MQTT_HOST = \"192.168.1.10\""), "{env}");
+        assert!(env.contains("OTA_MANIFEST_URL = \"http://192.168.1.10:8080/kitchen-hub/manifest.json\""), "{env}");
         let cargo = codegen::cargo_toml(
             &render::render("Cargo.toml", render::FILES[1].1, &p.package, "esp32c6", "/opt/iotkit").unwrap(),
             &p,

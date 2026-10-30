@@ -595,6 +595,28 @@ pub fn update_env(p: &Project) -> String {
     s
 }
 
+/// The `[env]` lines of the project's own servers, for `.cargo/config.toml` (committed: not secret,
+/// and the same for everyone building the project). The broker's login is in `secrets`.
+pub fn servers_env(p: &Project) -> String {
+    let a = &p.answers;
+    let mut s = String::new();
+    if let Some(host) = &a.mqtt_host {
+        let _ = writeln!(
+            s,
+            "# The MQTT broker (`host` or `host:port`), unless one is given on the device.\nMQTT_HOST = {}",
+            toml::Value::String(host.clone())
+        );
+    }
+    if let Some(url) = &a.updates_url {
+        let _ = writeln!(
+            s,
+            "# Where Home Assistant's updates come from (`cargo iotkit ota publish`).\nOTA_MANIFEST_URL = {}",
+            toml::Value::String(url.clone())
+        );
+    }
+    s
+}
+
 /// `.cargo/secrets.toml` (git-ignored): what the builder gave now, read at build time.
 pub fn secrets(p: &Project) -> Option<String> {
     let a = &p.answers;
@@ -610,15 +632,10 @@ pub fn secrets(p: &Project) -> Option<String> {
         set("WIFI_SSID", ssid);
         set("WIFI_PASS", a.wifi_password.as_deref().unwrap_or(""));
     }
-    if let Some(host) = &a.mqtt_host {
-        set("MQTT_HOST", host);
-        if let Some(user) = &a.mqtt_user {
-            set("MQTT_USER", user);
-            set("MQTT_PASS", a.mqtt_password.as_deref().unwrap_or(""));
-        }
-    }
-    if let Some(url) = &a.updates_url {
-        set("OTA_MANIFEST_URL", url);
+    // The broker's host and the update URL are in `.cargo/config.toml` (`servers_env`).
+    if let (Some(_), Some(user)) = (&a.mqtt_host, &a.mqtt_user) {
+        set("MQTT_USER", user);
+        set("MQTT_PASS", a.mqtt_password.as_deref().unwrap_or(""));
     }
     if let Some(setup) = p.matter_setup {
         set("MATTER_PASSCODE", &setup.passcode.to_string());
@@ -934,16 +951,18 @@ pub fn readme(p: &Project) -> String {
                     setup.manual_code_pretty()
                 );
             }
-            // Thread builds have no console.
-            None if p.thread() => s.push_str("Each device draws its pairing code at its first boot: it is in the boot log.\n"),
-            None => s.push_str(
+            // Thread builds have no console; Wi-Fi ones only if asked.
+            None if a.console => s.push_str(
                 "Each device draws its pairing code at its first boot: it is in the boot log, and `matter` on the console prints it.\n",
             ),
+            None => s.push_str("Each device draws its pairing code at its first boot: it is in the boot log.\n"),
         }
         s.push_str(if p.thread() {
             "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. Holding BOOT 3 s lets another\ncontroller pair for 15 minutes.\n"
-        } else {
+        } else if a.console {
             "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. `matter pair` on the console lets\nanother controller pair for 15 minutes.\n"
+        } else {
+            "\nIn Home Assistant: *Settings > Devices > Add device > Matter*, then the code. Another controller pairs through the\nfirst one (most controllers share a device they paired).\n"
         });
     }
 

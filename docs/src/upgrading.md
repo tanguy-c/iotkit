@@ -17,7 +17,8 @@ which now count as given on the device: flash it once with `cargo iotkit flash -
 ### The update URL is built in
 
 `update-url` is gone from the console, and a URL set with it is ignored: build the firmware with
-`OTA_MANIFEST_URL`. `ota::UpdateSource` is gone.
+`OTA_MANIFEST_URL`, best in `.cargo/config.toml`'s `[env]` (committed), as `cargo iotkit new` now
+does with it and `MQTT_HOST`; `.cargo/secrets.toml` keeps the logins. `ota::UpdateSource` is gone.
 
 ### The console is opt-in
 

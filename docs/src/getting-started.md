@@ -44,8 +44,8 @@ It asks, in plain words:
 
 You get one entity per part, each in its own module, `src/parts/<entity id>.rs`: a
 [ready-made part](components.md) where there is one, and a `TODO(<entity id>)` with hints
-elsewhere. You also get a README with the wiring table, `.cargo/secrets.toml` with what you gave,
-`iotkit.toml` with the other answers, and the update signing keys. `--defaults` asks nothing (a plugged-in C6 with
+elsewhere. You also get a README with the wiring table, `.cargo/secrets.toml` with the secrets you
+gave, the broker and update URL in `.cargo/config.toml`, `iotkit.toml` with the other answers, and the update signing keys. `--defaults` asks nothing (a plugged-in C6 with
 its LED as a light that shows the status); `--answers FILE` reads the answers from TOML (scripts, CI).
 
 ```text
@@ -83,7 +83,7 @@ browser](install-from-browser.md).
 
 ## Join Wi-Fi
 
-With no network stored, the device opens a setup window. Give it your network any of three ways:
+With no network (none built in, none given before), the device opens a setup window. Give it your network any of three ways:
 
 - **Setup access point:** join the open network `iotkit-XXXX`; the phone shows the setup page (or
   open `http://192.168.4.1/`). Keep it open: it says when the device is connected (the access
@@ -94,8 +94,8 @@ With no network stored, the device opens a setup window. Give it your network an
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
 characters. To change it later, hold **BOOT** 3 s, or type `provision` on the [USB console](console.md);
-the window stays open 10 minutes, or until a short press of **BOOT** closes it (once a network is
-stored). Hold **BOOT** 10 s to erase every setting and Matter pairing.
+the window stays open 10 minutes, or until a short press of **BOOT** closes it (once the device
+has a network). Hold **BOOT** 10 s to erase every setting and Matter pairing.
 
 > During a setup window anyone in range can give the device a network. Open it only when you
 > need it.
@@ -105,10 +105,12 @@ For development, `.cargo/secrets.toml` (git-ignored) can build the network in (`
 
 ## Where settings come from
 
-`.cargo/secrets.toml` (git-ignored; `secrets.toml.example` lists its keys) is read at build time:
-its values are **built in**, and every flash or update brings the new build's. A value **given
+The `[env]` of `.cargo/config.toml` (committed: the broker's host, the update URL) and
+`.cargo/secrets.toml` (git-ignored: the network, logins, keys and codes; `secrets.toml.example`
+lists its keys) are read at build time: their values are **built in**, and every flash or update
+brings the new build's. A value **given
 on the device** (setup window, console) is stored in flash and wins over the built-in one until a
-factory reset. Nothing else is stored.
+factory reset. No other setting is stored.
 
 | Setting | Built in | Given on the device |
 | --- | --- | --- |
