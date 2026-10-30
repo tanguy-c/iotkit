@@ -17,6 +17,8 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - `iotkit::esphome::api_key()`: the ESPHome API's key, for an app to show (a device's own key, on a
   screen).
 - `cargo iotkit flash --factory-reset`: erases the settings and Matter pairings as it flashes.
+- Wi-Fi: a joined network that gives no address within 30 s is left and joined again, backing
+  off like a failed join (an access point that never answered DHCP kept the device there for good).
 - Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
   (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
   allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more
