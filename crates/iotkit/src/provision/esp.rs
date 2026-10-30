@@ -236,7 +236,7 @@ pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: 
 }
 
 async fn has_network(p: &Provisioner) -> bool {
-    crate::net::esp::credentials(p.store).await.is_some()
+    crate::net::esp::has_credentials(p.store).await
 }
 
 async fn closed() {
@@ -259,7 +259,7 @@ pub async fn button_task(mut button: esp_hal::gpio::Input<'static>, store: &'sta
             Gesture::Press if crate::matter::common::pairing() => crate::matter::common::close_pairing_window(),
             Gesture::Press if window_open() => {
                 // Without a network, the window is the way to get one: it stays.
-                if crate::net::esp::credentials(store).await.is_some() {
+                if crate::net::esp::has_credentials(store).await {
                     log::info!("provision: button pressed, window closed");
                     close_window();
                 } else {

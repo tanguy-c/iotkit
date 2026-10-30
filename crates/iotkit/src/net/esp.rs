@@ -94,6 +94,12 @@ pub async fn credentials(store: &SharedStore) -> Option<WifiCredentials> {
     store.lock().await.load_or(built_in).await
 }
 
+/// Whether the device has a network, built in or given, without making it (a smaller future
+/// for the tasks that only ask).
+pub async fn has_credentials(store: &SharedStore) -> bool {
+    option_env!("WIFI_SSID").is_some() || matches!(store.lock().await.load::<WifiCredentials>().await, Ok(Some(_)))
+}
+
 /// What a deep-sleeping device remembers to join faster: the access point (channel, BSSID) and
 /// the last DHCP lease.
 #[cfg(feature = "deep-sleep")]

@@ -145,6 +145,9 @@ pub struct Store<F> {
     flash: F,
     range: Range<u32>,
     buf: [u8; BUF_LEN],
+    /// The setting being saved, encoded: here once, not in the future of every caller of
+    /// [`save`](Self::save) while it waits for the flash.
+    value: [u8; MAX_VALUE_LEN],
 }
 
 impl<F: MultiwriteNorFlash> Store<F> {
@@ -155,7 +158,7 @@ impl<F: MultiwriteNorFlash> Store<F> {
         if !aligned || range.end < range.start + 2 * sector {
             return Err(Error::Range);
         }
-        Ok(Self { flash, range, buf: [0; BUF_LEN] })
+        Ok(Self { flash, range, buf: [0; BUF_LEN], value: [0; MAX_VALUE_LEN] })
     }
 
     /// Checks that the range holds a store; if it holds something else (e.g. an old firmware, or
@@ -216,10 +219,9 @@ impl<F: MultiwriteNorFlash> Store<F> {
 
     /// Writes a setting (only when it differs from what is stored, to spare the flash).
     pub async fn save<S: Setting>(&mut self, value: &S) -> Result<(), Error> {
-        let mut encoded = [0; MAX_VALUE_LEN];
-        encoded[0] = S::VERSION;
-        let n = postcard::to_slice(value, &mut encoded[1..]).map_err(|_| Error::TooLarge)?.len() + 1;
-        let encoded = &encoded[..n];
+        self.value[0] = S::VERSION;
+        let n = postcard::to_slice(value, &mut self.value[1..]).map_err(|_| Error::TooLarge)?.len() + 1;
+        let encoded = &self.value[..n];
 
         let stored: Option<&[u8]> =
             map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;

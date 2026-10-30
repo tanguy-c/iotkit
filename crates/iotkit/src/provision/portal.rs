@@ -51,22 +51,23 @@ pub struct Form {
 pub fn parse_form(body: &[u8]) -> Option<Form> {
     let body = core::str::from_utf8(body).ok()?;
     let (mut ssid, mut password) = (None, String::new());
-    let (mut broker, mut user, mut broker_password) = (String::<70>::new(), String::<32>::new(), String::<64>::new());
+    // The login straight into the broker; the address, once decoded, into its host and port.
+    let mut broker = Broker { host: String::new(), port: 0, user: String::new(), password: String::new() };
     for pair in body.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         match key {
             "ssid" => ssid = Some(decode(value)?),
             "password" => password = decode(value)?,
-            "broker" => broker = decode(value)?,
-            "broker_user" => user = decode(value)?,
-            "broker_password" => broker_password = decode(value)?,
+            "broker" => match decode::<70>(value)?.trim() {
+                "" => {}
+                address => broker.set_address(address)?,
+            },
+            "broker_user" => broker.user = decode(value)?,
+            "broker_password" => broker.password = decode(value)?,
             _ => {}
         }
     }
-    let broker = match broker.trim() {
-        "" => None,
-        address => Some(Broker::parse(address, &user, &broker_password)?),
-    };
+    let broker = (!broker.host.is_empty()).then_some(broker);
     Some(Form { ssid: ssid.filter(|s| !s.is_empty())?, password, broker })
 }
 
