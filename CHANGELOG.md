@@ -5,6 +5,15 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
 ## Unreleased
 
+- Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
+  (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
+  allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more
+  stack.
+- Matter over Thread: a device whose last pairing a controller removes forgets the Thread network,
+  instead of joining it while pairing over Bluetooth on the same radio (a busy loop that also
+  ignored the BOOT button).
+- Adafruit Feather ESP32-C6 (`cargo iotkit new`): GPIO20 high at boot, powering the NeoPixel and
+  the STEMMA QT port.
 - `cargo iotkit new` writes one module per part, `src/parts/<entity id>.rs`, and the board's LED in
   `src/led.rs`; `src/main.rs` keeps the setup and the lists of parts. `iotkit.toml` keeps the
   answers (without the secrets).
@@ -19,15 +28,6 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
   smoke and motion inputs, and the soil probe (on the ADC after the battery level).
 - A Matter ICD (Thread on battery) reads its sensors every `report_every_min` (asked now), not
   every 30 s: each report wakes its radio.
-- Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
-  (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
-  allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more
-  stack.
-- Matter over Thread: a device whose last pairing a controller removes forgets the Thread network,
-  instead of joining it while pairing over Bluetooth on the same radio (a busy loop that also
-  ignored the BOOT button).
-- Adafruit Feather ESP32-C6 (`cargo iotkit new`): GPIO20 high at boot, powering the NeoPixel and
-  the STEMMA QT port.
 
 ## 0.4.0 (2026-10-27)
 
