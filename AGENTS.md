@@ -57,7 +57,7 @@ then the guide in `docs/` (mdBook; `docs/src/llms.txt` indexes it).
   [crates/iotkit/src/lib.rs](crates/iotkit/src/lib.rs).
 - The C3 has no atomics: `portable-atomic` is an opt-in feature its `esp32c3` features enable; the
   C6 keeps core atomics.
-- No heap growth: `iotkit::init!`'s heap (64 + 96 KB; ESP32: 96 KB; H2: 64 + 32 KB, `DEFAULT_HEAP`) stays as is; use
+- No heap growth: `iotkit::init!`'s heap (64 + 96 KB with Wi-Fi, 64 KB without; ESP32: 96 KB; `DEFAULT_HEAP`) stays as is; use
   static or stack buffers (`heapless`, `static_cell`).
 - `template/check-sync.sh` fails when the template's copies drift from the root files.
 - `xtask/answers/*.toml` are CI inputs: a new part kind or board option belongs in them.

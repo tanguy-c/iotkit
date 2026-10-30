@@ -67,6 +67,6 @@ Early (0.x): the API and the settings' flash layout may still change.
 | ESP32-C5 | yes | no: esp-hal 1.2 has no true RNG on the C5 yet | build only |
 | ESP32-S3 | yes | no: does not fit in internal RAM (PSRAM support later) | yes (ESP32-S3-DevKitC-1 v1.1, 8 MB) |
 | ESP32 | yes, except setup over Bluetooth; console and Improv on UART0; no deep sleep yet | no: not tried (RAM, rs-matter support) | build only |
-| ESP32-H2 | no Wi-Fi | Thread (`matter-thread`, `matter-ota` included; its `init!` heap 32 KB smaller) | build only |
+| ESP32-H2 | no Wi-Fi | Thread (`matter-thread`, `matter-ota` included; without Wi-Fi, `init!`'s heap is the reclaimed 64 KB only) | build only |
 
 The ESP32-C6 is the reference: support for other chips is added without changing it.
