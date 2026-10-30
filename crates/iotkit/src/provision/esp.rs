@@ -134,15 +134,16 @@ impl Serial {
                 }
                 return console;
             }
-            Some(Ok((frame::RPC, data))) => heapless::Vec::<u8, 256>::from_slice(data).ok(),
+            // Read in place: nothing else uses the decoder until the answer (a join can take a
+            // while, and a copy would stay in the console's future meanwhile).
+            Some(Ok((frame::RPC, data))) => data,
             Some(Ok(_)) => return Released::new(),
             Some(Err(e)) => {
                 send(frame::ERROR, &[e as u8]);
                 return Released::new();
             }
         };
-        let Some(rpc) = rpc else { return Released::new() };
-        match parse_rpc(Transport::Serial, &rpc) {
+        match parse_rpc(Transport::Serial, rpc) {
             Ok(Rpc::GetState) => {
                 let state = p.state();
                 send(frame::STATE, &[state as u8]);

@@ -25,6 +25,7 @@
 
 use core::{fmt, ops::Range};
 
+use embassy_futures::block_on;
 use embedded_storage_async::nor_flash::MultiwriteNorFlash;
 use sequential_storage::{cache::NoCache, map};
 use serde::{Serialize, de::DeserializeOwned};
@@ -141,6 +142,11 @@ impl<E> From<sequential_storage::Error<E>> for Error {
 }
 
 /// Settings in a flash range.
+///
+/// For a blocking flash behind an async interface (esp-storage through `BlockingAsync`), whose
+/// futures are ready at once: each operation runs its flash work to the end before returning
+/// ([`block_on`]), so that work's state (about 600 bytes) is not kept in the future of every task
+/// that loads or saves a setting. A flash that truly waits would block the caller meanwhile.
 pub struct Store<F> {
     flash: F,
     range: Range<u32>,
@@ -165,7 +171,7 @@ impl<F: MultiwriteNorFlash> Store<F> {
     /// it was never erased), erases it. Returns `true` when it did. Call once after [`new`](Self::new).
     pub async fn format_if_needed(&mut self) -> Result<bool, Error> {
         let probe: Result<Option<&[u8]>, _> =
-            map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &0u16).await;
+            block_on(map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &0u16));
         match probe.map_err(Error::from) {
             Ok(_) => Ok(false),
             Err(Error::Corrupted) => {
@@ -188,8 +194,13 @@ impl<F: MultiwriteNorFlash> Store<F> {
 
     /// Reads a setting; `None` if it was never saved (or its old version was dropped).
     pub async fn load<S: Setting>(&mut self) -> Result<Option<S>, Error> {
-        let raw: Option<&[u8]> =
-            map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;
+        let raw: Option<&[u8]> = block_on(map::fetch_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut NoCache::new(),
+            &mut self.buf,
+            &S::KEY,
+        ))?;
         let Some((&version, bytes)) = raw.and_then(<[u8]>::split_first) else {
             return Ok(None);
         };
@@ -223,25 +234,36 @@ impl<F: MultiwriteNorFlash> Store<F> {
         let n = postcard::to_slice(value, &mut self.value[1..]).map_err(|_| Error::TooLarge)?.len() + 1;
         let encoded = &self.value[..n];
 
-        let stored: Option<&[u8]> =
-            map::fetch_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;
+        let stored: Option<&[u8]> = block_on(map::fetch_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut NoCache::new(),
+            &mut self.buf,
+            &S::KEY,
+        ))?;
         if stored == Some(encoded) {
             return Ok(());
         }
-        map::store_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY, &encoded)
-            .await?;
+        block_on(map::store_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut NoCache::new(),
+            &mut self.buf,
+            &S::KEY,
+            &encoded,
+        ))?;
         Ok(())
     }
 
     /// Forgets a setting.
     pub async fn remove<S: Setting>(&mut self) -> Result<(), Error> {
-        map::remove_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY).await?;
+        block_on(map::remove_item(&mut self.flash, self.range.clone(), &mut NoCache::new(), &mut self.buf, &S::KEY))?;
         Ok(())
     }
 
     /// Erases every setting.
     pub async fn factory_reset(&mut self) -> Result<(), Error> {
-        self.flash.erase(self.range.start, self.range.end).await.map_err(|_| Error::Flash)
+        block_on(self.flash.erase(self.range.start, self.range.end)).map_err(|_| Error::Flash)
     }
 }
 
