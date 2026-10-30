@@ -14,7 +14,7 @@ esp32c6 = ["iotkit/esp32c6", "esp-hal/esp32c6", "esp-rtos/esp32c6", "esp-hal-sma
 matter-wifi = ["iotkit/matter-wifi"]
 
 [dependencies]
-iotkit = { workspace = true, features = ["ha-update", "smartled", "remember"] }
+iotkit = { workspace = true, features = ["console", "ha-update", "smartled", "remember"] }
 
 esp-hal                = { workspace = true }
 esp-rtos               = { workspace = true }

@@ -124,6 +124,10 @@ enum Cmd {
     Flash {
         #[command(flatten)]
         app: App,
+        /// Also erase the settings set on the device and the Matter pairings (the `config` and
+        /// `nvs` partitions), as a factory reset does: it starts from the values built in.
+        #[arg(long)]
+        factory_reset: bool,
     },
     /// OTA commands.
     #[command(subcommand)]
@@ -203,8 +207,8 @@ enum Ota {
         key: PathBuf,
     },
     /// Build, then copy the signed manifest and image to `DIR/<package>/`, a folder a web server
-    /// serves: devices that poll its manifest (`update-url` on their console) offer the update
-    /// in Home Assistant.
+    /// serves: devices built with its manifest URL (`OTA_MANIFEST_URL`) offer the update in Home
+    /// Assistant.
     Publish {
         /// The served folder (e.g. a web server's root, or a mounted share).
         #[arg(long)]
@@ -280,7 +284,7 @@ fn main() -> Result<()> {
             };
             verify(&manifest, &key)
         }
-        Cmd::Flash { app } => flash(&Build::new(app)?),
+        Cmd::Flash { app, factory_reset } => flash(&Build::new(app)?, factory_reset),
         Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, release, key }) => {
             let app = Build::new(app)?;
             if !no_build {
@@ -451,11 +455,13 @@ impl Build {
 }
 
 /// Flashes over USB, then opens the serial monitor.
-fn flash(app: &Build) -> Result<()> {
+fn flash(app: &Build, factory_reset: bool) -> Result<()> {
     run(app.cargo().arg("build").args(app.cargo_args()))?;
+    // otadata: boot the first app slot; config and nvs: what a factory reset erases.
+    let erase = if factory_reset { "otadata,config,nvs" } else { "otadata" };
     run(Command::new("espflash")
         .args(["flash", "--monitor", "--chip", app.chip.name, "--flash-size", &app.flash_size])
-        .args(["--partition-table", app.partition_table(), "--erase-parts", "otadata"])
+        .args(["--partition-table", app.partition_table(), "--erase-parts", erase])
         .arg(app.elf()))
 }
 
@@ -695,7 +701,7 @@ fn publish(package: &str, to: &Path, base_url: Option<&str>) -> Result<()> {
     fs::rename(&tmp, dir.join("manifest.json"))?;
     println!("published {package} {} to {}", manifest.version, dir.display());
     if let Some(base) = base_url {
-        println!("devices: update-url {}/{package}/manifest.json", base.trim_end_matches('/'));
+        println!("devices built with OTA_MANIFEST_URL = \"{}/{package}/manifest.json\"", base.trim_end_matches('/'));
     }
     Ok(())
 }

@@ -66,6 +66,10 @@ fn main() {
         println!("cargo::rustc-cfg=auto_update_off");
     }
     let updates = on("_ESP") && on("WIFI") && on("HA_UPDATE");
+    println!("cargo:rerun-if-env-changed=OTA_MANIFEST_URL");
+    if updates && std::env::var("OTA_MANIFEST_URL").unwrap_or_default().is_empty() {
+        println!("cargo:warning=`ha-update` without OTA_MANIFEST_URL: Home Assistant offers no updates");
+    }
     // Nobody can click *Install* on a sleeping device over the API: its switch is always there.
     let asleep = on("DEEP_SLEEP") && on("ESPHOME_API");
     if updates && (auto == Some(true) || asleep) {

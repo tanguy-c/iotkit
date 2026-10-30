@@ -77,15 +77,42 @@ With no network stored, the device opens a setup window. Give it your network an
 - **USB (Improv):** ESP Web Tools, or improv-wifi.com with Web Serial.
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
-characters. To change it later, hold **BOOT** 3 s, or type `provision` on the USB console;
+characters. To change it later, hold **BOOT** 3 s, or type `provision` on the [USB console](console.md);
 the window stays open 10 minutes, or until a short press of **BOOT** closes it (once a network is
 stored). Hold **BOOT** 10 s to erase every setting and Matter pairing.
 
 > During a setup window anyone in range can give the device a network. Open it only when you
 > need it.
 
-For development, `.cargo/secrets.toml` (git-ignored) can set `WIFI_SSID`, `WIFI_PASS` and
-`MQTT_HOST`: the first boot stores them and skips the window. `secrets.toml.example` lists the
-other keys (broker login, update URL, Matter code, ESPHome API key).
+For development, `.cargo/secrets.toml` (git-ignored) can build the network in (`WIFI_SSID`,
+`WIFI_PASS`): the device joins it and skips the window.
+
+## Where settings come from
+
+`.cargo/secrets.toml` (git-ignored; `secrets.toml.example` lists its keys) is read at build time:
+its values are **built in**, and every flash or update brings the new build's. A value **given
+on the device** (setup window, console) is stored in flash and wins over the built-in one until a
+factory reset. Nothing else is stored.
+
+| Setting | Built in | Given on the device |
+| --- | --- | --- |
+| Wi-Fi network | `WIFI_SSID`, `WIFI_PASS` | the setup window (access point, Improv) |
+| MQTT broker | `MQTT_HOST` (`host` or `host:port`), `MQTT_USER`, `MQTT_PASS` | the setup page (*MQTT broker*, under the network); `mqtt HOST` on the console; `iotkit::mqtt::esp::set_broker` |
+| ESPHome API key | `ESPHOME_API_KEY` | `api-key KEY` on the console. With neither, the device makes one at its first boot: `iotkit::esphome::api_key()` gives it, for a screen |
+| Matter pairing code | `MATTER_PASSCODE`, `MATTER_DISCRIMINATOR` (always win) | none. With neither, the device draws one at its first boot: `pairing_codes()` (`iotkit::matter::wifi`, `::thread`) |
+| Update manifest URL | `OTA_MANIFEST_URL` | none: the same for every device running the firmware |
+
+What each storage keeps:
+
+| | USB flash | Update | Factory reset | Power loss |
+| --- | --- | --- | --- | --- |
+| Built-in values (the firmware) | the new build's | the new build's | kept | kept |
+| Values given on the device, remembered entity states, crash and update records (`config` partition) | kept | kept | erased | kept |
+| Matter pairings, the Thread network (`nvs` partition) | kept | kept | erased | kept |
+
+A factory reset: hold **BOOT** 10 s, `factory-reset` on the console, or flash with
+`cargo iotkit flash --factory-reset`, which erases both partitions as it flashes. An update whose
+built-in network or ESPHome key no longer works (the device stays offline, or Home Assistant cannot
+connect) fails its health check and rolls back to the previous firmware and its values.
 
 Then [connect it to Home Assistant](home-assistant.md) or [a Matter controller](matter.md).

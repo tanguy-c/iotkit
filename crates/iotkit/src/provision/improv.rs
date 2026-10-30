@@ -248,12 +248,24 @@ pub struct SerialDecoder {
     buf: heapless::Vec<u8, FRAME_MAX>,
     /// `buf` holds a frame already returned.
     complete: bool,
+    /// Bytes held back as the start of a frame that turned out not to be one: the console's.
+    released: Released,
 }
+
+/// The bytes a [`SerialDecoder`] gives back: a header that broke off (at most the 6 header bytes
+/// before the version), and room for the byte that broke it.
+pub type Released = heapless::Vec<u8, 8>;
 
 impl SerialDecoder {
     /// Nothing received yet.
     pub const fn new() -> Self {
-        Self { buf: heapless::Vec::new(), complete: false }
+        Self { buf: heapless::Vec::new(), complete: false, released: heapless::Vec::new() }
+    }
+
+    /// Takes the bytes held back for a frame that did not come (`I` before `=`, say), in the
+    /// order received: they belong to the console, before the byte just pushed.
+    pub fn take_released(&mut self) -> Released {
+        core::mem::take(&mut self.released)
     }
 
     /// True while the bytes so far could be the start of a frame: the caller can hold them
@@ -275,6 +287,7 @@ impl SerialDecoder {
             _ => None,
         };
         if expected.is_some_and(|b| b != byte) {
+            let _ = self.released.extend_from_slice(&self.buf);
             self.buf.clear();
             if byte == SERIAL_HEADER[0] {
                 let _ = self.buf.push(byte);
@@ -387,5 +400,32 @@ mod tests {
             last = d.push(b).map(|r| r.map(|_| ()));
         }
         assert_eq!(last, Some(Err(Error::InvalidRpc)));
+    }
+
+    /// What the console gets from `input`: each byte unless a frame holds it, after the bytes a
+    /// broken header released.
+    fn console(input: &[u8]) -> alloc::vec::Vec<u8> {
+        let mut d = SerialDecoder::new();
+        let mut out = alloc::vec::Vec::new();
+        for &b in input {
+            let frame = d.push(b).is_some();
+            out.extend_from_slice(&d.take_released());
+            if !frame && !d.in_frame() {
+                out.push(b);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn gives_back_what_is_not_a_frame() {
+        // An `I` in a console line, such as the end of a base64 key.
+        assert_eq!(console(b"api-key ZExI=\r"), b"api-key ZExI=\r");
+        assert_eq!(console(b"IMPROX IMPRO\n"), b"IMPROX IMPRO\n");
+        assert_eq!(console(b"IIMPROV\x02"), b"IIMPROV\x02", "the wrong version");
+        // A frame still goes to Improv alone.
+        let mut input = b"help\r".to_vec();
+        input.extend_from_slice(&SERIAL_WIFI);
+        assert_eq!(console(&input), b"help\r");
     }
 }

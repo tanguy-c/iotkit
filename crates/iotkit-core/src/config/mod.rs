@@ -44,7 +44,8 @@ pub mod keys {
     pub const OTA_PENDING: u16 = 0x0030;
     /// `iotkit::ota`: what the last update did.
     pub const OTA_LAST: u16 = 0x0031;
-    /// `iotkit::ota`: the manifest URL to check for updates.
+    /// Retired: the manifest URL, now built in (`OTA_MANIFEST_URL`). A value left in flash is
+    /// ignored; never reuse the key.
     pub const UPDATE_SOURCE: u16 = 0x0032;
     /// `iotkit::matter::ota`: the Matter OTA provider of the update on trial.
     pub const OTA_MATTER_FROM: u16 = 0x0033;
@@ -200,6 +201,19 @@ impl<F: MultiwriteNorFlash> Store<F> {
         }
     }
 
+    /// The stored setting, else `built` (the value given at build time, never stored): a setting
+    /// is stored only when chosen on the device, and then wins until a factory reset.
+    pub async fn load_or<S: Setting>(&mut self, built: Option<S>) -> Option<S> {
+        match self.load::<S>().await {
+            Ok(Some(s)) => Some(s),
+            Ok(None) => built,
+            Err(e) => {
+                log::warn!("config: setting {:#06x} unreadable ({e}), using the built-in one", S::KEY);
+                built
+            }
+        }
+    }
+
     /// Writes a setting (only when it differs from what is stored, to spare the flash).
     pub async fn save<S: Setting>(&mut self, value: &S) -> Result<(), Error> {
         let mut encoded = [0; MAX_VALUE_LEN];
@@ -349,6 +363,19 @@ mod tests {
             assert_eq!(s.load::<Wifi>().await, Ok(Some(wifi)));
             s.remove::<Boots>().await.unwrap();
             assert_eq!(s.load::<Boots>().await, Ok(None));
+        });
+    }
+
+    #[test]
+    fn stored_setting_wins_over_built_in() {
+        block_on(async {
+            let mut s = store();
+            assert_eq!(s.load_or::<Boots>(None).await, None);
+            assert_eq!(s.load_or(Some(Boots(1))).await, Some(Boots(1)));
+            assert_eq!(s.load::<Boots>().await, Ok(None), "the built-in value is not stored");
+            s.save(&Boots(2)).await.unwrap();
+            assert_eq!(s.load_or(Some(Boots(1))).await, Some(Boots(2)));
+            assert_eq!(s.load_or::<Boots>(None).await, Some(Boots(2)));
         });
     }
 

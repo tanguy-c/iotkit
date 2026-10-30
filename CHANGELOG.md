@@ -5,6 +5,18 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
 ## Unreleased
 
+- **Breaking:** settings are predictable. A value built in (`.cargo/secrets.toml`) is no longer
+  copied to flash at the first boot, where it hid every later build's: each flash or update brings
+  the new one, unless a value was given on the device (setup window, console), which wins until a
+  factory reset. The update URL is built in only (`OTA_MANIFEST_URL`; `update-url` and
+  `ota::UpdateSource` are gone). The console is opt-in (the `console` feature)
+  ([Upgrading](docs/src/upgrading.md), [where settings come
+  from](docs/src/getting-started.md#where-settings-come-from)).
+- The setup page takes the MQTT broker too (*MQTT broker*, under the Wi-Fi network), and an app can
+  set it (`iotkit::mqtt::esp::set_broker`); the broker in use is logged at boot.
+- `iotkit::esphome::api_key()`: the ESPHome API's key, for an app to show (a device's own key, on a
+  screen).
+- `cargo iotkit flash --factory-reset`: erases the settings and Matter pairings as it flashes.
 - Less RAM without Wi-Fi: `init!`'s heap is only the 64 KB reclaimed from the bootloader
   (`DEFAULT_HEAP` is 0 without `wifi`; Bluetooth and Thread fit), and the Matter stack's
   allocations are sized to their measured use: Matter over Thread on the C6 has about 100 KB more

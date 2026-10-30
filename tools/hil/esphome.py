@@ -2,8 +2,8 @@
 """Checks a device's ESPHome API (`esphome-api`) as Home Assistant uses it: handshake with the
 key, device info, the entity list, the states, and a switch command answered by a new state.
 
-Needs: `pip install aioesphomeapi`. The key from `api-key` on the device's console, in
-ESPHOME_API_KEY (it is never printed).
+Needs: `pip install aioesphomeapi`. The device's key (the one built in, or `api-key` on its
+console), in ESPHOME_API_KEY (it is never printed).
 
     ESPHOME_API_KEY=... tools/hil/esphome.py iotkit-xxxx.local [--switch relay]
 """
@@ -53,7 +53,7 @@ def main() -> None:
     parser.add_argument("--switch", help="a switch to toggle (and wait for its new state)")
     args = parser.parse_args()
     if "ESPHOME_API_KEY" not in os.environ:
-        sys.exit("ESPHOME_API_KEY: the key `api-key` shows on the device's console")
+        sys.exit("ESPHOME_API_KEY: the device's key (built in, or `api-key` on its console)")
     asyncio.run(check(args.host, args.switch))
 
 

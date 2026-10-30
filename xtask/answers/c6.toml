@@ -1,11 +1,12 @@
 # `cargo iotkit new --answers answers/c6.toml`: a plugged-in ESP32-C6 with Matter (fixed code),
-# one part of every kind, and AGENTS.md. CI generates and builds it.
+# one part of every kind, the USB console, and AGENTS.md. CI generates and builds it.
 name = "Kitchen hub"
 maker = "CI"
 board = "esp32c6-devkitc-1"
 matter = "fixed"
 mqtt_host = "192.168.1.10"
 updates_url = "http://192.168.1.10:8080/kitchen-hub/manifest.json"
+console = true
 ai_agents = true
 
 [[parts]]

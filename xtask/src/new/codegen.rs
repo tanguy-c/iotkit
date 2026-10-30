@@ -246,7 +246,8 @@ pub fn main_rs(p: &Project) -> String {
             s,
             "//! `iotkit::start` brings Wi-Fi setup (access point, Improv), Home Assistant, signed updates,"
         );
-        let _ = writeln!(s, "//! crash records, the watchdog and the USB console (`help`).");
+        let console = if p.answers.console { " and the USB console (`help`)" } else { "" };
+        let _ = writeln!(s, "//! crash records, the watchdog{console}.");
     }
     if p.parts.is_empty() {
         s.push_str("//! No parts yet: add entities below (https://tanguy-c.github.io/iotkit/entities.html).\n");
@@ -651,8 +652,8 @@ pub fn update_env(p: &Project) -> String {
 pub fn secrets(p: &Project) -> Option<String> {
     let a = &p.answers;
     let mut s = String::from(
-        "# Read at build time (git-ignored). The device stores the network and the broker at its first\n\
-         # boot; `factory-reset` on the console forgets them. See secrets.toml.example.\n[env]\n",
+        "# Read at build time (git-ignored): used at every flash or update, unless set on the device\n\
+         # (setup page, console), which wins until a factory reset. See secrets.toml.example.\n[env]\n",
     );
     let before = s.len();
     let mut set = |key: &str, value: &str| {
@@ -825,13 +826,12 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         (true, "wifi"),
         (setup.contains(&SetupWay::AccessPoint), "softap"),
         (setup.contains(&SetupWay::Serial), "improv-serial"),
-        (p.answers.console, "console"),
         (updates, "ota-push"),
     ]
     .into_iter()
     .filter_map(|(on, f)| on.then_some(f))
     .collect();
-    let all = ["improv-ble", "mqtt", "wifi", "softap", "improv-serial", "console", "ota-push"];
+    let all = ["improv-ble", "mqtt", "wifi", "softap", "improv-serial", "ota-push"];
     let defaults = if p.thread() {
         "default-features = false, "
     } else if wifi != all {
@@ -840,6 +840,10 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
     } else {
         ""
     };
+    // Opt-in: added to the defaults or to the list.
+    if p.answers.console && !p.thread() {
+        app_features.push("console");
+    }
     let line = format!(
         "iotkit = {{ {source}, {defaults}features = [{}] }}",
         app_features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
@@ -1003,7 +1007,7 @@ pub fn readme(p: &Project) -> String {
         );
     } else if a.wifi_ssid.is_some() {
         s.push_str("## Wi-Fi and Home Assistant\n\n");
-        s.push_str("The Wi-Fi network is built in (`.cargo/secrets.toml`) and stored at the first boot.\n");
+        s.push_str("The Wi-Fi network is built in (`.cargo/secrets.toml`): each flash brings it, unless one was given on the device.\n");
     } else {
         s.push_str("## Wi-Fi and Home Assistant\n\n");
         s.push_str(
@@ -1017,12 +1021,15 @@ pub fn readme(p: &Project) -> String {
             match &p.esphome_key {
                 // Not the key itself: the README is committed, secrets.toml is not.
                 Some(_) => s.push_str("It asks for the encryption key:\n`ESPHOME_API_KEY` in `.cargo/secrets.toml`, the same on every device flashed from this project.\n"),
-                None => s.push_str("It asks for the encryption key:\neach device makes its own at its first boot, and `api-key` on the USB console shows it.\n"),
+                None => s.push_str("It asks for the encryption key:\neach device makes its own at its first boot: `api-key` on the USB console shows it, or the app\nwith `iotkit::esphome::api_key()`.\n"),
             }
         }
         Some(host) => {
             let _ = writeln!(s, "It connects to the MQTT broker at `{host}`; Home Assistant finds it by itself.");
         }
+        None if p.setup().contains(&SetupWay::AccessPoint) => s.push_str(
+            "Give the MQTT broker (Home Assistant's Mosquitto add-on) on the setup page, under the Wi-Fi network\n(*MQTT broker*); Home Assistant finds the device by itself.\n",
+        ),
         None => s.push_str(
             "Set the MQTT broker (Home Assistant's Mosquitto add-on) with `mqtt 192.168.1.10` on the USB console;\nHome Assistant finds the device by itself.\n",
         ),
@@ -1102,7 +1109,7 @@ pub fn readme(p: &Project) -> String {
             );
         }
         None => s.push_str(
-            "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it (`update-url URL` on the console)\n```\n",
+            "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it to devices built with `OTA_MANIFEST_URL`\n```\n",
         ),
     }
     if p.auto_update() {

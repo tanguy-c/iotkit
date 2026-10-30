@@ -14,7 +14,7 @@ use core::fmt::Write as _;
 use crate::config::esp::SharedStore;
 use crate::model::{Entity, Update};
 use crate::net::esp::Net;
-use crate::ota::{UpdateSource, esp::Firmware};
+use crate::ota::esp::Firmware;
 use embassy_futures::select::{Either, Either3, select, select3};
 use embassy_time::{Duration, Timer};
 use heapless::String;
@@ -53,21 +53,17 @@ pub(crate) fn with_update(entities: &'static [&'static dyn Entity]) -> &'static 
     Box::leak(all.into_boxed_slice())
 }
 
-/// The manifest URL: the stored one; the first time, the one given at build time
-/// (`OTA_MANIFEST_URL`), which is then stored.
-pub(crate) async fn source(store: &SharedStore) -> Option<String<200>> {
-    let mut store = store.lock().await;
-    if let Ok(Some(s)) = store.load::<UpdateSource>().await {
-        return Some(s.manifest_url).filter(|u| !u.is_empty());
-    }
-    let built_in = String::try_from(option_env!("OTA_MANIFEST_URL").filter(|u| !u.is_empty())?).ok()?;
-    let _ = store.save(&UpdateSource { manifest_url: built_in.clone() }).await;
-    Some(built_in)
-}
+/// The manifest URL, given at build time (`OTA_MANIFEST_URL`): where this firmware's releases are
+/// published, the same for every device running it.
+const SOURCE: Option<&str> = match option_env!("OTA_MANIFEST_URL") {
+    Some(url) if !url.is_empty() => Some(url),
+    _ => None,
+};
 
-/// Checks for releases (at start, then every [`CHECK_EVERY`], and when the URL changes) and
-/// installs the latest one when Home Assistant asks.
+/// Checks for releases (at start, then every [`CHECK_EVERY`]) and installs the latest one when
+/// Home Assistant asks.
 #[embassy_executor::task]
+#[cfg_attr(not(any(esp_auto, feature = "deep-sleep")), allow(unused_variables))]
 pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmware) {
     FIRMWARE.set_installed(fw.version_text);
     #[cfg(feature = "deep-sleep")]
@@ -86,9 +82,11 @@ pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmw
     let mut check_now = true;
     #[cfg(all(esp_auto, not(feature = "deep-sleep")))]
     let at_slot = false;
+    if SOURCE.is_none() {
+        warn!("update: no manifest URL built in (`OTA_MANIFEST_URL`): Home Assistant offers no updates");
+    }
     loop {
-        let url = source(store).await;
-        match &url {
+        match SOURCE {
             Some(url) if check_now => {
                 CHECKING.store(true, core::sync::atomic::Ordering::Relaxed);
                 let checked = embassy_time::with_timeout(CHECK_TIMEOUT, check(url, fw)).await.unwrap_or_else(|_| {
@@ -112,37 +110,26 @@ pub(crate) async fn update_task(net: Net, store: &'static SharedStore, fw: Firmw
                 known::save(store, fw).await;
                 CHECKING.store(false, core::sync::atomic::Ordering::Relaxed);
             }
-            Some(_) => {}
-            None => info!("update: no manifest URL (set one with `update-url URL`)"),
+            _ => {}
         }
         check_now = true;
         #[cfg(esp_auto)]
-        let wait = select3(
-            Timer::after(CHECK_EVERY),
-            FIRMWARE.wait_install(),
-            select(SOURCE_CHANGED.wait(), auto::run(store, fw)),
-        );
+        let wait = select3(Timer::after(CHECK_EVERY), FIRMWARE.wait_install(), auto::run(store, fw));
         #[cfg(not(esp_auto))]
-        let wait = select3(Timer::after(CHECK_EVERY), FIRMWARE.wait_install(), SOURCE_CHANGED.wait());
+        let wait = select3(Timer::after(CHECK_EVERY), FIRMWARE.wait_install(), core::future::pending::<()>());
         match wait.await {
-            Either3::Second(()) => match &url {
+            Either3::Second(()) => match SOURCE {
                 Some(url) => {
                     install(url).await;
                     check_now = false;
                 }
                 None => warn!("update: install asked, but no manifest URL"),
             },
-            // The timer, a new URL, or *Auto-update* turned on: check now.
+            // The timer, or *Auto-update* turned on: check now.
             Either3::First(()) | Either3::Third(_) => {}
         }
     }
 }
-
-/// The URL was changed (console): check again now.
-pub(crate) static SOURCE_CHANGED: embassy_sync::signal::Signal<
-    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
-    (),
-> = embassy_sync::signal::Signal::new();
 
 /// Checks the manifest at `url`: the release's version if newer.
 async fn check(url: &str, fw: Firmware) -> Result<Option<crate::image::Version>, ()> {

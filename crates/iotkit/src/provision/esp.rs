@@ -19,7 +19,7 @@ use esp_println::Printer;
 use heapless::String;
 
 use crate::provision::improv::{
-    Error, FRAME_MAX, RPC_MAX, Rpc, SerialDecoder, State, Transport, command, frame, parse_rpc, rpc_result,
+    Error, FRAME_MAX, RPC_MAX, Released, Rpc, SerialDecoder, State, Transport, command, frame, parse_rpc, rpc_result,
     serial_frame,
 };
 
@@ -122,19 +122,26 @@ impl Serial {
         Self { decoder: SerialDecoder::new() }
     }
 
-    /// Feeds a byte read from the port. `true` while it belongs to an Improv frame: keep it from
-    /// the console. Answers complete frames (which can take the time of a Wi-Fi join).
-    pub async fn feed(&mut self, p: &Provisioner, byte: u8) -> bool {
+    /// Feeds a byte read from the port; returns the bytes for the console, in order: none while
+    /// they could be an Improv frame, the held ones once they are not (an `I` typed, then not
+    /// `MPROV`). Answers complete frames (which can take the time of a Wi-Fi join).
+    pub async fn feed(&mut self, p: &Provisioner, byte: u8) -> Released {
         let rpc = match self.decoder.push(byte) {
-            None => return self.decoder.in_frame(),
+            None => {
+                let mut console = self.decoder.take_released();
+                if !self.decoder.in_frame() {
+                    let _ = console.push(byte);
+                }
+                return console;
+            }
             Some(Ok((frame::RPC, data))) => heapless::Vec::<u8, 256>::from_slice(data).ok(),
-            Some(Ok(_)) => return true,
+            Some(Ok(_)) => return Released::new(),
             Some(Err(e)) => {
                 send(frame::ERROR, &[e as u8]);
-                return true;
+                return Released::new();
             }
         };
-        let Some(rpc) = rpc else { return true };
+        let Some(rpc) = rpc else { return Released::new() };
         match parse_rpc(Transport::Serial, &rpc) {
             Ok(Rpc::GetState) => {
                 let state = p.state();
@@ -157,7 +164,7 @@ impl Serial {
             Ok(Rpc::Identify) | Err(Error::UnknownRpc) => send(frame::ERROR, &[Error::UnknownRpc as u8]),
             Err(e) => send(frame::ERROR, &[e as u8]),
         }
-        true
+        Released::new()
     }
 }
 
@@ -229,7 +236,7 @@ pub async fn window_task(#[cfg(feature = "improv-ble")] mut bt: BT<'static>, p: 
 }
 
 async fn has_network(p: &Provisioner) -> bool {
-    matches!(p.store.lock().await.load::<WifiCredentials>().await, Ok(Some(_)))
+    crate::net::esp::credentials(p.store).await.is_some()
 }
 
 async fn closed() {
@@ -252,7 +259,7 @@ pub async fn button_task(mut button: esp_hal::gpio::Input<'static>, store: &'sta
             Gesture::Press if crate::matter::common::pairing() => crate::matter::common::close_pairing_window(),
             Gesture::Press if window_open() => {
                 // Without a network, the window is the way to get one: it stays.
-                if matches!(store.lock().await.load::<WifiCredentials>().await, Ok(Some(_))) {
+                if crate::net::esp::credentials(store).await.is_some() {
                     log::info!("provision: button pressed, window closed");
                     close_window();
                 } else {

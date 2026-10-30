@@ -52,8 +52,8 @@ cargo iotkit new my-light --defaults && cd my-light
 cargo iotkit flash --release
 ```
 
-Join the `iotkit-XXXX` network from a phone to give it your Wi-Fi, then type `mqtt <your broker>`
-on the console: the board's LED shows up in Home Assistant. `cargo iotkit new` without
+Join the `iotkit-XXXX` network from a phone and give it your Wi-Fi and your MQTT broker on the
+setup page: the board's LED shows up in Home Assistant. `cargo iotkit new` without
 `--defaults` asks about your own board and parts.
 
 ## Status

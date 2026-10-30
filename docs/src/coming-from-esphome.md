@@ -81,8 +81,9 @@ async fn soil_task(mut adc: Adc<'static, ADC1<'static>, Async>, mut pin: AdcPin<
 }
 ```
 
-Wi-Fi setup, MQTT, signed OTA, mDNS, crash records and the console come with `start`; the broker
-is set once on the console (`mqtt 192.168.1.10`) or at build time (`MQTT_HOST`).
+Wi-Fi setup, MQTT, signed OTA, mDNS and crash records come with `start`; the broker is built in
+(`MQTT_HOST`) or given on the setup page ([where settings come
+from](getting-started.md#where-settings-come-from)).
 
 ## Block by block
 
@@ -93,9 +94,9 @@ is set once on the console (`mqtt 192.168.1.10`) or at build time (`MQTT_HOST`).
 | `wifi:`, `ap:`, `captive_portal:` | the setup window of `start` (feature `softap`) |
 | `esp32_improv:`, `improv_serial:` | features `improv-ble`, `improv-serial` |
 | `api:` + `encryption:` | the `esphome-api` feature; or MQTT discovery, or Matter ([Home Assistant](home-assistant.md), [Matter](matter.md)) |
-| `mqtt:` | `mqtt HOST` on the console, or `MQTT_HOST` at build time |
+| `mqtt:` | `MQTT_HOST` at build time, or the setup page |
 | `ota:` | `cargo iotkit ota push`, signed; or updates from Home Assistant ([updates](updates.md)) |
-| `logger:` | `ESP_LOG` at build time, the USB console ([console](console.md)) |
+| `logger:` | `ESP_LOG` at build time, the log over USB; the `console` feature for commands ([console](console.md)) |
 | `switch: platform: gpio` | `components::relay` |
 | `binary_sensor: platform: gpio` | `components::binary_input` (debounced) |
 | `binary_sensor:` `on_multi_click:` | `components::button`: press, double, triple, long |

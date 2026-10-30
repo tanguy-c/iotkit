@@ -59,12 +59,6 @@ const MATTER_HELP: &str = "";
 const ESPHOME_HELP: &str = "  api-key        the ESPHome API's encryption key, for Home Assistant
   api-key KEY    set it (base64, 32 bytes; then restarts)";
 
-#[cfg(feature = "ha-update")]
-const UPDATE_HELP: &str = "
-  update-url [URL]  the manifest Home Assistant's updates come from (set: checks it now)";
-#[cfg(not(feature = "ha-update"))]
-const UPDATE_HELP: &str = "";
-
 const TEST_HELP: &str = "
   panic          panic (recorded, then restart)
   hang           block the executor (hardware watchdog reset after 5 s)
@@ -93,28 +87,29 @@ pub(crate) async fn console_task(
         #[cfg(feature = "esp32")]
         let Ok(n) = rx.read_async(&mut buf).await else { continue };
         for &byte in &buf[..n] {
-            // Improv frames (ESP Web Tools, improv-wifi.com) share the port.
+            // Improv frames (ESP Web Tools, improv-wifi.com) share the port: the console gets the
+            // rest, including what looked like the start of a frame.
             #[cfg(feature = "improv-serial")]
-            if let Some(p) = &provisioner
-                && improv.feed(p, byte).await
-            {
-                continue;
-            }
+            let console = match &provisioner {
+                Some(p) => improv.feed(p, byte).await,
+                None => crate::provision::improv::Released::from_slice(&[byte]).unwrap_or_default(),
+            };
+            #[cfg(not(feature = "improv-serial"))]
+            let console = [byte];
             #[cfg(feature = "console")]
-            match byte {
-                // Terminals send \r, \n or \r\n: one Enter.
-                b'\n' if last == b'\r' => {}
-                b'\r' | b'\n' => {
-                    println!();
-                    run(line.trim(), store, net, config).await;
-                    line.clear();
+            for &byte in console.iter() {
+                match byte {
+                    // Terminals send \r, \n or \r\n: one Enter.
+                    b'\n' if last == b'\r' => {}
+                    b'\r' | b'\n' => {
+                        println!();
+                        run(line.trim(), store, net, config).await;
+                        line.clear();
+                    }
+                    0x08 | 0x7f if line.pop().is_some() => print!("\x08 \x08"),
+                    b' '..=b'~' if line.push(byte as char).is_ok() => print!("{}", byte as char),
+                    _ => {}
                 }
-                0x08 | 0x7f if line.pop().is_some() => print!("\x08 \x08"),
-                b' '..=b'~' if line.push(byte as char).is_ok() => print!("{}", byte as char),
-                _ => {}
-            }
-            #[cfg(feature = "console")]
-            {
                 last = byte;
             }
         }
@@ -125,7 +120,7 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
     match cmd {
         "" => {}
         "help" => {
-            println!("{HELP}{MQTT_HELP}{UPDATE_HELP}{MATTER_HELP}{TEST_HELP}");
+            println!("{HELP}{MQTT_HELP}{MATTER_HELP}{TEST_HELP}");
             // Its own line: builds without it print as before.
             #[cfg(feature = "esphome-api")]
             println!("{ESPHOME_HELP}");
@@ -198,18 +193,20 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
             let address = args.next().unwrap_or("");
             let (user, password) = (args.next().unwrap_or(""), args.next().unwrap_or(""));
             match crate::mqtt::Broker::parse(address, user, password) {
-                Some(broker) => match store.lock().await.save(&broker).await {
-                    Ok(()) => {
-                        println!("broker {}:{} saved, restarting", broker.host, broker.port);
-                        crate::diag::esp::restart().await;
+                Some(broker) => {
+                    println!("broker {}:{} saved, restarting", broker.host, broker.port);
+                    if let Err(e) = crate::mqtt::esp::set_broker(store, &broker).await {
+                        println!("could not save: {e}");
                     }
-                    Err(e) => println!("could not save: {e}"),
-                },
+                }
                 None => println!("usage: mqtt HOST[:PORT] [USER PASSWORD]"),
             }
         }
         #[cfg(feature = "esphome-api")]
-        "api-key" => println!("{}", crate::esphome::esp::key(store).await.to_text()),
+        "api-key" => match crate::esphome::api_key() {
+            Some(key) => println!("{}", key.to_text()),
+            None => println!("ESPHome API not started"),
+        },
         #[cfg(feature = "esphome-api")]
         _ if cmd.starts_with("api-key ") => match crate::esphome::ApiKey::parse(cmd["api-key ".len()..].trim()) {
             Some(key) => match store.lock().await.save(&key).await {
@@ -221,29 +218,6 @@ async fn run(cmd: &str, store: &SharedStore, net: Option<Net>, config: &Config) 
             },
             None => println!("usage: api-key KEY (base64 of 32 bytes, as Home Assistant shows it)"),
         },
-        #[cfg(feature = "ha-update")]
-        "update-url" => match super::update::source(store).await {
-            Some(url) => println!("updates from {url}"),
-            None => println!("no manifest URL: `update-url http://server/<package>/manifest.json`"),
-        },
-        #[cfg(feature = "ha-update")]
-        _ if cmd.starts_with("update-url ") => {
-            let url = cmd["update-url ".len()..].trim();
-            let valid = crate::net::http::Url::parse(url).is_ok();
-            match heapless::String::try_from(url) {
-                Ok(manifest_url) if valid => {
-                    let source = crate::ota::UpdateSource { manifest_url };
-                    match store.lock().await.save(&source).await {
-                        Ok(()) => {
-                            println!("updates from {url}, checking");
-                            super::update::SOURCE_CHANGED.signal(());
-                        }
-                        Err(e) => println!("could not save: {e}"),
-                    }
-                }
-                _ => println!("usage: update-url http://server/<package>/manifest.json (200 bytes at most)"),
-            }
-        }
         _ if cmd.starts_with("ota ") => {
             if net.is_none() {
                 println!("Wi-Fi not started");

@@ -17,18 +17,19 @@ the window's): push again once it closes.
 
 With the `ha-update` feature (on in new projects) the device has a *Firmware* update entity:
 Home Assistant shows the installed and latest versions, the release summary and link, and installs
-with progress. The device checks a manifest URL at start, then every 6 hours.
+with progress. The device checks the manifest URL built in, `OTA_MANIFEST_URL`, at start, then
+every 6 hours: the same for every device running the firmware (without it, Home Assistant offers
+no updates).
 
 ```bash
 # Build, sign and copy to a folder a web server serves:
 cargo iotkit ota publish --to /srv/www --release --base-url http://192.168.1.10:8080 \
     --summary "Faster Wi-Fi" --release-url https://example.com/notes/1.2.0
-# Once, on the device's console (or OTA_MANIFEST_URL at build time):
-update-url http://192.168.1.10:8080/my-device/manifest.json
+# The firmware is built with, in .cargo/secrets.toml:
+#   OTA_MANIFEST_URL = "http://192.168.1.10:8080/my-device/manifest.json"
 ```
 
-The summary and link are signed with the manifest (64 and 96 bytes at most; the `update-url`
-200). A failed install shows its error as the
+The summary and link are signed with the manifest (64 and 96 bytes at most; the URL 200). A failed install shows its error as the
 summary and keeps the running firmware.
 
 ## Over Matter (Thread, Wi-Fi)

@@ -86,20 +86,12 @@ pub enum StartError {
     Radio,
 }
 
-/// The stored network; the first time, the one given at build time (`WIFI_SSID`, `WIFI_PASS`
-/// in `.cargo/secrets.toml`), which is then stored.
+/// The network given on the device (setup window), else the one given at build time
+/// (`WIFI_SSID`, `WIFI_PASS` in `.cargo/secrets.toml`).
 pub async fn credentials(store: &SharedStore) -> Option<WifiCredentials> {
-    let mut store = store.lock().await;
-    match store.load::<WifiCredentials>().await {
-        Ok(Some(c)) => return Some(c),
-        Ok(None) => {}
-        Err(e) => log::warn!("net: stored Wi-Fi network unreadable: {e}"),
-    }
-    let built_in = WifiCredentials::new(option_env!("WIFI_SSID")?, option_env!("WIFI_PASS").unwrap_or(""))?;
-    if let Err(e) = store.save(&built_in).await {
-        log::warn!("net: could not store the Wi-Fi network: {e}");
-    }
-    Some(built_in)
+    let built_in =
+        option_env!("WIFI_SSID").and_then(|ssid| WifiCredentials::new(ssid, option_env!("WIFI_PASS").unwrap_or("")));
+    store.lock().await.load_or(built_in).await
 }
 
 /// What a deep-sleeping device remembers to join faster: the access point (channel, BSSID) and
