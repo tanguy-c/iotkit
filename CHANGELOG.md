@@ -3,6 +3,12 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
+## Unreleased
+
+- Wi-Fi: the station transmits at 13 dBm instead of esp-radio's 5 dBm. Some access points did not
+  answer the weak authentication frames (`AuthenticationExpired`): on a XIAO ESP32-C6 that woke
+  every 10 to 30 s, a third of the wake-ups needed a retry, none does now.
+
 ## 0.5.0 (2026-10-30)
 
 - **Breaking:** settings are predictable. A value built in (`.cargo/config.toml`,
