@@ -33,6 +33,11 @@ const SOCKETS: usize = if cfg!(feature = "matter-wifi") { 8 } else { 6 } + cfg!(
 /// On the access point: DHCP server, DNS server, the portal, embassy-net's own DNS client, one
 /// spare. Too few panics in smoltcp at the first `bind`.
 const AP_SOCKETS: usize = 5;
+/// The station's maximum transmit power, in 0.25 dBm. esp-radio's default (20, 5 dBm) is too weak
+/// for some access points to hear: at -55 dBm, authentications expired (`AuthenticationExpired`)
+/// on a third of the wake-ups of a deep-sleeping XIAO ESP32-C6. Above about 65 (16 dBm) some
+/// boards fail too.
+const TX_POWER: i8 = 52;
 /// Time allowed for each step of an HTTP exchange.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -149,10 +154,13 @@ pub fn connected_ap() -> Option<(u8, [u8; 6])> {
 pub fn start(spawner: Spawner, wifi: WIFI<'static>, credentials: Option<WifiCredentials>) -> Result<Net, StartError> {
     // Power saving while disconnected starves Bluetooth (provisioning shares the radio).
     let config = ControllerConfig::default().with_sta_disconnected_pm(false);
-    let controller = WifiController::new(wifi, config).map_err(|e| {
+    let mut controller = WifiController::new(wifi, config).map_err(|e| {
         log::error!("net: Wi-Fi init failed: {e:?}");
         StartError::Radio
     })?;
+    if let Err(e) = controller.set_max_tx_power(TX_POWER) {
+        log::warn!("net: TX power: {e:?}");
+    }
     let interface = Interface::station();
     let mac = interface.mac_address();
 
