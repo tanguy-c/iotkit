@@ -3,7 +3,7 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
-## Unreleased
+## 0.5.1 (2026-10-31)
 
 - Wi-Fi: the station transmits at 13 dBm instead of esp-radio's 5 dBm. Some access points did not
   answer the weak authentication frames (`AuthenticationExpired`): on a XIAO ESP32-C6 that woke
