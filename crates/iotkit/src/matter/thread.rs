@@ -17,7 +17,7 @@ use esp_hal::peripherals::{ADC1, BT, IEEE802154, RNG};
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 use rs_matter_embassy::{
     matter::{
-        crypto::{Crypto, Rng, default_crypto},
+        crypto::{Crypto, default_crypto},
         dm::networks::NetChangeNotif,
         dm::{
             Async, Dataver, EmptyHandler, Node,
@@ -201,8 +201,10 @@ async fn run(
         })?;
     }
 
-    let mut eui64 = [0; 8];
-    rand.fill_bytes(&mut eui64);
+    // The chip's own, as after a reset the parent would keep a child per random address until its
+    // timeout, and the device would rejoin as a stranger (EUI-48 to EUI-64, as ESP-IDF does).
+    let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or_default();
+    let eui64 = [mac[0], mac[1], mac[2], 0xff, 0xfe, mac[3], mac[4], mac[5]];
     #[cfg(not(feature = "matter-icd"))]
     let thread = EmbassyThread::new(EspThreadDriver::new(radio, bt), crypto.rand()?, eui64, &kv, stack, true);
     #[cfg(feature = "matter-icd")]
