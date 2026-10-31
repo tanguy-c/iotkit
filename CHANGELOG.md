@@ -8,6 +8,8 @@ the steps to apply them in [Upgrading](docs/src/upgrading.md).
 - Wi-Fi: the station transmits at 13 dBm instead of esp-radio's 5 dBm. Some access points did not
   answer the weak authentication frames (`AuthenticationExpired`): on a XIAO ESP32-C6 that woke
   every 10 to 30 s, a third of the wake-ups needed a retry, none does now.
+- Matter over Thread: the device's 802.15.4 address comes from the chip, not a random draw at each
+  boot, so after a reset its parent knows it again instead of keeping a stale child.
 
 ## 0.5.0 (2026-10-30)
 
