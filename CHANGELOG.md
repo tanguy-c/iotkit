@@ -3,6 +3,11 @@
 The API and the settings' flash layout may still change before 1.0. Breaking changes come with
 the steps to apply them in [Upgrading](docs/src/upgrading.md).
 
+## Unreleased
+
+- Matter over Thread: the device's 802.15.4 address comes from the chip, not a random draw at each
+  boot, so after a reset its parent knows it again instead of keeping a stale child.
+
 ## 0.5.0 (2026-10-30)
 
 - **Breaking:** settings are predictable. A value built in (`.cargo/config.toml`,
