@@ -8,6 +8,10 @@ ignore = [
     # Unmaintained, no known vulnerability; both come in through esp-hal and its build scripts.
     { id = "RUSTSEC-2024-0436", reason = "paste: macro-only, via esp-hal" },
     { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml: build-time only, via esp-config's serde_yaml" },
+    # crypto-bigint 0.5.5 via embedded-tls 0.19 -> p256 0.13 -> elliptic-curve 0.13 (`tls` feature only).
+    # The fix is 0.7.6, which needs elliptic-curve 0.14; no embedded-tls release supports it yet.
+    # Drop this once embedded-tls moves past p256 0.13.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5: no patched 0.5.x, embedded-tls 0.19 pins p256 0.13" },
 ]
 
 [licenses]
