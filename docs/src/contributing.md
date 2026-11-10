@@ -20,10 +20,29 @@ cargo test-host              # iotkit-image, iotkit-core, and iotkit without a c
 cargo build -p devkit        # one app at a time
 ```
 
-`cargo build --workspace` fails: devkit's Wi-Fi and thread-light's 802.15.4 would share one
-esp-radio build. [AGENTS.md](https://github.com/tanguy-c/iotkit/blob/main/AGENTS.md) has the
-rules (the ESP32-C6 build must not change for another chip or feature), the size and link checks,
-and the hardware gotchas; the CI workflows (`ci.yml`, `full.yml`) are the reference for every
-check.
-[CONTRIBUTING.md](https://github.com/tanguy-c/iotkit/blob/main/CONTRIBUTING.md) covers issues
-and pull requests.
+Build one app at a time: `cargo build --workspace` fails, because devkit's Wi-Fi and
+thread-light's 802.15.4 would share one esp-radio build.
+
+[CONTRIBUTING.md](https://github.com/tanguy-c/iotkit/blob/main/CONTRIBUTING.md) has the project
+rules, and covers issues and pull requests. The CI workflows (`ci.yml`, `full.yml`) are the
+reference for every check.
+
+## Hardware notes
+
+These notes save you a reset loop or a firmware that no longer fits. Users meet some of them too:
+[Troubleshooting](troubleshooting.md) has those.
+
+- **The C6's USB serial port:** leave DTR and RTS alone. Toggling them resets the chip, so a tool
+  that toggles them each time it opens the port keeps the board in a reset loop.
+- **The C6's LP core:** keep it unused (`LpCore`, `load_lp_code!`). It overwrites iotkit's RTC
+  records: the early rollback, the crash record and the deep-sleep state
+  ([why](battery.md#the-c6s-low-power-core-not-with-iotkit-yet)).
+- **Ed25519 verification:** `ed25519-compact` and `iotkit-image` build at opt-level `z` (the root
+  `Cargo.toml`). At `s`, the verification grows to about 1.2 MB.
+- **Bluetooth setup:** keep esp-radio's `sta_disconnected_pm` off. It starves Bluetooth, and
+  Improv setup over Bluetooth stops working (`crates/iotkit/src/net/esp.rs`).
+- **The original ESP32:** it has no USB serial port, so the console and Improv use UART0
+  (`Board::uart`). `improv-ble` does not link there yet (esp-radio's Bluetooth ROM symbols), so it
+  builds without default features.
+- **Xtensa chips (S3, ESP32):** use Espressif's toolchain 1.98.1.0. Version 1.99 fails to link
+  esp-hal 1.2.2 ([getting started](getting-started.md)).

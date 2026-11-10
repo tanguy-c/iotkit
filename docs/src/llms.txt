@@ -1,6 +1,6 @@
 # iotkit
 
-> A no_std Rust firmware kit for ESP32 smart devices (esp-hal 1.2, Embassy): Matter over Wi-Fi and Thread (any Matter controller), Home Assistant over the ESPHome API or MQTT, Wi-Fi setup, signed OTA updates with automatic rollback, battery devices (deep sleep, Matter ICDs). A device's main lists its entities and calls `iotkit::start`. 0.1 is released from git (not on crates.io yet); depend on the git repository.
+> A no_std Rust firmware kit for ESP32 smart devices (esp-hal 1.2, Embassy): Matter over Wi-Fi and Thread (any Matter controller), Home Assistant over the ESPHome API or MQTT, Wi-Fi setup, signed OTA updates with automatic rollback, battery devices (deep sleep, Matter ICDs). A device's main lists its entities and calls `iotkit::start`. Released from git (not on crates.io yet); depend on the git repository.
 
 Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `iotkit-core` (chip-independent, re-exported by `iotkit`), `iotkit-build` (the project's build-dependency). CLI: `cargo iotkit` (`new`, `keygen`, `build`, `verify`, `flash`, `ota push`, `ota publish`, `web`). API docs: `cargo doc -p iotkit --open` in a project.
 
@@ -22,7 +22,6 @@ Crates: `iotkit` (what a device depends on; chip feature such as `esp32c6`), `io
 - [Upgrading](https://tanguy-c.github.io/iotkit/upgrading.html): what to change in a project for each breaking release
 - [Examples](https://tanguy-c.github.io/iotkit/examples.html): devkit, showcase, sleepy, lean, thread-light, ble-beacon
 - [Working on iotkit](https://tanguy-c.github.io/iotkit/contributing.html): repository layout, first commands
-- [Roadmap](https://tanguy-c.github.io/iotkit/roadmap.html)
 
 ## Code
 

@@ -166,5 +166,5 @@ app that starts it breaks part of the kit, without an error:
 Each record is checked before use, so nothing wrong is done with what the LP program wrote; the
 record is just lost at every boot that starts the LP core. To use the LP core, accept those
 losses, or use a part that does the job itself (a pulse counter with its own memory, a sensor
-with a threshold interrupt on a wake-up pin). Support is on the [roadmap](roadmap.md#next). The
-S3's ULP core is not affected: its memory is not the one iotkit uses.
+with a threshold interrupt on a wake-up pin). The S3's ULP core is
+not affected: its memory is not the one iotkit uses.

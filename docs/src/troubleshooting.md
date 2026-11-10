@@ -4,6 +4,9 @@
 | --- | --- |
 | `Permission denied` on `/dev/ttyACM0` | Add yourself to `dialout`, log in again |
 | `espflash` hangs on "Connecting" | Another program holds the serial port (a monitor): close it |
+| `espflash` alone: the app does not fit, or the partition table is refused | `partitions.csv` is for 8 MB: add `--flash-size 8mb`, or use `cargo iotkit flash`, which reads the size from the project. For a 4 MB board, use `partitions-4mb.csv` |
+| The serial port disappears on a battery device | The USB serial port goes away while the chip is in deep sleep. Wait for it to come back before you run `espflash`, or hold the button 3 s: [pairing mode](battery.md) keeps it awake for 10 minutes |
+| S3 or ESP32 build fails to link | Use Espressif's toolchain 1.98.1.0: `espup install --toolchain-version 1.98.1.0`. Version 1.99 fails to link esp-hal 1.2.2 |
 | Board not detected | Hold BOOT, tap RESET, release BOOT, flash again |
 | Build fails: "No OTA key" or "no signing key" | `cargo iotkit keygen` |
 | `ota push`: name not resolved | Use the device's address (`net: address` in its log, or `net` on the console) |

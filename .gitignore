@@ -18,3 +18,5 @@ published/
 docs/book/
 # Python bytecode (tools/hil).
 __pycache__/
+# Private to-do list (was the roadmap).
+TODO.md
