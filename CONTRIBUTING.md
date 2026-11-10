@@ -44,15 +44,15 @@ label.
 
 ## Step lists for common changes
 
-The skills in [`.claude/skills/`](.claude/skills) list the steps for common changes. Read them
+The skills in [`.agents/skills/`](.agents/skills) list the steps for common changes. Read them
 yourself or hand them to a coding agent. [AGENTS.md](AGENTS.md) is the entry point for agents.
 
 | Skill | For |
 | --- | --- |
-| [add-component](.claude/skills/add-component/SKILL.md) | a ready-made part (sensor, actuator, input) and its wizard entry |
-| [add-entity-kind](.claude/skills/add-entity-kind/SKILL.md) | a new entity kind through the model, MQTT, the ESPHome API, Matter and the wizard |
-| [add-chip](.claude/skills/add-chip/SKILL.md) | another ESP32 chip |
-| [size-check](.claude/skills/size-check/SKILL.md) | comparing the C6 firmware sizes before you commit |
+| [add-component](.agents/skills/add-component/SKILL.md) | a ready-made part (sensor, actuator, input) and its wizard entry |
+| [add-entity-kind](.agents/skills/add-entity-kind/SKILL.md) | a new entity kind through the model, MQTT, the ESPHome API, Matter and the wizard |
+| [add-chip](.agents/skills/add-chip/SKILL.md) | another ESP32 chip |
+| [size-check](.agents/skills/size-check/SKILL.md) | comparing the C6 firmware sizes before you commit |
 
 ## Pull requests
 
