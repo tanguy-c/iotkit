@@ -53,6 +53,7 @@ yourself or hand them to a coding agent. [AGENTS.md](AGENTS.md) is the entry poi
 | [add-entity-kind](.agents/skills/add-entity-kind/SKILL.md) | a new entity kind through the model, MQTT, the ESPHome API, Matter and the wizard |
 | [add-chip](.agents/skills/add-chip/SKILL.md) | another ESP32 chip |
 | [size-check](.agents/skills/size-check/SKILL.md) | comparing the C6 firmware sizes before you commit |
+| [release](.agents/skills/release/SKILL.md) | preparing a release and opening its pull request (`tools/release.sh`) |
 
 ## Pull requests
 

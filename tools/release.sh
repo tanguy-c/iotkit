@@ -12,14 +12,15 @@ repo=https://github.com/tanguy-c/iotkit
 case $version in
     *[!0-9.]* | .* | *. | *..*) echo "not a version: $version" >&2; exit 1 ;;
 esac
-# From an up-to-date main. CHANGELOG.md may hold the summary you just wrote.
+# From an up-to-date main. CHANGELOG.md and docs/ may hold the release's edits: the summary, the
+# upgrade steps, the hardware test table.
 git fetch --quiet origin main
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
     echo "check out main, up to date with origin/main" >&2
     exit 1
 fi
-if git status --porcelain --untracked-files=no | grep -qv ' CHANGELOG.md$'; then
-    echo "commit or stash your changes first (CHANGELOG.md may stay)" >&2
+if git status --porcelain --untracked-files=no | grep -qvE ' (CHANGELOG\.md|docs/.*)$'; then
+    echo "commit or stash your changes first (CHANGELOG.md and docs/ may stay)" >&2
     exit 1
 fi
 
@@ -54,7 +55,8 @@ sed -i \
     CHANGELOG.md
 
 git switch --quiet -c "release-$version"
-git commit --quiet -am "Release $version" -m "$summary"
+git add CHANGELOG.md docs Cargo.toml Cargo.lock xtask/Cargo.toml xtask/Cargo.lock
+git commit --quiet -m "Release $version" -m "$summary"
 git push --quiet -u origin "release-$version"
 gh pr create --title "Release $version" --body "$summary
 

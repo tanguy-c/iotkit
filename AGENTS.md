@@ -98,4 +98,4 @@ When a change is visible to users, in the same pull request:
 ## Skills
 
 `.agents/skills/` (linked from `.claude/skills/`) has step lists for common changes:
-`size-check`, `add-entity-kind`, `add-chip` and `add-component`.
+`size-check`, `add-entity-kind`, `add-chip`, `add-component` and `release`.
