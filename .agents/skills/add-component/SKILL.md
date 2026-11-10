@@ -23,7 +23,7 @@ Follow an existing part: `relay` (output), `button` (input with timing), `poll` 
    I²C chip: its driver in `components::i2c` (stateless, a mock-bus test in `tests.rs`) and an
    `[i2c]` table instead of `[code]`, its address checked against two sources.
 5. **Docs**: the table in `docs/src/components.md`, and the generated AGENTS.md line in
-   `codegen::agents_md`.
+   `codegen::agents_md`. Add an entry under `## Unreleased` → `### Added` in `CHANGELOG.md`.
 6. **Checks**: a rule in `tools/link-check.sh` when the part has a distinctive string or symbol
    (generics inline: use a string), then the `size-check` skill. A generated c6 project must pass
    clippy and `cargo iotkit build`.

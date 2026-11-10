@@ -23,4 +23,3 @@
 - [Troubleshooting](troubleshooting.md)
 - [Upgrading](upgrading.md)
 - [Working on iotkit](contributing.md)
-- [Roadmap](roadmap.md)

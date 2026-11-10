@@ -43,30 +43,36 @@ code you own.
 
 ## Status
 
-Early (0.x): the API and the settings' flash layout may still change.
+iotkit is early (0.x): the API and the settings' flash layout may still change before 1.0. When a
+release breaks something, [Upgrading](upgrading.md) gives the steps.
 
-- Tested on an ESP32-C6-DevKitC-1: Wi-Fi setup (access point, Improv over Bluetooth and serial),
-  signed OTA with rollback, MQTT with Home Assistant, Matter over Wi-Fi with Home Assistant's
-  Matter server, deep sleep, updates from Home Assistant, installing from the browser, Home
-  Assistant's ESPHome integration, MQTT and updates over TLS, Matter over Thread through a Thread
-  border router (paired with one controller, shared with Home Assistant's Matter server, updated
-  over Matter), the status LED and the BOOT button's gestures.
-- Tested on a Seeed Studio XIAO ESP32-C6 (4 MB): Wi-Fi (its antenna switch), MQTT, OTA, the
-  ESPHome API, Matter over Thread, deep sleep over MQTT and the ESPHome API.
-- Tested on an ESP32-S3-DevKitC-1 (v1.1, 8 MB): Wi-Fi, MQTT, OTA, the setup window, the ESPHome
-  API, the status LED.
-- Built but not tested on hardware: the C3, C5, ESP32 and H2, most entity kinds over Matter.
-- Matter uses the test attestation credentials: for development, not for selling devices.
+Matter uses the test attestation credentials. Use it for development, not to sell devices
+([why](matter.md#before-selling-a-device)).
 
 ## Chips
 
-| Chip | Wi-Fi, MQTT, OTA, setup | Matter | Tested on hardware |
-| --- | --- | --- | --- |
-| ESP32-C6 | yes | Wi-Fi (`matter-wifi`, 8 MB), Thread (`matter-thread`, 4 MB is enough) | yes (ESP32-C6-DevKitC-1, 8 MB; XIAO ESP32-C6, 4 MB) |
-| ESP32-C3 | yes | no: Matter needs about 24 KB more RAM than the C3 has | build only |
-| ESP32-C5 | yes | no: esp-hal 1.2 has no true RNG on the C5 yet | build only |
-| ESP32-S3 | yes | no: does not fit in internal RAM (PSRAM support later) | yes (ESP32-S3-DevKitC-1 v1.1, 8 MB) |
-| ESP32 | yes, except setup over Bluetooth; console and Improv on UART0; no deep sleep yet | no: not tried (RAM, rs-matter support) | build only |
-| ESP32-H2 | no Wi-Fi | Thread (`matter-thread`, `matter-ota` included; without Wi-Fi, `init!`'s heap is the reclaimed 64 KB only) | build only |
+| Chip | Wi-Fi, MQTT, OTA, setup | Matter |
+| --- | --- | --- |
+| ESP32-C6 | yes | Wi-Fi (`matter-wifi`, 8 MB), Thread (`matter-thread`, 4 MB is enough) |
+| ESP32-C3 | yes | no: Matter needs about 24 KB more RAM than the C3 has |
+| ESP32-C5 | yes | no: esp-hal 1.2 has no true RNG on the C5 yet |
+| ESP32-S3 | yes | no: does not fit in internal RAM (PSRAM support later) |
+| ESP32 | yes, except setup over Bluetooth; console and Improv on UART0; no deep sleep yet | no: not tried (RAM, rs-matter support) |
+| ESP32-H2 | no Wi-Fi | Thread (`matter-thread`, `matter-ota` included; without Wi-Fi, `init!`'s heap is the reclaimed 64 KB only) |
 
 The ESP32-C6 is the reference: support for other chips is added without changing it.
+
+### Tested on hardware
+
+Every chip builds in CI. This table lists the boards someone ran iotkit on, and the last version
+they tested. A release updates the rows it tested. To add your board, open an issue or a pull
+request.
+
+| Board | Last tested | What was tested |
+| --- | --- | --- |
+| ESP32-C6-DevKitC-1 (8 MB) | 0.4.0 | Wi-Fi setup (access point, Improv over Bluetooth and serial); signed OTA with rollback; MQTT and the ESPHome API with Home Assistant, over TLS too; updates from Home Assistant; Matter over Wi-Fi; Matter over Thread through a border router (pairing, multi-admin, updates over Matter); deep sleep; install from the browser; status LED and BOOT button |
+| Seeed Studio XIAO ESP32-C6 (4 MB) | 0.5.1 | Wi-Fi (its antenna switch), MQTT, OTA, the ESPHome API; Matter over Thread with Google Home; deep sleep over MQTT and the ESPHome API (about 110 wake-ups) |
+| ESP32-S3-DevKitC-1 v1.1 (8 MB) | 0.4.0 | Wi-Fi, MQTT, OTA, the setup window, the ESPHome API, status LED |
+| ESP32-C3, C5, ESP32, H2 | not yet | build only |
+
+Most entity kinds over Matter are not tested on hardware yet.

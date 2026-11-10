@@ -24,6 +24,7 @@ is the worked example (some paths have moved since); follow `esp32c5` with `grep
 6. **Wizard**: boards and pins in `xtask/src/new/boards.rs`; the chip loop in `render.rs` tests.
 7. **CI**: a row in the `chips-riscv` matrix (or a row in the `xtensa` matrix) and in the template job of
    `.github/workflows/full.yml`.
-8. **Docs**: the chip table in `docs/src/introduction.md` (what works, what is build-tested only).
+8. **Docs**: the chip table in `docs/src/introduction.md` (what works), and a
+   `build only` row in its "Tested on hardware" table until someone runs it on a board. Add an entry under `## Unreleased` → `### Added` in `CHANGELOG.md`.
 9. Prove C6 unchanged: `tools/size-check.sh` reports zero `.text`/`.data`/`.bss` delta on the
    three C6 builds; hardware-test the C6 if anything shared moved.

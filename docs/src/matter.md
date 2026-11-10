@@ -79,5 +79,4 @@ interface towards the device:
 
 Certification is the product's, not the kit's: its maker gets a vendor ID from the Connectivity
 Standards Alliance, attestation credentials for the product, and certifies it. iotkit builds every
-device with the test vendor's IDs and credentials; building in a product's own is on the
-[roadmap](roadmap.md).
+device with the test vendor's IDs and credentials, and cannot build in a product's own yet.

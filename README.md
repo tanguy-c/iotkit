@@ -57,11 +57,10 @@ later. The S3 and the ESP32 need Espressif's toolchain:
 
 ## Status
 
-Early (0.x): the API and the settings' flash layout may still change. Tested on an
-ESP32-C6-DevKitC-1, a XIAO ESP32-C6 and an ESP32-S3-DevKitC-1; the C3, C5, ESP32 and H2 are
-build-tested ([chips](https://tanguy-c.github.io/iotkit/introduction.html#chips)).
-Matter uses test attestation credentials: for development, not for selling devices. What comes
-next: the [roadmap](docs/src/roadmap.md).
+Early (0.x): the API and the settings' flash layout may still change before 1.0. Tested on an
+ESP32-C6-DevKitC-1, a XIAO ESP32-C6 and an ESP32-S3-DevKitC-1. The C3, C5, ESP32 and H2 are
+build-tested only ([what was tested, on which version](https://tanguy-c.github.io/iotkit/introduction.html#tested-on-hardware)).
+Matter uses test attestation credentials: use it for development, not to sell devices.
 
 ## Contributing
 

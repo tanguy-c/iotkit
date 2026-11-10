@@ -150,4 +150,4 @@ a busy loop is not.
 A part is an `async fn` over embedded-hal traits that never returns: wait for a command or an
 edge, drive the hardware, report the state. Keep it free of registries or lists of every part, so
 it stays out of firmware that does not use it. The repository's `add-component` checklist
-(`.claude/skills/add-component`) covers tests and the wizard.
+(`.agents/skills/add-component`) covers tests and the wizard.

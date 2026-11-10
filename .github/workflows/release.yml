@@ -1,0 +1,30 @@
+name: Release
+
+# Publishes a release when a "Release <version>" pull request (tools/release.sh) is merged: a
+# version in Cargo.toml with no tag yet gets its tag and its GitHub release, with the notes from
+# CHANGELOG.md (tools/release-notes.sh). CI already passed: main only takes green pull requests.
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish the version if it has no tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already released"
+            exit 0
+          fi
+          tools/release-notes.sh "$version" > notes.md
+          gh release create "v$version" --target "$GITHUB_SHA" --title "iotkit $version" \
+            --notes-file notes.md
