@@ -160,6 +160,7 @@ services:
     image: ghcr.io/tanguy-c/iotkit-server:0.1
     restart: unless-stopped
     ports: ["8080:8080"]
+    extra_hosts: ["host.docker.internal:host-gateway"]  # this machine, for `matter`
     environment:
       # GITHUB_TOKEN: ...          # to read private repositories
       # IOTKIT_SERVER_TOKEN: ...   # allows `POST /refresh`, to read the stores at once
@@ -176,22 +177,34 @@ services:
     environment:
       ENABLE_TEST_NET_DCL: "true"  # offers updates of the test vendor (0xFFF1), iotkit's default
     volumes:
-      - ./matter:/data
+      - matter-data:/data          # its pairings
 
 volumes:
   iotkit-data:
+  matter-data:
 ```
 
 Then write `config/iotkit-server.toml`, with one `[[product]]` per firmware:
 
 ```toml
-# matter = "ws://192.168.1.10:5580/ws"   # the Matter server, to hand it the .ota files
+# The Matter server, to hand it the .ota files. On this machine, as in the compose.yaml above:
+# matter = "ws://host.docker.internal:5580/ws"
+# On another one, such as Home Assistant's: matter = "ws://192.168.1.10:5580/ws"
 
 [[product]]
 name  = "kitchen-hub"                    # the package name
 store = "github:me/kitchen-hub"          # or "dir:/releases"
 key   = "kitchen-hub.pub"                # the project's keys/ota.pub
 ```
+
+To read a private GitHub repository, give the server a token in `GITHUB_TOKEN`. Make it a
+[fine-grained token](https://github.com/settings/personal-access-tokens/new) with only these
+rights:
+
+- *Repository access*: the repositories of your releases.
+- *Permissions*: *Contents*, read-only. It covers releases and their files.
+
+The server needs nothing more. Devices never see the token: they download from the server.
 
 Start it with `docker compose up -d`, then open `http://<server>:8080/`: it lists each firmware's
 versions. It reads the stores every 10 minutes. To read them right after publishing, call

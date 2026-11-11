@@ -39,6 +39,9 @@ services:
     # not python-matter-server's: empty `matter-data/` when coming from it.
     image: ghcr.io/matter-js/matterjs-server:stable
     network_mode: host
+    # The image runs as uid 1000, which may not own the folders below (Docker creates them as
+    # root; rootless Podman maps uid 1000 elsewhere). Root writes to them in both.
+    user: "0:0"
     environment:
       STORAGE_PATH: /data
       # The device may only have an IPv6 link-local address: name the interface towards it
