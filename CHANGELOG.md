@@ -9,6 +9,9 @@ This file lists the notable changes to iotkit, newest first. It follows
 
 ### Added
 
+- `cargo iotkit wifi` gives the device on USB the Wi-Fi network of `.cargo/secrets.toml`, over
+  Improv. The device joins it, then stores it: a published update, which leaves the network out,
+  keeps it. If the device cannot join, the command shows the device's log.
 - [Publishing updates](docs/src/publishing-updates.md), a new page of the guide: where to publish
   your releases, and how to run the server your devices ask.
 - `cargo iotkit ota publish` publishes to GitHub releases (`--to github:OWNER/REPO`, with the

@@ -15,10 +15,12 @@ What to change in a project when a release breaks the API, newest first. The
 published-secrets = ["MQTT_USER", "MQTT_PASS", "ESPHOME_API_KEY", "MATTER_PASSCODE", "MATTER_DISCRIMINATOR"]
 ```
 
-List only the ones your `.cargo/secrets.toml` sets. Leave out the Wi-Fi network: before the first
-published update, give it on each device that has it only built in: hold **BOOT** 3 s, then use
-the setup window ([Join Wi-Fi](getting-started.md#join-wi-fi)). Otherwise the device has no
-network after the update.
+List only the ones your `.cargo/secrets.toml` sets. Leave out the Wi-Fi network. Before the first
+published update, store it on each device that has it only built in, or the device has no network
+after the update:
+
+- plug the device in over USB, then run `cargo iotkit wifi`;
+- or hold **BOOT** 3 s, then use the setup window ([Join Wi-Fi](getting-started.md#join-wi-fi)).
 
 ### `ota publish` takes a store, `ota build` no `.json`
 

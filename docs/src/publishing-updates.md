@@ -58,8 +58,14 @@ device, from the setup window ([getting started](getting-started.md#join-wi-fi))
 to a public GitHub repository, unless you add `--allow-secrets`.
 
 A device that joined Wi-Fi only from a dev build's `WIFI_SSID` has no network after a published
-update. Give it the network on the device first: hold **BOOT** 3 s, then use the setup window. Or
-flash it again over USB.
+update. To store the network on the device first, plug it in over USB, then run:
+
+```bash
+cargo iotkit wifi
+```
+
+It sends the network of `.cargo/secrets.toml` over Improv (`improv-serial`, a default feature).
+The device joins it, then stores it. You can also hold **BOOT** 3 s, then use the setup window.
 
 `cargo iotkit build --dev` makes a dev build. `--no-build` publishes the last build, and
 refuses it if it was a dev build.
@@ -159,7 +165,7 @@ services:
       # IOTKIT_SERVER_TOKEN: ...   # allows `POST /refresh`, to read the stores at once
     volumes:
       - ./config:/config:ro        # iotkit-server.toml and the public keys
-      - ./data:/data               # the images it keeps
+      - iotkit-data:/data          # the images it keeps
       # - /srv/iotkit:/releases:ro # a folder store
 
   # Without Home Assistant's Matter Server. Leave it out if you have that one.
@@ -171,6 +177,9 @@ services:
       ENABLE_TEST_NET_DCL: "true"  # offers updates of the test vendor (0xFFF1), iotkit's default
     volumes:
       - ./matter:/data
+
+volumes:
+  iotkit-data:
 ```
 
 Then write `config/iotkit-server.toml`, with one `[[product]]` per firmware:

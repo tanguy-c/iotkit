@@ -16,6 +16,7 @@ use std::{
 
 mod new;
 mod publish;
+mod wifi;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
@@ -154,6 +155,13 @@ enum Cmd {
         /// `nvs` partitions), as a factory reset does: it starts from the values built in.
         #[arg(long)]
         factory_reset: bool,
+    },
+    /// Give the device on USB the Wi-Fi network of `.cargo/secrets.toml` (`WIFI_SSID`,
+    /// `WIFI_PASS`), over Improv: it joins it, then stores it, so published builds keep it
+    Wifi {
+        /// The serial port (default: the one Espressif USB port)
+        #[arg(long)]
+        port: Option<String>,
     },
     /// OTA commands.
     #[command(subcommand)]
@@ -336,6 +344,7 @@ fn main() -> Result<()> {
             verify(&manifest, &key)
         }
         Cmd::Flash { app, factory_reset } => flash(&Build::new(app, Kind::Dev)?, factory_reset),
+        Cmd::Wifi { port } => wifi::run(port),
         Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, release, key }) => {
             let app = Build::new(app, Kind::Dev)?;
             if !no_build {

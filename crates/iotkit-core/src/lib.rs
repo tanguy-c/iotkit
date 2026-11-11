@@ -1,5 +1,5 @@
 //! The chip-independent half of iotkit, tested on the host: the device model, typed settings in
-//! flash, signed update images and manifests, and the health check. `iotkit` re-exports it.
+//! flash, signed update images and manifests, the health check, and the Improv protocol. `iotkit` re-exports it.
 
 #![no_std]
 #![warn(missing_docs)]
@@ -11,6 +11,7 @@ pub(crate) use core::sync::atomic;
 pub(crate) use portable_atomic as atomic;
 
 pub mod config;
+pub mod improv;
 pub use iotkit_image as image;
 pub mod model;
 #[cfg(feature = "remember")]

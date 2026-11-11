@@ -90,7 +90,8 @@ With no network (none built in, none given before), the device opens a setup win
   point restarts once while it joins).
 - **Bluetooth ([Improv](https://www.improv-wifi.com)):** the Home Assistant app offers the device
   under *Settings > Devices > Add*; improv-wifi.com works from a desktop browser.
-- **USB (Improv):** ESP Web Tools, or improv-wifi.com with Web Serial.
+- **USB (Improv):** `cargo iotkit wifi` sends the network of `.cargo/secrets.toml`. ESP Web Tools
+  and improv-wifi.com with Web Serial work too.
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
 characters. To change it later, hold **BOOT** 3 s, or type `provision` on the [USB console](console.md);
