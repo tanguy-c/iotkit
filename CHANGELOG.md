@@ -7,7 +7,41 @@ This file lists the notable changes to iotkit, newest first. It follows
 
 ## [Unreleased]
 
+### Added
+
+- [Publishing updates](docs/src/publishing-updates.md), a new page of the guide: where to publish
+  your releases, and how to run the server your devices ask.
+- `cargo iotkit ota publish` publishes to GitHub releases (`--to github:OWNER/REPO`, with the
+  GitHub CLI) or to a folder. It reads where from `[package.metadata.iotkit.publish] to` in
+  `Cargo.toml`, or `IOTKIT_PUBLISH_TO`, so `cargo iotkit ota publish --release` is enough.
+  - It publishes the `.ota` file too when the firmware has `matter-ota`, and the whole flash for
+    the install page.
+  - It refuses a version already published, or older than one published (`--force` publishes it
+    anyway).
+  - `--prerelease` publishes a test version, which only an update server's beta channel offers.
+- [iotkit-server](https://github.com/tanguy-c/iotkit-server), a separate project: the update
+  server for iotkit. It reads your releases from GitHub or a folder, serves the ones signed with
+  your key, serves an install page, and hands `.ota` files to Home Assistant's Matter Server.
+- `cargo iotkit new` asks where you publish updates (GitHub or a folder) and your update server's
+  address. For GitHub, it writes `.github/workflows/release.yml`, which publishes each `v*` tag.
+- `cargo iotkit build --dev` makes a dev build.
+
 ### Changed
+
+- **Breaking:** `cargo iotkit ota publish`, `ota build`, `build` and `web` make *published builds*:
+  they leave out `.cargo/secrets.toml`, but the values listed in `[package.metadata.iotkit]
+  published-secrets`. `cargo run`, `cargo iotkit flash` and `ota push` still build it in
+  ([dev and published builds](docs/src/publishing-updates.md#dev-builds-and-published-builds)).
+  With `--no-build`, `ota publish` and `ota build` refuse a dev build.
+- **Breaking:** `cargo iotkit ota build` no longer writes the `.json` description of the `.ota`
+  file. Home Assistant's Matter Server (matter.js, add-on 9.0 and later) reads the `.ota` file
+  alone.
+- **Breaking:** in `cargo iotkit new`'s answers files, `update_server` (the server's address)
+  replaces `updates_url`, and `publish_to` says where to publish.
+- The firmware reads an empty built-in value (`WIFI_SSID = ""`) as unset.
+- `test-server/` runs matter.js's Matter server, as Home Assistant does, instead of
+  python-matter-server, which is archived. To offer an update, copy its `.ota` file to
+  `test-server/matter-ota/`.
 
 - The guide lists the boards iotkit was tested on, with the last version tested and what was
   covered ([Tested on hardware](docs/src/introduction.md#tested-on-hardware)).
@@ -18,6 +52,8 @@ This file lists the notable changes to iotkit, newest first. It follows
 ### Removed
 
 - The roadmap page.
+- **Breaking:** `--base-url` of `cargo iotkit ota publish`: `cargo iotkit new` writes the manifest
+  URL from your update server's address.
 
 ## [0.5.1] - 2026-10-31
 

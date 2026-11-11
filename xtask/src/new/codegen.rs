@@ -11,7 +11,7 @@ mod part;
 use part::Uses;
 pub use part::{Call, part, ready};
 
-use super::{Indicator, MatterMode, Project, SetupWay};
+use super::{IOTKIT_GIT, Indicator, MatterMode, Project, SetupWay};
 
 /// The comments `cargo iotkit add` finds in `src/main.rs`, each above the lines it adds to.
 pub const ENTITIES_MARK: &str = "// The parts' entities (`cargo iotkit add` adds them here).";
@@ -607,11 +607,11 @@ pub fn servers_env(p: &Project) -> String {
             toml::Value::String(host.clone())
         );
     }
-    if let Some(url) = &a.updates_url {
+    if let Some(url) = p.manifest_url() {
         let _ = writeln!(
             s,
-            "# Where Home Assistant's updates come from (`cargo iotkit ota publish`).\nOTA_MANIFEST_URL = {}",
-            toml::Value::String(url.clone())
+            "# Where the device finds its releases: the update server (`cargo iotkit ota publish`).\nOTA_MANIFEST_URL = {}",
+            toml::Value::String(url)
         );
     }
     s
@@ -621,8 +621,10 @@ pub fn servers_env(p: &Project) -> String {
 pub fn secrets(p: &Project) -> Option<String> {
     let a = &p.answers;
     let mut s = String::from(
-        "# Read at build time (git-ignored): used at every flash or update, unless set on the device\n\
-         # (setup page, console), which wins until a factory reset. See secrets.toml.example.\n[env]\n",
+        "# Read at build time (git-ignored), unless set on the device (setup page, console), which wins until\n\
+         # a factory reset. Dev builds only (`cargo run`, `cargo iotkit flash`, `ota push`): published builds\n\
+         # (`cargo iotkit ota publish`) leave out all but `published-secrets` in Cargo.toml. See\n\
+         # secrets.toml.example.\n[env]\n",
     );
     let before = s.len();
     let mut set = |key: &str, value: &str| {
@@ -645,6 +647,90 @@ pub fn secrets(p: &Project) -> Option<String> {
         set("ESPHOME_API_KEY", key);
     }
     (s.len() > before).then_some(s)
+}
+
+/// The secrets `secrets` writes that every device needs, in dev and published builds alike: the
+/// broker's login, the project's Matter code, the ESPHome key. The Wi-Fi network is for dev builds.
+pub fn published_secrets(p: &Project) -> Vec<&'static str> {
+    let a = &p.answers;
+    let mut out = Vec::new();
+    if a.mqtt_host.is_some() && a.mqtt_user.is_some() {
+        out.extend(["MQTT_USER", "MQTT_PASS"]);
+    }
+    if p.matter_setup.is_some() {
+        out.extend(["MATTER_PASSCODE", "MATTER_DISCRIMINATOR"]);
+    }
+    if p.esphome_key.is_some() {
+        out.push("ESPHOME_API_KEY");
+    }
+    out
+}
+
+/// The lines after `[package.metadata.iotkit]`'s: what published builds keep, and where they are
+/// published.
+fn publish_metadata(p: &Project) -> String {
+    let mut s = String::new();
+    let kept = published_secrets(p);
+    if !kept.is_empty() {
+        let list = kept.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>().join(", ");
+        let _ = writeln!(
+            s,
+            "# Built into published builds too (`cargo iotkit ota publish`), from .cargo/secrets.toml.\npublished-secrets = [{list}]"
+        );
+    }
+    if let Some(to) = &p.answers.publish_to {
+        let _ = write!(
+            s,
+            "\n# Where `cargo iotkit ota publish` puts the releases (`--to` or `IOTKIT_PUBLISH_TO` override it).\n\
+             [package.metadata.iotkit.publish]\nto = {}\n",
+            toml::Value::String(to.clone())
+        );
+    }
+    s
+}
+
+/// `.github/workflows/release.yml`, when the releases go to GitHub: each `v*` tag is built,
+/// signed with the `IOTKIT_OTA_KEY` secret and published.
+pub fn release_workflow(p: &Project) -> Option<String> {
+    p.answers.publish_to.as_deref()?.strip_prefix("github:")?;
+    let toolchain = if p.board.xtensa() {
+        "      - uses: esp-rs/xtensa-toolchain@v1.7\n        with:\n          default: false\n          buildtargets: CHIP\n          ldproxy: false\n"
+            .replace("CHIP", p.board.chip)
+    } else {
+        String::new()
+    };
+    // From GitHub, even for a project on a local checkout: CI has none.
+    let source = format!("--git {}", crate::new::IOTKIT_GIT);
+    Some(format!(
+        "# Publishes a release for each `v*` tag (`git tag v0.2.0 && git push --tags`): a published build,
+# signed with the `IOTKIT_OTA_KEY` secret (keys/ota.key: `gh secret set IOTKIT_OTA_KEY < keys/ota.key`).
+# Whoever can run this repository's workflows can sign updates for your devices.
+name: Release
+
+on:
+  push:
+    tags: [\"v*\"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+{toolchain}      - uses: taiki-e/install-action@v2
+        with:
+          tool: espflash
+      - run: cargo install --locked {source} iotkit-cli
+      - run: printf '%s\\n' \"$IOTKIT_OTA_KEY\" > keys/ota.key
+        env:
+          IOTKIT_OTA_KEY: ${{{{ secrets.IOTKIT_OTA_KEY }}}}
+      - run: cargo iotkit ota publish --release
+        env:
+          GH_TOKEN: ${{{{ github.token }}}}
+"
+    ))
 }
 
 /// The template's `Cargo.toml` with the features the answers need (its own and its parts').
@@ -743,6 +829,13 @@ pub fn cargo_toml(rendered: &str, p: &Project) -> anyhow::Result<String> {
         } else if l.starts_with("embassy-time") && !bus_dependencies(p).is_empty() {
             let _ = writeln!(out, "{l}");
             out.push_str(&bus_dependencies(p).join("\n"));
+        } else if l.starts_with("flash-size") {
+            out.push_str(l);
+            let metadata = publish_metadata(p);
+            if !metadata.is_empty() {
+                out.push('\n');
+                out.push_str(metadata.trim_end());
+            }
         } else if l.starts_with("esp-hal-smartled") && p.thread() {
             // Its 802.15.4 and Bluetooth drivers, for the chip.
             let _ = writeln!(out, "{l}");
@@ -973,11 +1066,14 @@ pub fn readme(p: &Project) -> String {
     if p.thread() {
         let _ = write!(
             s,
-            "\n## Updates\n\n```bash\n# bump `version` in Cargo.toml, then:\ncargo iotkit ota build --release   # dist/{0}/{0}-<version>.ota, and its .json for a provider\n```\n\n\
-             A Matter OTA provider serves the `.ota` file: Home Assistant's Matter server with `--ota-provider-dir` set to\n\
-             `dist/{0}/` offers it on the device's update entity. The device checks the signature, installs it, and keeps it once it\n\
-             rejoins Thread and its controller (else the previous firmware comes back).\n",
-            a.package
+            "\n## Updates\n\n```bash\n# bump `version` in Cargo.toml, then:\n{}\n```\n\n\
+             A Matter OTA provider serves the `.ota` file: Home Assistant's Matter Server offers it on the device's update entity\n\
+             ([Publishing updates]({IOTKIT_GIT}/blob/main/docs/src/publishing-updates.md)). The device checks the signature,\n\
+             installs it, and keeps it once it rejoins Thread and its controller (else the previous firmware comes back).\n",
+            match &a.publish_to {
+                Some(to) => format!("cargo iotkit ota publish --release   # to {to}: the release, with its .ota"),
+                None => format!("cargo iotkit ota build --release     # dist/{0}/{0}-<version>.ota", a.package),
+            }
         );
         s.push_str(&if let Some(time) = a.update_time.as_deref().filter(|_| p.auto_update()) {
             format!(
@@ -994,19 +1090,22 @@ pub fn readme(p: &Project) -> String {
         return s;
     }
     s.push_str("\n## Updates\n\n```bash\n# bump `version` in Cargo.toml, then:\ncargo iotkit ota push --host <device-ip>      # straight to the device\n");
-    match &a.updates_url {
-        Some(url) => {
-            let base = url.rsplit_once('/').map_or(url.as_str(), |(b, _)| b);
-            let base = base.rsplit_once('/').map_or(base, |(b, _)| b);
-            let _ = writeln!(
-                s,
-                "cargo iotkit ota publish --to <served-folder> --base-url {base}   # Home Assistant offers it\n```\n\nThe device checks `{url}`."
-            );
+    match &a.publish_to {
+        Some(to) => {
+            let _ =
+                writeln!(s, "cargo iotkit ota publish --release            # to {to}; Home Assistant offers it\n```");
         }
-        None => s.push_str(
-            "cargo iotkit ota publish --to <served-folder>  # Home Assistant offers it to devices built with `OTA_MANIFEST_URL`\n```\n",
-        ),
+        None => s.push_str("cargo iotkit ota publish --release --to <folder>   # Home Assistant offers it\n```\n"),
     }
+    let _ = writeln!(
+        s,
+        "\nA published build leaves out `.cargo/secrets.toml`, but its `published-secrets` (Cargo.toml): give the Wi-Fi network\n\
+         on the device. {} See [Publishing updates]({IOTKIT_GIT}/blob/main/docs/src/publishing-updates.md).",
+        match p.manifest_url() {
+            Some(url) => format!("The device checks `{url}`."),
+            None => "Without `OTA_MANIFEST_URL` (.cargo/config.toml), Home Assistant offers no updates.".into(),
+        }
+    );
     if p.auto_update() {
         let time = a.update_time.as_deref().unwrap_or("02:00");
         s.push_str(&if p.esphome() && time != "wake" {

@@ -15,6 +15,7 @@ use std::{
 };
 
 mod new;
+mod publish;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
@@ -117,10 +118,14 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Build a firmware, save its app image and write a signed manifest to `dist/<package>/`.
+    /// Build a firmware, save its app image and write a signed manifest to `dist/<package>/`: a
+    /// published build, without `.cargo/secrets.toml` but its `published-secrets`.
     Build {
         #[command(flatten)]
         app: App,
+        /// A dev build instead: with `.cargo/secrets.toml`.
+        #[arg(long)]
+        dev: bool,
         /// Oldest running version allowed to install this image.
         #[arg(long, default_value = "0.0.0")]
         min_version: String,
@@ -227,16 +232,28 @@ enum Ota {
         #[arg(long, default_value = "keys/ota.key")]
         key: PathBuf,
     },
-    /// Build, then copy the signed manifest and image to `DIR/<package>/`, a folder a web server
-    /// serves: devices built with its manifest URL (`OTA_MANIFEST_URL`) offer the update in Home
-    /// Assistant.
+    /// Make a published build, then publish its release (manifest, image, and `.ota` with
+    /// `matter-ota`) where devices find it: a GitHub release, or a folder a web server serves.
     Publish {
-        /// The served folder (e.g. a web server's root, or a mounted share).
+        /// `github:OWNER/REPO`, or a folder (default: `IOTKIT_PUBLISH_TO`, else
+        /// `[package.metadata.iotkit.publish] to`).
         #[arg(long)]
-        to: PathBuf,
-        /// Where `DIR` is served from, to print the manifest URL to give the devices.
+        to: Option<String>,
+        /// A pre-release: only the update server's beta channel offers it.
         #[arg(long)]
-        base_url: Option<String>,
+        prerelease: bool,
+        /// Publish even if this version, or a newer one, is already published.
+        #[arg(long)]
+        force: bool,
+        /// Publish to a public GitHub repository even with published secrets built in.
+        #[arg(long)]
+        allow_secrets: bool,
+        /// The device's Matter vendor id, for the `.ota` file.
+        #[arg(long, default_value = "0xFFF1", value_parser = parse_u16)]
+        vid: u16,
+        /// The device's Matter product id.
+        #[arg(long, default_value = "0x8001", value_parser = parse_u16)]
+        pid: u16,
         #[command(flatten)]
         app: App,
         /// Publish the last build instead of building.
@@ -249,9 +266,8 @@ enum Ota {
         #[arg(long, default_value = "keys/ota.key")]
         key: PathBuf,
     },
-    /// Build, then write the Matter OTA file `dist/<package>/<package>-<version>.ota` (its payload:
-    /// the signed manifest, then the image) and its description for a Matter OTA provider
-    /// (`<package>-<version>.json`: python-matter-server's `--ota-provider-dir` format).
+    /// Make a published build, then write the Matter OTA file `dist/<package>/<package>-<version>.ota`
+    /// (its payload: the signed manifest, then the image), for a Matter OTA provider.
     Build {
         #[command(flatten)]
         app: App,
@@ -308,7 +324,10 @@ fn main() -> Result<()> {
     match cli.command {
         Cmd::New { .. } | Cmd::Add { .. } | Cmd::Components => unreachable!("handled above"),
         Cmd::Keygen { out, force } => keygen(&out, force),
-        Cmd::Build { app, min_version, release, key } => build(&Build::new(app)?, &min_version, &release, &key),
+        Cmd::Build { app, dev, min_version, release, key } => {
+            let kind = if dev { Kind::Dev } else { Kind::Published };
+            build(&Build::new(app, kind)?, &min_version, &release, &key)
+        }
         Cmd::Verify { manifest, package, key } => {
             let manifest = match manifest {
                 Some(m) => m,
@@ -316,16 +335,16 @@ fn main() -> Result<()> {
             };
             verify(&manifest, &key)
         }
-        Cmd::Flash { app, factory_reset } => flash(&Build::new(app)?, factory_reset),
+        Cmd::Flash { app, factory_reset } => flash(&Build::new(app, Kind::Dev)?, factory_reset),
         Cmd::Ota(Ota::Push { host, app, no_build, port, min_version, release, key }) => {
-            let app = Build::new(app)?;
+            let app = Build::new(app, Kind::Dev)?;
             if !no_build {
                 build(&app, &min_version, &release, &key)?;
             }
             push(&host, &app.package, port)
         }
         Cmd::Web { app, no_build, port, min_version, release, key } => {
-            let app = Build::new(app)?;
+            let app = Build::new(app, Kind::Published)?;
             if !no_build {
                 build(&app, &min_version, &release, &key)?;
             }
@@ -335,20 +354,51 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Ota(Ota::Build { app, no_build, min_version, release, key, vid, pid, unsigned }) => {
-            let app = Build::new(app)?;
-            if !no_build {
+            let app = Build::new(app, Kind::Published)?;
+            if no_build {
+                last_build_published(&app.package)?;
+            } else {
                 build(&app, &min_version, &release, &key)?;
             }
             matter_ota(&Path::new("dist").join(&app.package), vid, pid, unsigned).map(|_| ())
         }
-        Cmd::Ota(Ota::Publish { to, base_url, app, no_build, min_version, release, key }) => {
-            let app = Build::new(app)?;
-            if !no_build {
+        Cmd::Ota(Ota::Publish {
+            to,
+            prerelease,
+            force,
+            allow_secrets,
+            vid,
+            pid,
+            app,
+            no_build,
+            min_version,
+            release,
+            key,
+        }) => {
+            let app = Build::new(app, Kind::Published)?;
+            let target = publish::Target::find(to, &Metadata::read()?, &app.package)?;
+            if no_build {
+                last_build_published(&app.package)?;
+            } else {
                 build(&app, &min_version, &release, &key)?;
             }
-            publish(&app.package, &to, base_url.as_deref())
+            let ota = app
+                .matter_ota
+                .then(|| matter_ota(&Path::new("dist").join(&app.package), vid, pid, app.matter_unsigned))
+                .transpose()?;
+            publish::run(&app, &target, ota.as_deref(), publish::Options { prerelease, force, allow_secrets })
         }
     }
+}
+
+/// `--no-build` takes the last build: refused if it was a dev build, with `.cargo/secrets.toml`.
+fn last_build_published(package: &str) -> Result<()> {
+    let kind = fs::read_to_string(Path::new("dist").join(package).join("kind")).unwrap_or_default();
+    ensure!(
+        kind.trim() == "published",
+        "the last build of {package} is a dev build, with .cargo/secrets.toml: build again without --no-build"
+    );
+    Ok(())
 }
 
 /// The nearest directory, from the current one up, with a `Cargo.toml` and a `partitions.csv`.
@@ -395,8 +445,28 @@ impl Metadata {
 
     /// `[package.metadata.iotkit] <key>` of `package`.
     fn iotkit(&self, package: &str, key: &str) -> Option<String> {
-        let found = self.packages().ok()?.iter().find(|p| p["name"] == package)?;
-        found["metadata"]["iotkit"][key].as_str().map(str::to_owned)
+        self.iotkit_value(package, key).as_str().map(str::to_owned)
+    }
+
+    /// `[package.metadata.iotkit] <key>` of `package`, as TOML has it (null when not set).
+    fn iotkit_value(&self, package: &str, key: &str) -> &serde_json::Value {
+        static NULL: serde_json::Value = serde_json::Value::Null;
+        match self.packages().ok().and_then(|ps| ps.iter().find(|p| p["name"] == package)) {
+            Some(found) => &found["metadata"]["iotkit"][key],
+            None => &NULL,
+        }
+    }
+
+    /// Whether `package` turns `feature` of iotkit on, in its dependency or its default features.
+    fn uses(&self, package: &str, feature: &str) -> bool {
+        let Some(found) = self.packages().ok().and_then(|ps| ps.iter().find(|p| p["name"] == package)) else {
+            return false;
+        };
+        let named =
+            |v: &serde_json::Value| v.as_str().is_some_and(|f| f == feature || f == format!("iotkit/{feature}"));
+        let deps = found["dependencies"].as_array().into_iter().flatten();
+        deps.filter(|d| d["name"] == "iotkit").any(|d| d["features"].as_array().into_iter().flatten().any(named))
+            || found["features"]["default"].as_array().into_iter().flatten().any(named)
     }
 
     fn target_dir(&self) -> PathBuf {
@@ -415,10 +485,27 @@ struct Build {
     /// Not the app's default chip: build with `--no-default-features`.
     other_chip: bool,
     flash_size: String,
+    /// A published build: the secrets of `.cargo/secrets.toml` it leaves out (set empty).
+    left_out: Vec<String>,
+    /// The secrets a published build keeps (`[package.metadata.iotkit] published-secrets`).
+    kept: Vec<String>,
+    /// The firmware updates over Matter (`matter-ota`): its releases carry a `.ota` file.
+    matter_ota: bool,
+    /// ... with bare images (`matter-ota-unsigned`).
+    matter_unsigned: bool,
+    kind: Kind,
+}
+
+/// The kind of build: with `.cargo/secrets.toml` (for the developer's own devices), or without it
+/// (to publish; see GLOSSARY.md).
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Dev,
+    Published,
 }
 
 impl Build {
-    fn new(app: App) -> Result<Self> {
+    fn new(app: App, kind: Kind) -> Result<Self> {
         let meta = Metadata::read()?;
         let package = meta.package(app.package)?;
         let version = meta.version(&package)?;
@@ -435,7 +522,28 @@ impl Build {
             .or_else(|| meta.iotkit(&package, "flash-size"))
             .unwrap_or_else(|| DEFAULT_FLASH_SIZE.to_owned());
         ensure!(matches!(flash_size.as_str(), "4mb" | "8mb"), "--flash-size: 4mb or 8mb");
+        let kept: Vec<String> = match meta.iotkit_value(&package, "published-secrets") {
+            serde_json::Value::Null => Vec::new(),
+            v => serde_json::from_value(v.clone())
+                .context("[package.metadata.iotkit] published-secrets: a list of names, such as [\"MQTT_PASS\"]")?,
+        };
+        let secrets = secret_names(Path::new(".cargo/secrets.toml"))?;
+        let (kept, left_out): (Vec<_>, Vec<_>) = match kind {
+            Kind::Dev => (Vec::new(), Vec::new()),
+            Kind::Published => secrets.into_iter().partition(|s| kept.contains(s)),
+        };
+        let mentions = |f: &str| {
+            meta.uses(&package, f)
+                || features.as_deref().is_some_and(|fs| fs.split(',').any(|x| x.trim_start_matches("iotkit/") == f))
+        };
+        let matter_unsigned = mentions("matter-ota-unsigned");
+        let matter_ota = matter_unsigned || mentions("matter-ota");
         Ok(Self {
+            kind,
+            left_out,
+            kept,
+            matter_ota,
+            matter_unsigned,
             version,
             target_dir: meta.target_dir(),
             package,
@@ -447,16 +555,22 @@ impl Build {
         })
     }
 
-    /// `cargo` for this chip: the Xtensa ones use Espressif's toolchain.
+    /// `cargo` for this chip: the Xtensa ones use Espressif's toolchain. A published build sets
+    /// the secrets it leaves out to empty: the process's environment wins over `[env]`, and the
+    /// firmware reads an empty value as unset.
     fn cargo(&self) -> Command {
-        if self.chip.xtensa() {
+        let mut cmd = if self.chip.xtensa() {
             let toolchain = std::env::var("IOTKIT_ESP_TOOLCHAIN").unwrap_or_else(|_| ESP_TOOLCHAIN.to_owned());
             let mut cmd = Command::new("rustup");
             cmd.args(["run", &toolchain, "cargo"]);
             cmd
         } else {
             cargo()
+        };
+        for name in &self.left_out {
+            cmd.env(name, "");
         }
+        cmd
     }
 
     fn cargo_args(&self) -> Vec<&str> {
@@ -484,6 +598,19 @@ impl Build {
     fn partition_table(&self) -> &'static str {
         if self.flash_size == "4mb" { "partitions-4mb.csv" } else { "partitions.csv" }
     }
+}
+
+/// The names `[env]` of `path` (`.cargo/secrets.toml`) sets; none without the file. A value with
+/// `force = true` would win over the empty one a published build sets: refused.
+fn secret_names(path: &Path) -> Result<Vec<String>> {
+    let Ok(text) = fs::read_to_string(path) else { return Ok(Vec::new()) };
+    let doc: toml::Table = text.parse().with_context(|| format!("reading {}", path.display()))?;
+    let Some(env) = doc.get("env").and_then(toml::Value::as_table) else { return Ok(Vec::new()) };
+    for (name, value) in env {
+        let forced = value.get("force").and_then(toml::Value::as_bool).unwrap_or(false);
+        ensure!(!forced, "{}: {name} has `force = true`: a published build could not leave it out", path.display());
+    }
+    Ok(env.keys().cloned().collect())
 }
 
 /// Flashes over USB, then opens the serial monitor.
@@ -532,9 +659,17 @@ fn build(app: &Build, min_version: &str, release: &Release, key: &Path) -> Resul
     ensure!(min_version <= version, "--min-version {min_version} is newer than the build ({version})");
 
     run(app.cargo().arg("build").args(app.cargo_args()))?;
+    if !app.left_out.is_empty() {
+        println!("published build: left out {}", app.left_out.join(", "));
+    }
+    if !app.kept.is_empty() {
+        println!("published build: built in, from published-secrets: {}", app.kept.join(", "));
+    }
 
     let dir = Path::new("dist").join(&app.package);
     fs::create_dir_all(&dir)?;
+    // What `--no-build` checks: a dev build is never published.
+    fs::write(dir.join("kind"), if app.kind == Kind::Dev { "dev\n" } else { "published\n" })?;
     let file = format!("{}-{version}.bin", app.package);
     let image = dir.join(&file);
     run(Command::new("espflash")
@@ -567,8 +702,7 @@ fn build(app: &Build, min_version: &str, release: &Release, key: &Path) -> Resul
     web(app, &dir.join("web"), version_str)
 }
 
-/// Writes the Matter OTA file of the build in `dir` (from its manifest and image) and the
-/// provider's description of it; returns the file's path.
+/// Writes the Matter OTA file of the build in `dir` (from its manifest and image); returns its path.
 fn matter_ota(dir: &Path, vid: u16, pid: u16, unsigned: bool) -> Result<PathBuf> {
     let json = fs::read(dir.join("manifest.json")).with_context(|| format!("reading {}", dir.display()))?;
     let manifest = Manifest::parse(&json).map_err(|e| anyhow::anyhow!("{}: {e}", dir.display()))?;
@@ -604,22 +738,6 @@ fn matter_ota(dir: &Path, vid: u16, pid: u16, unsigned: bool) -> Result<PathBuf>
     let name = format!("{}-{version_text}", manifest.product);
     let path = dir.join(format!("{name}.ota"));
     fs::write(&path, &file)?;
-    // The provider reads `file:///<name>` from its own folder, and checks the whole file's SHA-256.
-    let description = serde_json::json!({
-        "modelVersion": {
-            "vid": vid,
-            "pid": pid,
-            "softwareVersion": version,
-            "softwareVersionString": version_text,
-            "otaUrl": format!("file:///{name}.ota"),
-            "otaChecksum": new::base64(&sha256(&file)),
-            "otaChecksumType": 1,
-            "minApplicableSoftwareVersion": min,
-            "maxApplicableSoftwareVersion": max,
-            "releaseNotesUrl": manifest.release_url,
-        }
-    });
-    fs::write(dir.join(format!("{name}.json")), serde_json::to_string_pretty(&description)? + "\n")?;
     let kind = if unsigned { "bare image" } else { "signed manifest and image" };
     println!("{}: Matter OTA file, {vid:#06x}/{pid:#06x} version {version:#x} ({kind})", path.display());
     Ok(path)
@@ -716,26 +834,6 @@ fn push(host: &str, package: &str, port: u16) -> Result<()> {
         }
         ensure!(Instant::now() < deadline, "the device did not come back within 90 s");
     }
-}
-
-/// Copies `dist/<package>/manifest.json` and its image to `to/<package>/`. The image goes
-/// first: a device never sees a manifest whose image is not there yet.
-fn publish(package: &str, to: &Path, base_url: Option<&str>) -> Result<()> {
-    let from = Path::new("dist").join(package);
-    let json = fs::read(from.join("manifest.json")).with_context(|| format!("reading {}", from.display()))?;
-    let manifest = Manifest::parse(&json).map_err(|e| anyhow::anyhow!("{}: {e}", from.display()))?;
-    let dir = to.join(package);
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    fs::copy(from.join(manifest.url), dir.join(manifest.url)).context("copying the image")?;
-    // Written next to it, then renamed: a manifest is never half-written.
-    let tmp = dir.join("manifest.json.tmp");
-    fs::write(&tmp, &json)?;
-    fs::rename(&tmp, dir.join("manifest.json"))?;
-    println!("published {package} {} to {}", manifest.version, dir.display());
-    if let Some(base) = base_url {
-        println!("devices built with OTA_MANIFEST_URL = \"{}/{package}/manifest.json\"", base.trim_end_matches('/'));
-    }
-    Ok(())
 }
 
 /// A GET over plain HTTP/1.1; returns the body of a 2xx response, or an error with it.
@@ -924,13 +1022,6 @@ mod tests {
         let bundled = Manifest::parse(&payload[6..6 + len]).unwrap();
         bundled.verify(&pair.pk).unwrap();
         assert_eq!(&payload[6 + len..], &image[..]);
-
-        let description: serde_json::Value =
-            serde_json::from_slice(&fs::read(dir.join("light-1.2.3.json")).unwrap()).unwrap();
-        let model = &description["modelVersion"];
-        assert_eq!(model["softwareVersion"], 0x01_02_03);
-        assert_eq!(model["otaUrl"], "file:///light-1.2.3.ota");
-        assert_eq!(model["otaChecksum"], new::base64(&sha256(&file)));
 
         let bare = fs::read(matter_ota(&dir, 0xfff1, 0x8001, true).unwrap()).unwrap();
         assert!(bare.ends_with(&image) && bare.len() < file.len());

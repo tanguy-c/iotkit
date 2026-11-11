@@ -93,7 +93,7 @@ impl crate::config::Setting for Client {
 /// (base64), else a random one, made once and stored; also kept for [`api_key`](super::api_key).
 pub async fn key(store: &SharedStore) -> ApiKey {
     let mut store = store.lock().await;
-    let key = match store.load_or(option_env!("ESPHOME_API_KEY").and_then(ApiKey::parse)).await {
+    let key = match store.load_or(crate::built_in!("ESPHOME_API_KEY").and_then(ApiKey::parse)).await {
         Some(key) => key,
         None => {
             let mut key = [0; 32];

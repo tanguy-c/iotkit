@@ -101,14 +101,16 @@ has a network). Hold **BOOT** 10 s to erase every setting and Matter pairing.
 > need it.
 
 For development, `.cargo/secrets.toml` (git-ignored) can build the network in (`WIFI_SSID`,
-`WIFI_PASS`): the device joins it and skips the window.
+`WIFI_PASS`): the device joins it and skips the window. Published updates leave it out
+([dev and published builds](publishing-updates.md#dev-builds-and-published-builds)).
 
 ## Where settings come from
 
 The `[env]` of `.cargo/config.toml` (committed: the broker's host, the update URL) and
 `.cargo/secrets.toml` (git-ignored: the network, logins, keys and codes; `secrets.toml.example`
 lists its keys) are read at build time: their values are **built in**, and every flash or update
-brings the new build's. A value **given
+brings the new build's. A published build (`cargo iotkit ota publish`) leaves out
+`.cargo/secrets.toml`, but the values `published-secrets` lists. A value **given
 on the device** (setup window, console) is stored in flash and wins over the built-in one until a
 factory reset. No other setting is stored.
 

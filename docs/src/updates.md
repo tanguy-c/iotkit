@@ -8,7 +8,9 @@ cargo iotkit verify                                        # optional: check its
 cargo iotkit ota push --host iotkit-XXXX.local --release   # build, serve, have the device install it
 ```
 
-`ota push` (feature `ota-push`, on by default) serves `dist/` from this machine (port 8000): the device must reach it. If the host
+`ota push` (feature `ota-push`, on by default) makes a dev build, with `.cargo/secrets.toml`
+([Publishing updates](publishing-updates.md#dev-builds-and-published-builds)), and serves `dist/`
+from this machine (port 8000): the device must reach it. If the host
 name does not resolve, use the device's address (`net: address` in its log, or `net` on the
 console). Bump `version` in
 `Cargo.toml` for each update. While a setup window is open the device answers 503 (its RAM is
@@ -22,11 +24,12 @@ with progress. The device checks the manifest URL built in, `OTA_MANIFEST_URL`, 
 every 6 hours: the same for every device running the firmware (without it, Home Assistant offers
 no updates).
 
+To give your devices their releases, publish each one, and run an update server
+([Publishing updates](publishing-updates.md)):
+
 ```bash
-# Build, sign and copy to a folder a web server serves:
-cargo iotkit ota publish --to /srv/www --release --base-url http://192.168.1.10:8080 \
-    --summary "Faster Wi-Fi" --release-url https://example.com/notes/1.2.0
-# The firmware is built with, in .cargo/config.toml's [env]:
+cargo iotkit ota publish --release --summary "Faster Wi-Fi" --release-url https://example.com/notes/1.2.0
+# The firmware is built with the update server's address, in .cargo/config.toml's [env]:
 #   OTA_MANIFEST_URL = "http://192.168.1.10:8080/my-device/manifest.json"
 ```
 
@@ -40,7 +43,8 @@ the device is a Matter OTA Requestor: a Matter OTA provider offers it updates, a
 them over Matter (BDX), so a Thread device updates without Wi-Fi.
 
 ```bash
-cargo iotkit ota build --release   # dist/<package>/<package>-<version>.ota, and its .json
+cargo iotkit ota publish --release   # with the release, for the provider
+cargo iotkit ota build --release     # or only dist/<package>/<package>-<version>.ota
 ```
 
 The `.ota` file is a standard Matter OTA image (`ota_image_tool.py show` reads it). Its payload
@@ -51,10 +55,9 @@ point it at a provider: the signature keeps updates to whoever holds `keys/ota.k
 `--vid` and `--pid` (the test vendor's 0xFFF1/0x8001 by default, as the firmware) must match the
 device's.
 
-A provider serves it. Home Assistant's Matter server reads the `.json` files of its
-`--ota-provider-dir` ([test-server](https://github.com/tanguy-c/iotkit/tree/main/test-server)
-points it at `dist/thread-light`): the device's update entity then offers the version, and
-installing announces the provider to the device (`AnnounceOTAProvider`). The device also asks its
+A provider serves it: Home Assistant's Matter Server, given the file by hand or by iotkit-server
+([Publishing updates](publishing-updates.md#over-matter)). The device's update entity then offers
+the version, and installing announces the provider to the device (`AnnounceOTAProvider`). The device also asks its
 default providers (`DefaultOTAProviders`, which a controller writes) once a day. Progress shows as
 the requestor's `UpdateState`; once the update runs, the device tells the provider
 (`NotifyUpdateApplied`).
@@ -65,10 +68,10 @@ restart: when the provider offers the same file again, the device skips the down
 hashed again before the switch, in case another update wrote the slot since. A provider that
 cannot be reached, or delays the update past 24 hours, is asked again 10 minutes later.
 
-`matter-ota-unsigned` takes bare app images instead (from ESP-IDF's `ota_image_tool.py`, or
-`cargo iotkit ota build --unsigned`), checked by the header's SHA-256, chip, product and version
-only: any administrator of any fabric can then install firmware. It replaces the signature
-check, it is not a fallback: a signed build never takes a bare image.
+`matter-ota-unsigned` takes bare app images instead, without the signature, checked by the
+header's SHA-256, chip, product and version only. It replaces the signature check, it is not a
+fallback: a signed build never takes a bare image. Any administrator of any fabric can then
+install firmware: [why to avoid it](publishing-updates.md#bare-images-matter-ota-unsigned).
 
 ## Without a click
 

@@ -5,7 +5,9 @@
 # MATTER_BT_ADAPTER picks the adapter (0: hci0).
 services:
   matter-server:
-    command: ["--storage-path", "/data", "--paa-root-cert-dir", "/data/credentials", "--enable-test-net-dcl", "--primary-interface", "${MATTER_INTERFACE:-wlan0}", "--ota-provider-dir", "/updates", "--bluetooth-adapter", "${MATTER_BT_ADAPTER:-0}"]
+    environment:
+      BLUETOOTH_ADAPTER: ${MATTER_BT_ADAPTER:-0}
+      NOBLE_BINDINGS: dbus
     volumes:
       - /run/dbus:/run/dbus:ro
     security_opt: ["label=disable"]   # SELinux: reach the host's D-Bus socket

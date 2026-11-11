@@ -94,15 +94,15 @@ pub enum StartError {
 /// The network given on the device (setup window), else the one given at build time
 /// (`WIFI_SSID`, `WIFI_PASS` in `.cargo/secrets.toml`).
 pub async fn credentials(store: &SharedStore) -> Option<WifiCredentials> {
-    let built_in =
-        option_env!("WIFI_SSID").and_then(|ssid| WifiCredentials::new(ssid, option_env!("WIFI_PASS").unwrap_or("")));
+    let built_in = crate::built_in!("WIFI_SSID")
+        .and_then(|ssid| WifiCredentials::new(ssid, option_env!("WIFI_PASS").unwrap_or("")));
     store.lock().await.load_or(built_in).await
 }
 
 /// Whether the device has a network, built in or given, without making it (a smaller future
 /// for the tasks that only ask).
 pub async fn has_credentials(store: &SharedStore) -> bool {
-    option_env!("WIFI_SSID").is_some() || matches!(store.lock().await.load::<WifiCredentials>().await, Ok(Some(_)))
+    crate::built_in!("WIFI_SSID").is_some() || matches!(store.lock().await.load::<WifiCredentials>().await, Ok(Some(_)))
 }
 
 /// What a deep-sleeping device remembers to join faster: the access point (channel, BSSID) and
