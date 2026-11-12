@@ -58,7 +58,7 @@ pub async fn wait_connected() {
 /// The broker set on the device ([`set_broker`]), else the one given at build time (`MQTT_HOST`
 /// as `host` or `host:port`, `MQTT_USER`, `MQTT_PASS` in `.cargo/secrets.toml`).
 pub async fn broker(store: &SharedStore) -> Option<Broker> {
-    let built_in = option_env!("MQTT_HOST").filter(|h| !h.is_empty()).and_then(|host| {
+    let built_in = crate::built_in!("MQTT_HOST").and_then(|host| {
         Broker::parse(host, option_env!("MQTT_USER").unwrap_or(""), option_env!("MQTT_PASS").unwrap_or(""))
     });
     store.lock().await.load_or(built_in).await

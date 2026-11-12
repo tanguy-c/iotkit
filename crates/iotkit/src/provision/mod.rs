@@ -9,5 +9,5 @@ pub mod dns;
 #[cfg(esp_wifi)]
 pub mod esp;
 pub mod gesture;
-pub mod improv;
+pub use iotkit_core::improv;
 pub mod portal;

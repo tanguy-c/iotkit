@@ -1,0 +1,3 @@
+# `.ota` files for the Matter server: imported at its start, then deleted.
+*
+!.gitignore

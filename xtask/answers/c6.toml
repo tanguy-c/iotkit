@@ -6,7 +6,8 @@ maker = "CI"
 board = "esp32c6-devkitc-1"
 matter = "fixed"
 mqtt_host = "192.168.1.10"
-updates_url = "http://192.168.1.10:8080/kitchen-hub/manifest.json"
+update_server = "http://192.168.1.10:8080"
+publish_to = "github:me/kitchen-hub"
 console = true
 ai_agents = true
 

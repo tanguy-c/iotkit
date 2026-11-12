@@ -13,6 +13,7 @@
 - [Components and drivers](components.md)
 - [Home Assistant](home-assistant.md)
 - [Updates](updates.md)
+- [Publishing updates](publishing-updates.md)
 - [Battery devices](battery.md)
 - [Only what the device uses](lean.md)
 - [Console, logs, editor](console.md)

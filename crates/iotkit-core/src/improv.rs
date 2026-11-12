@@ -151,6 +151,11 @@ fn string(data: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     Ok(rest.split_at(len as usize))
 }
 
+/// An RPC command, as a client sends it: the same layout as [`rpc_result`].
+pub fn rpc_command<'o>(transport: Transport, id: u8, strings: &[&str], out: &'o mut [u8; RPC_MAX]) -> &'o [u8] {
+    rpc_result(transport, id, strings, out)
+}
+
 /// An RPC result: command id, length, each string with its length, then (BLE only) the
 /// checksum. Strings that do not fit in 255 bytes of data are left out.
 pub fn rpc_result<'o>(transport: Transport, id: u8, strings: &[&str], out: &'o mut [u8; RPC_MAX]) -> &'o [u8] {
@@ -306,6 +311,8 @@ impl SerialDecoder {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
 
     /// "MyWiFi" / "pass", from the protocol description.
@@ -404,9 +411,9 @@ mod tests {
 
     /// What the console gets from `input`: each byte unless a frame holds it, after the bytes a
     /// broken header released.
-    fn console(input: &[u8]) -> alloc::vec::Vec<u8> {
+    fn console(input: &[u8]) -> std::vec::Vec<u8> {
         let mut d = SerialDecoder::new();
-        let mut out = alloc::vec::Vec::new();
+        let mut out = std::vec::Vec::new();
         for &b in input {
             let frame = d.push(b).is_some();
             out.extend_from_slice(&d.take_released());

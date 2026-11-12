@@ -95,10 +95,31 @@ compile_error!("iotkit: `matter-ota` needs `matter-wifi` or `matter-thread`");
 #[cfg(all(feature = "matter-thread", feature = "wifi"))]
 compile_error!("iotkit: `matter-thread` is without Wi-Fi: `default-features = false`");
 
+/// A value built in at build time (`[env]` of `.cargo/config.toml` or `.cargo/secrets.toml`), if
+/// set and not empty. A published build (`cargo iotkit ota publish`) sets the secrets it leaves out
+/// to empty: they read as unset.
+// Used by the network, MQTT, ESPHome and Matter code: unused in a build with none of them.
+#[allow(unused_macros)]
+macro_rules! built_in {
+    ($name:literal) => {
+        $crate::non_empty(option_env!($name))
+    };
+}
+#[allow(unused_imports)]
+pub(crate) use built_in;
+
+#[allow(dead_code)]
+pub(crate) const fn non_empty(value: Option<&'static str>) -> Option<&'static str> {
+    match value {
+        Some(v) if !v.is_empty() => Some(v),
+        _ => None,
+    }
+}
+
 // With no setup path, only a network given at build time can be joined.
 #[cfg(all(feature = "wifi", not(any(feature = "improv-ble", feature = "softap", feature = "improv-serial"))))]
 const _: () = assert!(
-    option_env!("WIFI_SSID").is_some(),
+    built_in!("WIFI_SSID").is_some(),
     "iotkit: no setup path (improv-ble, softap, improv-serial): set WIFI_SSID at build time"
 );
 

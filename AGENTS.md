@@ -10,6 +10,9 @@ code, read the [hardware notes](docs/src/contributing.md#hardware-notes).
 
 ## Layout
 
+[GLOSSARY.md](GLOSSARY.md) defines the words for builds and updates: dev build, published build,
+release, release store, update server. Use them in code and docs.
+
 - `crates/iotkit-core`: the code that needs no chip, tested on the host.
   - `model`: entities.
   - `config`: the settings store.
@@ -44,7 +47,9 @@ code, read the [hardware notes](docs/src/contributing.md#hardware-notes).
     `cargo iotkit new --answers xtask/answers/thread.toml`: when you change one, change the other.
   - `ble-beacon`: BTHome over Bluetooth, with no network or OTA, its crates assembled by hand.
 - `xtask/`: the `cargo iotkit` CLI (`cargo xtask` in this repository). The `new` wizard and `add`
-  are in `xtask/src/new/`, with the chips' pin rules in `boards.rs`.
+  are in `xtask/src/new/`, with the chips' pin rules in `boards.rs`. `ota publish` is in
+  `publish.rs`; the update server it publishes for is a separate repository,
+  [iotkit-server](https://github.com/tanguy-c/iotkit-server).
 - `boards/`: the boards the wizard knows, one TOML file each ([its README](boards/README.md)).
 - `components/`: the parts the wizard knows, one TOML file each, with their code as Liquid
   templates ([its README](components/README.md)).

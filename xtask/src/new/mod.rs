@@ -71,8 +71,11 @@ pub struct Answers {
     /// Signed updates: over Wi-Fi from Home Assistant and `cargo iotkit ota push`, over Thread from
     /// a Matter OTA provider. Off, a smaller firmware, flashed over USB only.
     pub updates: bool,
-    /// The manifest Home Assistant's updates come from.
-    pub updates_url: Option<String>,
+    /// Where `cargo iotkit ota publish` puts the releases: `github:OWNER/REPO`, or a folder.
+    pub publish_to: Option<String>,
+    /// Over Wi-Fi, the update server the devices ask for releases (`http://host:port`): the
+    /// manifest URL is `<update_server>/<package>/manifest.json`.
+    pub update_server: Option<String>,
     /// Updates install without a click (`IOTKIT_AUTO_UPDATE`); unset, the link's default: on over
     /// Thread and on a battery device over the ESPHome API, off on the others.
     pub auto_update: Option<bool>,
@@ -118,7 +121,8 @@ impl Default for Answers {
             matter_passcode: None,
             matter_discriminator: None,
             updates: true,
-            updates_url: None,
+            publish_to: None,
+            update_server: None,
             auto_update: None,
             update_time: None,
             setup: None,
@@ -314,6 +318,12 @@ impl Part {
 }
 
 impl Project {
+    /// Where devices over Wi-Fi find the releases (`OTA_MANIFEST_URL`).
+    pub fn manifest_url(&self) -> Option<String> {
+        let server = self.answers.update_server.as_deref()?;
+        Some(format!("{}/{}/manifest.json", server.trim_end_matches('/'), self.package))
+    }
+
     pub fn battery(&self) -> bool {
         self.answers.power == Power::Battery
     }
@@ -436,8 +446,8 @@ impl Project {
                 "Thread has no Wi-Fi, MQTT or ESPHome API: remove `wifi_ssid`, `mqtt_host` and `esphome`"
             );
             ensure!(
-                answers.updates_url.is_none(),
-                "Thread devices update over Matter (`cargo iotkit ota build`, then a Matter OTA provider): remove `updates_url`"
+                answers.update_server.is_none(),
+                "Thread devices update over Matter, from a Matter OTA provider: remove `update_server`"
             );
             ensure!(
                 answers.setup.is_none() && !answers.console,
@@ -477,8 +487,11 @@ impl Project {
             );
         }
         ensure!(
-            answers.updates || (answers.updates_url.is_none() && answers.auto_update != Some(true)),
-            "`updates = false`: remove `updates_url` and `auto_update`"
+            answers.updates
+                || (answers.update_server.is_none()
+                    && answers.publish_to.is_none()
+                    && answers.auto_update != Some(true)),
+            "`updates = false`: remove `update_server`, `publish_to` and `auto_update`"
         );
         // A broker not built in is given on the setup page or the console (Improv gives only the
         // network).
@@ -522,9 +535,15 @@ impl Project {
                 "with Matter, Home Assistant does not discover the ESPHome API: add the device by its address".into(),
             );
         }
-        if answers.transport == Transport::Wifi && answers.updates && answers.updates_url.is_none() {
+        if let Some(to) = &answers.publish_to {
+            publish_to_ok(to).map_err(anyhow::Error::msg)?;
+        }
+        if let Some(server) = &answers.update_server {
+            update_server_ok(server).map_err(anyhow::Error::msg)?;
+        }
+        if answers.transport == Transport::Wifi && answers.updates && answers.update_server.is_none() {
             warnings.push(
-                "no `updates_url`: Home Assistant offers no updates (`cargo iotkit ota push` still works)".into(),
+                "no `update_server`: Home Assistant offers no updates (`cargo iotkit ota push` still works)".into(),
             );
         }
         // The board's own: its switches, set in `main`.
@@ -842,6 +861,9 @@ fn write(p: &Project, dir: &Path) -> Result<()> {
     if let Some(secrets) = codegen::secrets(p) {
         put(&dir.join(".cargo/secrets.toml"), &secrets)?;
     }
+    if let Some(workflow) = codegen::release_workflow(p) {
+        put(&dir.join(".github/workflows/release.yml"), &workflow)?;
+    }
     if let Some(setup) = p.matter_setup {
         put(&dir.join("matter-pairing.svg"), &setup.qr_svg()?)?;
     }
@@ -912,6 +934,13 @@ fn report(p: &Project, dir: &Path) {
     );
     if p.answers.ai_agents {
         println!("AI coding agents: AGENTS.md.");
+    }
+    if codegen::release_workflow(p).is_some() {
+        println!(
+            "\nGitHub releases: .github/workflows/release.yml publishes each `v*` tag. It signs with your key: add\n\
+             keys/ota.key as the repository's `IOTKIT_OTA_KEY` secret (`gh secret set IOTKIT_OTA_KEY < keys/ota.key`).\n\
+             Whoever can run the repository's workflows can then sign updates for your devices."
+        );
     }
 }
 
@@ -1082,10 +1111,8 @@ fn ask(mut a: Answers, iotkit_path: String) -> Result<Project> {
     if battery {
         ask_battery(&mut a, board, thread)?;
     }
-    let package = if a.package.is_empty() { slug(&a.name, '-') } else { a.package.clone() };
-    let default_url =
-        a.mqtt_host.as_deref().map(|h| format!("http://{h}:8080/{package}/manifest.json")).unwrap_or_default();
-    ask_updates(&mut a, &default_url, thread, battery)?;
+    let default_server = a.mqtt_host.as_deref().map(|h| format!("http://{h}:8080")).unwrap_or_default();
+    ask_updates(&mut a, &default_server, thread, battery)?;
     if !thread {
         ask_extras(&mut a, board)?;
     }
@@ -1251,6 +1278,29 @@ fn ask_pins(board: &'static Board, kind: &Kind, name: String, taken: &mut Vec<u8
     Ok(part)
 }
 
+/// `github:OWNER/REPO`, or a folder.
+fn publish_to_ok(to: &str) -> Result<(), &'static str> {
+    match to.strip_prefix("github:") {
+        Some(repo) => match repo.split('/').collect::<Vec<_>>()[..] {
+            [owner, name] if !owner.is_empty() && !name.is_empty() && !repo.contains(char::is_whitespace) => Ok(()),
+            _ => Err("a repository as OWNER/REPO"),
+        },
+        None if to.trim().is_empty() => Err("a folder"),
+        None => Ok(()),
+    }
+}
+
+/// `http://host[:port]` or `https://...`, without a path: the update server.
+fn update_server_ok(url: &str) -> Result<(), &'static str> {
+    let rest =
+        url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")).ok_or("an http:// or https:// address")?;
+    let rest = rest.trim_end_matches('/');
+    if rest.is_empty() || rest.contains(['/', ' ', '?', '#', '@']) {
+        return Err("an address without a path, such as http://192.168.1.10:8080");
+    }
+    Ok(())
+}
+
 /// `HH:MM` on the half hour, or `wake`: iotkit's `IOTKIT_UPDATE_TIME`.
 fn update_time_ok(s: &str) -> bool {
     if s == "wake" {
@@ -1267,7 +1317,7 @@ fn non_empty(s: &str) -> Result<Validation, inquire::CustomUserError> {
 /// A GPIO number, checked for the chip (refused pins are asked again, warnings shown).
 /// The battery questions: how often a sleeping device reports, and its level's pin.
 /// Updates: whether, from where, and whether they install by themselves.
-fn ask_updates(a: &mut Answers, default_url: &str, thread: bool, battery: bool) -> Result<()> {
+fn ask_updates(a: &mut Answers, default_server: &str, thread: bool, battery: bool) -> Result<()> {
     println!("\nUpdates:");
     a.updates = Confirm::new(if thread { "Update it over Matter?" } else { "Update it over the network?" })
         .with_default(true)
@@ -1277,20 +1327,53 @@ fn ask_updates(a: &mut Answers, default_url: &str, thread: bool, battery: bool) 
             "Signed updates from Home Assistant and `cargo iotkit ota push`. Without: flashed over USB only, smaller"
         })
         .prompt()?;
-    a.updates_url = None;
+    a.publish_to = None;
+    a.update_server = None;
     a.auto_update = None;
     a.update_time = None;
     if !a.updates {
         return Ok(());
     }
-    if !thread {
-        let url = Text::new("Where will you publish updates (manifest URL)?")
-            .with_default(default_url)
+    let options = vec!["On GitHub (releases of a repository)", "In a folder (a server or share)", "Not now"];
+    let choice = Select::new("Where will you publish its updates?", options.clone())
+        .with_help_message("`cargo iotkit ota publish` puts each release there; the update server reads it")
+        .prompt()?;
+    if choice == options[0] {
+        let repo = Text::new("Which repository? (OWNER/REPO)")
+            .with_validator(|s: &str| {
+                Ok(match publish_to_ok(&format!("github:{}", s.trim())) {
+                    Ok(()) => Validation::Valid,
+                    Err(e) => Validation::Invalid(e.into()),
+                })
+            })
+            .with_help_message("A workflow publishes each `v*` tag; it signs with the `IOTKIT_OTA_KEY` secret")
+            .prompt()?;
+        a.publish_to = Some(format!("github:{}", repo.trim()));
+    } else if choice == options[1] {
+        let dir = Text::new("Which folder?")
             .with_help_message(
-                "Home Assistant then offers new versions; `cargo iotkit ota publish` fills it. Leave empty to skip.",
+                "The update server's folder, e.g. a mounted share; `cargo iotkit ota publish` writes there",
             )
             .prompt()?;
-        a.updates_url = (!url.trim().is_empty()).then(|| url.trim().to_string());
+        a.publish_to = (!dir.trim().is_empty()).then(|| dir.trim().to_string());
+    }
+    if !thread {
+        let server = Text::new("Your update server's address?")
+            .with_default(default_server)
+            .with_help_message(
+                "Built in: the devices ask it for new releases, and Home Assistant offers them. Leave empty to skip.",
+            )
+            .with_validator(|s: &str| {
+                Ok(match s.trim() {
+                    "" => Validation::Valid,
+                    s => match update_server_ok(s) {
+                        Ok(()) => Validation::Valid,
+                        Err(e) => Validation::Invalid(e.into()),
+                    },
+                })
+            })
+            .prompt()?;
+        a.update_server = (!server.trim().is_empty()).then(|| server.trim().trim_end_matches('/').to_string());
     }
     let esphome = a.esphome != EsphomeMode::Off;
     // The link's default (`Project::auto_update`): on where nobody can click.
@@ -1541,6 +1624,15 @@ mod tests {
         )
         .unwrap();
         assert!(cargo.contains("default     = [\"matter-wifi\"]"), "{cargo}");
+        // Published builds keep the project's Matter code, not the Wi-Fi; the releases go to GitHub.
+        assert!(cargo.contains("published-secrets = [\"MATTER_PASSCODE\", \"MATTER_DISCRIMINATOR\"]"), "{cargo}");
+        assert!(cargo.contains("[package.metadata.iotkit.publish]\nto = \"github:me/kitchen-hub\""), "{cargo}");
+        let workflow = codegen::release_workflow(&p).unwrap();
+        assert!(
+            workflow.contains("secrets.IOTKIT_OTA_KEY") && workflow.contains("cargo iotkit ota publish"),
+            "{workflow}"
+        );
+        assert!(codegen::readme(&p).contains("to github:me/kitchen-hub"));
         // The default features, and the console on top.
         assert!(
             cargo.contains("{ path = \"/opt/iotkit/crates/iotkit\", features = [\"esp32c6\", \"ha-update\", \"smartled\", \"remember\", \"console\"]"),
@@ -1606,7 +1698,9 @@ mod tests {
     #[test]
     fn slim() {
         let err = |toml: &str| Project::new(toml::from_str(toml).unwrap(), "/x".into()).err().unwrap().to_string();
-        assert!(err("updates = false\nupdates_url = \"http://h/m.json\"").contains("updates = false"));
+        assert!(err("updates = false\nupdate_server = \"http://h:8080\"").contains("updates = false"));
+        assert!(err("publish_to = \"github:me\"").contains("OWNER/REPO"));
+        assert!(err("update_server = \"http://h:8080/x/manifest.json\"").contains("without a path"));
         assert!(err("updates = false\nauto_update = true").contains("updates = false"));
         assert!(err("setup = []").contains("wifi_ssid"));
         assert!(err("setup = [\"serial\"]").contains("mqtt_host"));
@@ -1713,7 +1807,7 @@ mod tests {
         assert!(err("transport = \"thread\"").contains("talk Matter"));
         assert!(err(&format!("{thread}power = \"battery\"\nbattery_pin = 2")).contains("ADC"));
         assert!(err(&format!("{thread}mqtt_host = \"10.0.0.1\"")).contains("no Wi-Fi"));
-        assert!(err(&format!("{thread}updates_url = \"http://h/m.json\"")).contains("over Matter"));
+        assert!(err(&format!("{thread}update_server = \"http://h:8080\"")).contains("over Matter"));
         assert!(err(&format!("{thread}[[parts]]\nkind = \"soil_moisture\"\npin = 2")).contains("ADC"));
         assert!(err("board = \"other-esp32h2\"\nflash_size = \"8mb\"").contains("no Wi-Fi"));
 

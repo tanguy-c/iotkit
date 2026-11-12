@@ -74,6 +74,8 @@ controller gives ([Without a click](updates.md#without-a-click)).
 ([A test setup on the PC](home-assistant.md#a-test-setup-on-the-pc)). It needs the PC's network
 interface towards the device:
 `MATTER_INTERFACE=<interface> docker compose -f test-server/compose.yaml up -d matter-server`.
+To offer an update, copy its `.ota` file to `test-server/matter-ota/`, then restart the server: it
+imports the file at start.
 
 ## Before selling a device
 

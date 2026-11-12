@@ -26,7 +26,8 @@ Boards on the chip's own USB port (the ESP32-C6, C3, C5, S3 and H2 DevKits' USB 
 ## Publish it
 
 Copy `dist/<package>/web/` to any HTTPS site (Web Serial needs a secure page): GitHub Pages, a
-NAS, your product's site. The page loads ESP Web Tools from unpkg; to host it yourself, change the
+NAS, your product's site. iotkit-server also serves this page for the latest release, at
+`/<package>/install/` ([Publishing updates](publishing-updates.md#run-iotkit-server)). The page loads ESP Web Tools from unpkg; to host it yourself, change the
 `<script>` line of `index.html`.
 
 - The Wi-Fi step needs the `improv-serial` feature (on by default). Without it, the device opens

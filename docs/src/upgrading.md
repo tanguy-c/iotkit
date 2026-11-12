@@ -3,6 +3,42 @@
 What to change in a project when a release breaks the API, newest first. The
 [changelog](https://github.com/tanguy-c/iotkit/blob/main/CHANGELOG.md) lists everything else.
 
+## To 0.6 (from 0.5)
+
+### Published builds leave out `.cargo/secrets.toml`
+
+`cargo iotkit ota publish`, `ota build`, `build` and `web` no longer build in the values of
+`.cargo/secrets.toml`. To keep the ones every device needs, list them in `Cargo.toml`:
+
+```toml
+[package.metadata.iotkit]
+published-secrets = ["MQTT_USER", "MQTT_PASS", "ESPHOME_API_KEY", "MATTER_PASSCODE", "MATTER_DISCRIMINATOR"]
+```
+
+List only the ones your `.cargo/secrets.toml` sets. Leave out the Wi-Fi network. Before the first
+published update, store it on each device that has it only built in, or the device has no network
+after the update:
+
+- plug the device in over USB, then run `cargo iotkit wifi`;
+- or hold **BOOT** 3 s, then use the setup window ([Join Wi-Fi](getting-started.md#join-wi-fi)).
+
+### `ota publish` takes a store, `ota build` no `.json`
+
+- `--base-url` is gone. Put the publish target in `Cargo.toml`, then drop `--to`:
+
+  ```toml
+  [package.metadata.iotkit.publish]
+  to = "/srv/www"   # the folder you passed to --to, or "github:OWNER/REPO"
+  ```
+
+  A folder keeps its layout: devices still find `<package>/manifest.json`.
+- `ota build` writes the `.ota` file only. If your Matter server is python-matter-server, which
+  read the `.json`, move to Home Assistant's Matter Server 9.0 or later (matter.js), with
+  `enable_test_net_dcl` on ([Over Matter](publishing-updates.md#over-matter)).
+- In an answers file for `cargo iotkit new`, replace
+  `updates_url = "http://192.168.1.10:8080/my-device/manifest.json"` with
+  `update_server = "http://192.168.1.10:8080"`.
+
 ## To 0.5 (from 0.4)
 
 ### Built-in values are no longer copied to flash

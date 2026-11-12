@@ -90,7 +90,8 @@ With no network (none built in, none given before), the device opens a setup win
   point restarts once while it joins).
 - **Bluetooth ([Improv](https://www.improv-wifi.com)):** the Home Assistant app offers the device
   under *Settings > Devices > Add*; improv-wifi.com works from a desktop browser.
-- **USB (Improv):** ESP Web Tools, or improv-wifi.com with Web Serial.
+- **USB (Improv):** `cargo iotkit wifi` sends the network of `.cargo/secrets.toml`. ESP Web Tools
+  and improv-wifi.com with Web Serial work too.
 
 The device tries the network before keeping it: 2.4 GHz, and a password that is empty or 8 to 63
 characters. To change it later, hold **BOOT** 3 s, or type `provision` on the [USB console](console.md);
@@ -101,14 +102,16 @@ has a network). Hold **BOOT** 10 s to erase every setting and Matter pairing.
 > need it.
 
 For development, `.cargo/secrets.toml` (git-ignored) can build the network in (`WIFI_SSID`,
-`WIFI_PASS`): the device joins it and skips the window.
+`WIFI_PASS`): the device joins it and skips the window. Published updates leave it out
+([dev and published builds](publishing-updates.md#dev-builds-and-published-builds)).
 
 ## Where settings come from
 
 The `[env]` of `.cargo/config.toml` (committed: the broker's host, the update URL) and
 `.cargo/secrets.toml` (git-ignored: the network, logins, keys and codes; `secrets.toml.example`
 lists its keys) are read at build time: their values are **built in**, and every flash or update
-brings the new build's. A value **given
+brings the new build's. A published build (`cargo iotkit ota publish`) leaves out
+`.cargo/secrets.toml`, but the values `published-secrets` lists. A value **given
 on the device** (setup window, console) is stored in flash and wins over the built-in one until a
 factory reset. No other setting is stored.
 
