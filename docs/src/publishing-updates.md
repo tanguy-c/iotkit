@@ -103,6 +103,15 @@ It creates the release `v<version>`, with the files as its assets. Its notes com
 [Keep a Changelog](https://keepachangelog.com)). `--summary` sets the text Home Assistant shows,
 64 bytes at most.
 
+To publish several firmwares to one repository, give each firmware its own tags. Otherwise the
+CLI takes the other firmware's releases for its own, and refuses an older version:
+
+```toml
+[package.metadata.iotkit.publish]
+to  = "github:me/home-devices"
+tag = "{package}-v{version}"
+```
+
 To publish from GitHub Actions instead, `cargo iotkit new` writes
 `.github/workflows/release.yml`. It publishes each `v*` tag you push. It needs your signing key as
 the repository's `IOTKIT_OTA_KEY` secret:
